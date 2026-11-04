@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Outburst
+GenericName=Burst culling
+Comment=Install Outburst if needed, then open the review window
+Exec=sh -c 'd="$1"; d="${d#file://}"; cd "$(dirname "$d")" && exec ./outburst.sh' outburst %k
+Terminal=true
+Categories=Graphics;Photography;
+StartupNotify=true
