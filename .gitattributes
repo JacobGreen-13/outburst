@@ -1,0 +1,4 @@
+Outburst.bat text eol=crlf
+Outburst.command text eol=lf
+outburst.sh text eol=lf
+Outburst.desktop text eol=lf
