@@ -93,11 +93,23 @@ QSlider::handle:horizontal {
     background: #3dbe86;
     border-radius: 7px;
 }
-QDoubleSpinBox, QLineEdit {
+QDoubleSpinBox, QLineEdit, QComboBox {
     background: #242424;
+    color: #f2f2f2;
     border: 1px solid #3a3a3a;
     border-radius: 6px;
-    padding: 4px;
+    padding: 4px 8px;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+QComboBox QAbstractItemView {
+    background: #242424;
+    color: #f2f2f2;
+    selection-background-color: #1f3d30;
+    selection-color: #f2f2f2;
+    border: 1px solid #3a3a3a;
 }
 QCheckBox {
     background: transparent;

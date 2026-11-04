@@ -45,6 +45,8 @@ def test_window_reviews_a_burst(qt_app, tmp_path: Path) -> None:
     assert window.is_scanning is False
     assert len(window.library.bursts) == 2
     assert window.windowTitle() == "Outburst"
+    assert window.controls.model_id() == "yolo11n"
+    assert window.controls.model_ids() == ("yolo11n", "yolo11s", "yolov8n", "yolov8s")
     assert "RECOMMENDED" in window.viewer.info.text()
     assert written["sharp"].name in window.viewer.info.text()
 
@@ -58,6 +60,26 @@ def test_window_reviews_a_burst(qt_app, tmp_path: Path) -> None:
     assert window.current_burst_index == 1
     window.close()
     qt_app.processEvents()
+
+
+def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from PySide6.QtCore import QSettings
+
+    from outburst.gui.main_window import MainWindow
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("headless mode must not download a model")
+
+    monkeypatch.setattr("outburst.subject.urllib.request.urlopen", fail)
+    settings_dir = tmp_path / "settings"
+    settings_dir.mkdir()
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_dir))
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.controls._subject.setChecked(True)
+    qt_app.processEvents()
+    assert window.controls.prefer_subject() is False
+    window.close()
 
 
 def test_version_flag() -> None:
