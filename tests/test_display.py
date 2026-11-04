@@ -5,8 +5,22 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from outburst.display import burst_list_text, frame_info_html, thumb_badge
+from outburst.display import burst_list_text, frame_info_html, thumb_badge, visible_bursts
 from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
+
+
+def test_single_frame_bursts_are_hidden_until_requested() -> None:
+    when = datetime(2024, 6, 1, 12, 0, 0)
+    pair = Burst(
+        "burst-001",
+        (
+            Frame(Path("a.jpg"), "jpeg", when, "exif", None, 1, 1),
+            Frame(Path("b.jpg"), "jpeg", when, "exif", None, 1, 1),
+        ),
+    )
+    single = Burst("burst-002", (Frame(Path("c.jpg"), "jpeg", when, "exif", None, 1, 1),))
+    assert visible_bursts([pair, single], show_singles=False) == (pair,)
+    assert visible_bursts([pair, single], show_singles=True) == (pair, single)
 
 
 def test_html_escapes_filenames_and_marks_the_recommendation() -> None:

@@ -9,7 +9,7 @@ Nothing is uploaded. There is no account and no subscription. Outburst never mod
 ## What you can do
 
 - Open a folder of RAW bursts, or JPEGs if that is what the camera wrote.
-- See the bursts in a list, and the frames in a filmstrip.
+- See the bursts in a list, and the frames in a filmstrip. A burst of one frame stays off that list until you turn on **Show single-frame bursts**.
 - Compare scores and open a larger preview of the recommended frame. It is marked **RECOMMENDED**, outlined in green, and labeled **BEST** on the filmstrip.
 - Mark keepers and rejects from the keyboard. Those marks are remembered on this computer.
 - Export the keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV report.
@@ -20,12 +20,37 @@ The copy above is a small drawn sample so you can try the window without a memor
 
 You need Python 3.11 or newer. Outburst runs on macOS (including Apple Silicon), Windows, and Linux.
 
+Double-click the launcher in this folder:
+
+| System | Double-click |
+| --- | --- |
+| macOS | `Outburst.command` |
+| Windows | `Outburst.bat` |
+| Linux | `Outburst.desktop`, or run `./outburst.sh` |
+
+The first run creates `.venv`, downloads the libraries, and opens the window. Later runs open the window. You can close the terminal once the window is up.
+
+Open a folder straight away:
+
+```bash
+./outburst.sh examples/sample_burst
+```
+
+```bat
+Outburst.bat examples\sample_burst
+```
+
+Subject detection is a larger optional install because it includes PyTorch. Run the launcher with `subject` once, for example `./outburst.sh subject` or `Outburst.bat subject`.
+
+### Install by hand
+
 macOS and Linux:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
+outburst
 ```
 
 Windows:
@@ -34,11 +59,6 @@ Windows:
 py -3 -m venv .venv
 .venv\Scripts\activate
 pip install -e .
-```
-
-Then start the app:
-
-```bash
 outburst
 ```
 
@@ -56,13 +76,13 @@ python examples/generate_sample_burst.py
 
 ### exiftool
 
-Install [exiftool](https://exiftool.org/) if you can. Outburst uses it for the most reliable capture times, which is what splits one burst from the next. It matters most for CR3 and other formats that are not plain TIFF.
+Install [exiftool](https://exiftool.org/) if you can. Outburst uses it first, because it understands the most camera formats, including CR3.
 
 - macOS: `brew install exiftool`
 - Windows: the ExifTool Windows package
 - Linux: the `libimage-exiftool-perl` package, or the equivalent for your distribution
 
-Without exiftool, Outburst reads timestamps itself. Frames it cannot time are left as their own bursts, and the window says so.
+Without exiftool, Outburst reads capture times with the exifread library that ships with the app. exifread covers JPEG and TIFF-based RAW such as CR2, NEF, ARW, DNG, ORF, PEF, and RW2. It does not read CR3, RAF, or X3F. Those files fall through to a search for a date string, which is less reliable. A frame with no capture time stays in a burst by itself. When a RAW folder is opened without exiftool, the window says which of those formats are in the folder.
 
 ### Linux libraries
 
@@ -154,16 +174,21 @@ Install Outburst with an arm64 build of Python 3.11 or newer and you do not need
 
 ## For developers
 
+The launcher's `.venv` is a normal virtual environment. Install the test extra into it when you want to run pytest:
+
 ```bash
+source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ```
+
+On Windows, activate with `.venv\Scripts\activate` instead.
 
 Core tests cover grouping, scoring, timestamp reading, preview fallback, the cache, and the non-destructive outputs. A lighter test opens the window offscreen, loads a folder, and moves between frames. The pipeline does not import Qt.
 
 See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules are allowed to write files.
 
-Packaging as a double-clickable app (pyinstaller or briefcase) is not part of this version. Installing into a virtual environment is the supported way to run Outburst today.
+The one-click launcher is the supported way to install and open Outburst.
 
 ## Roadmap
 
