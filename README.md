@@ -9,7 +9,7 @@ Nothing is uploaded. There is no account and no subscription. Outburst never mod
 ## What you can do
 
 - Open a folder of RAW bursts, or JPEGs if that is what the camera wrote.
-- See the bursts in a list, and the frames in a filmstrip.
+- See the bursts in a list, and the frames in a filmstrip. A burst of one frame stays off that list until you turn on **Show single-frame bursts**.
 - Compare scores and open a larger preview of the recommended frame. It is marked **RECOMMENDED**, outlined in green, and labeled **BEST** on the filmstrip.
 - Mark keepers and rejects from the keyboard. Those marks are remembered on this computer.
 - Export the keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV report.
@@ -56,13 +56,13 @@ python examples/generate_sample_burst.py
 
 ### exiftool
 
-Install [exiftool](https://exiftool.org/) if you can. Outburst uses it for the most reliable capture times, which is what splits one burst from the next. It matters most for CR3 and other formats that are not plain TIFF.
+Install [exiftool](https://exiftool.org/) if you can. Outburst uses it first, because it understands the most camera formats, including CR3.
 
 - macOS: `brew install exiftool`
 - Windows: the ExifTool Windows package
 - Linux: the `libimage-exiftool-perl` package, or the equivalent for your distribution
 
-Without exiftool, Outburst reads timestamps itself. Frames it cannot time are left as their own bursts, and the window says so.
+Without exiftool, Outburst reads capture times with the exifread library that ships with the app. exifread covers JPEG and TIFF-based RAW such as CR2, NEF, ARW, DNG, ORF, PEF, and RW2. It does not read CR3, RAF, or X3F. Those files fall through to a search for a date string, which is less reliable. A frame with no capture time stays in a burst by itself. When a RAW folder is opened without exiftool, the window says which of those formats are in the folder.
 
 ### Linux libraries
 

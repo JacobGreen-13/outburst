@@ -14,11 +14,14 @@ import numpy as np
 
 from outburst.metadata import (
     SOURCE_EXIF,
+    SOURCE_EXIFREAD,
     SOURCE_EXIFTOOL,
     SOURCE_HEADER,
+    _pack_tiff,
     build_exif_app1,
     inject_exif,
     read_capture_info,
+    timestamp_reader_warning,
 )
 from tests.helpers import sharp_frame, write_jpeg
 
@@ -29,7 +32,7 @@ def test_jpeg_exif_round_trip(tmp_path: Path) -> None:
     write_jpeg(path, sharp_frame(), when, model="BirdCam")
     info = read_capture_info([path])[path]
     assert info.captured_at == when
-    assert info.source == SOURCE_EXIF
+    assert info.source == SOURCE_EXIFREAD
     assert info.camera == "BirdCam"
     decoded = cv2.imdecode(np.frombuffer(path.read_bytes(), dtype=np.uint8), cv2.IMREAD_COLOR)
     assert decoded is not None
@@ -106,7 +109,66 @@ def test_exiftool_json_is_preferred(monkeypatch, tmp_path: Path) -> None:
         return SimpleNamespace(returncode=0, stdout=payload.encode(), stderr=b"")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+
+    def exifread_must_not_run(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("exiftool already supplied the timestamp")
+
+    import exifread
+
+    monkeypatch.setattr(exifread, "process_file", exifread_must_not_run)
     info = read_capture_info([path])[path]
     assert info.source == SOURCE_EXIFTOOL
     assert info.captured_at == datetime(2024, 1, 2, 3, 4, 5, 250000)
     assert info.camera == "BirdCam"
+
+
+def test_exifread_reads_a_tiff_based_raw(tmp_path: Path) -> None:
+    path = tmp_path / "bird.CR2"
+    when = datetime(2020, 2, 3, 4, 5, 6, 700000)
+    path.write_bytes(_pack_tiff(when, "7", "Cam", endian="<", magic=42))
+    info = read_capture_info([path])[path]
+    assert info.source == SOURCE_EXIFREAD
+    assert info.captured_at == when
+    assert info.camera == "Cam"
+
+
+def test_exifread_error_falls_back_to_the_builtin_reader(monkeypatch, tmp_path: Path) -> None:
+    path = tmp_path / "bird.jpg"
+    when = datetime(2024, 5, 6, 7, 8, 9, 200000)
+    write_jpeg(path, sharp_frame(), when, model="BirdCam")
+
+    import exifread
+
+    def boom(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("exifread failed")
+
+    monkeypatch.setattr(exifread, "process_file", boom)
+    info = read_capture_info([path])[path]
+    assert info.captured_at == when
+    assert info.source == SOURCE_EXIF
+    assert info.camera == "BirdCam"
+
+
+def test_reader_warning_names_unrecognized_raw_formats(monkeypatch) -> None:
+    monkeypatch.setattr("outburst.metadata.exiftool_available", lambda: False)
+    monkeypatch.setattr("outburst.metadata.exifread_available", lambda: True)
+    text = timestamp_reader_warning([".CR3", "raf", ".cr2"])
+    assert text is not None
+    assert "exifread" in text
+    assert "CR2" in text
+    assert "This folder includes CR3, RAF." in text
+    assert timestamp_reader_warning([]) is None
+
+
+def test_reader_warning_is_quiet_when_exiftool_is_installed(monkeypatch) -> None:
+    monkeypatch.setattr("outburst.metadata.exiftool_available", lambda: True)
+    assert timestamp_reader_warning([".cr3"]) is None
+
+
+def test_reader_warning_without_exifread(monkeypatch) -> None:
+    monkeypatch.setattr("outburst.metadata.exiftool_available", lambda: False)
+    monkeypatch.setattr("outburst.metadata.exifread_available", lambda: False)
+    text = timestamp_reader_warning([".nef"])
+    assert text is not None
+    assert "built-in" in text
+    assert "CR3" in text

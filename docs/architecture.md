@@ -7,7 +7,7 @@ Outburst is a desktop app. The scoring pipeline does not import Qt, so it can be
 | Module | Role |
 | --- | --- |
 | `scanner.py` | Finds RAW and JPEG files. A JPEG with the same stem as a RAW in the same folder is the preview pair, not a second frame. |
-| `metadata.py` | Reads `DateTimeOriginal` and `SubSecTimeOriginal`. Uses exiftool when it is installed, otherwise a built-in TIFF/JPEG EXIF reader, then a date string in the file header. |
+| `metadata.py` | Reads `DateTimeOriginal` and `SubSecTimeOriginal`. Uses exiftool when it is installed. Otherwise it uses exifread for JPEG and TIFF-based RAW, then a built-in TIFF/JPEG reader, then a date string in the file header. exifread does not recognize CR3, RAF, or X3F. |
 | `grouping.py` | Sorts by capture time and groups consecutive frames whose gap is strictly below the threshold. Frames with no capture time stay alone. |
 | `preview.py` | Loads a preview. Paired JPEGs win. Otherwise rawpy's embedded thumbnail is used. A byte scan for an embedded JPEG is the fallback. Full demosaic is never requested. |
 | `scoring.py` | Laplacian variance, optional Tenengrad, exposure penalties, and the weighted composite. Pure functions. |
@@ -76,7 +76,7 @@ Photograph files are opened for reading. Export uses `shutil.copy2` or `os.link`
 
 ## Window
 
-`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
+`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides one-frame bursts until **Show single-frame bursts** is on. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
 
 ## Subject detection
 

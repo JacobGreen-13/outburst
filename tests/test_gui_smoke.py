@@ -62,6 +62,62 @@ def test_window_reviews_a_burst(qt_app, tmp_path: Path) -> None:
     qt_app.processEvents()
 
 
+def test_single_frame_bursts_stay_hidden_until_requested(qt_app, tmp_path: Path) -> None:
+    from datetime import datetime, timedelta
+
+    from PySide6.QtCore import QSettings
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.pipeline import analyze_folder
+    from tests.helpers import sharp_frame, write_jpeg
+
+    settings_dir = tmp_path / "settings"
+    settings_dir.mkdir()
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_dir))
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    base = datetime(2024, 6, 1, 12, 0, 0)
+    write_jpeg(folder / "a.jpg", sharp_frame(), base)
+    write_jpeg(folder / "b.jpg", sharp_frame(seed=2), base + timedelta(milliseconds=200))
+    write_jpeg(folder / "c.jpg", sharp_frame(seed=3), base + timedelta(seconds=5))
+    library = analyze_folder(folder, cache_dir=tmp_path / "cache", threshold=1.0)
+    assert [burst.count for burst in library.bursts] == [2, 1]
+
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+    assert window.controls.show_singles() is False
+    assert window.burst_list.count() == 1
+    assert "1 single frame hidden" in window.statusBar().currentMessage()
+    assert "a.jpg" in window.viewer.info.text()
+
+    window.controls._singles.setChecked(True)
+    qt_app.processEvents()
+    assert window.burst_list.count() == 2
+    assert "hidden" not in window.statusBar().currentMessage()
+
+    window.burst_list.setCurrentRow(1)
+    qt_app.processEvents()
+    assert "c.jpg" in window.viewer.info.text()
+
+    window.controls._singles.setChecked(False)
+    qt_app.processEvents()
+    assert window.burst_list.count() == 1
+    assert "a.jpg" in window.viewer.info.text()
+
+    solo = tmp_path / "solo"
+    solo.mkdir()
+    write_jpeg(solo / "only.jpg", sharp_frame(seed=4), base)
+    window.present(analyze_folder(solo, cache_dir=tmp_path / "cache2", threshold=1.0))
+    qt_app.processEvents()
+    assert window.burst_list.count() == 0
+    assert "Show single-frame bursts" in window.viewer.preview.text()
+    window.close()
+    qt_app.processEvents()
+
+
 def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from PySide6.QtCore import QSettings
 
