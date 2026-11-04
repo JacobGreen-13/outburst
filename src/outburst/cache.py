@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS frame_metrics (
 CREATE TABLE IF NOT EXISTS decisions (
     path TEXT PRIMARY KEY,
     decision TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT 'user'
 );
 """
 
@@ -95,6 +96,7 @@ class Cache:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._ensure_decision_origin()
         self._conn.commit()
 
     def close(self) -> None:
@@ -216,20 +218,57 @@ class Cache:
                     found[path] = row["decision"]
         return found
 
-    def set_decision(self, path: Path, decision: str | None) -> None:
+    def decision_origins(self, paths: list[Path]) -> dict[Path, str]:
+        """``auto`` when Outburst marked the keeper, ``user`` when the photographer did."""
+
+        found: dict[Path, str] = {}
+        if not paths:
+            return found
+        for start in range(0, len(paths), 400):
+            chunk = paths[start : start + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._conn.execute(
+                f"SELECT path, origin FROM decisions WHERE path IN ({placeholders})",
+                [str(path) for path in chunk],
+            )
+            by_text = {str(path): path for path in chunk}
+            for row in rows:
+                path = by_text.get(row["path"])
+                if path is None:
+                    continue
+                found[path] = row["origin"] if row["origin"] in {"user", "auto"} else "user"
+        return found
+
+    def set_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
         if decision not in {None, "keep", "reject"}:
             raise ValueError(f"Unknown decision: {decision}")
+        if origin not in {"user", "auto"}:
+            raise ValueError(f"Unknown decision origin: {origin}")
         if decision is None:
             self._conn.execute("DELETE FROM decisions WHERE path = ?", (str(path),))
         else:
+            stored_origin = origin if decision == "keep" else "user"
             self._conn.execute(
                 """
-                INSERT OR REPLACE INTO decisions (path, decision, updated_at)
-                VALUES (?, ?, ?)
+                INSERT OR REPLACE INTO decisions (path, decision, updated_at, origin)
+                VALUES (?, ?, ?, ?)
                 """,
-                (str(path), decision, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                (
+                    str(path),
+                    decision,
+                    datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    stored_origin,
+                ),
             )
         self._conn.commit()
+
+    def _ensure_decision_origin(self) -> None:
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(decisions)")}
+        if "origin" in columns:
+            return
+        self._conn.execute(
+            "ALTER TABLE decisions ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'"
+        )
 
     def forget_folder(self, folder: Path) -> int:
         """Drop cached measurements and preview files for photographs inside ``folder``.
