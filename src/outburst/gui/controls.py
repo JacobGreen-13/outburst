@@ -30,6 +30,7 @@ class ControlPanel(QGroupBox):
     weights_changed = Signal()
     subject_toggled = Signal(bool)
     model_changed = Signal(str)
+    singles_toggled = Signal(bool)
 
     def __init__(self) -> None:
         super().__init__("Scoring")
@@ -52,6 +53,11 @@ class ControlPanel(QGroupBox):
         self._sharpness.valueChanged.connect(self._refresh_labels)
         self._center.valueChanged.connect(self._refresh_labels)
 
+        self._singles = QCheckBox("Show single-frame bursts")
+        self._singles.setToolTip(
+            "A burst with only one frame stays off the list until this is on."
+        )
+        self._singles.toggled.connect(self.singles_toggled.emit)
         self._recursive = QCheckBox("Include subfolders on the next scan")
         self._subject = QCheckBox("Subject-aware sharpness")
         self._subject.setToolTip(
@@ -78,6 +84,7 @@ class ControlPanel(QGroupBox):
         layout.addWidget(self._sharpness)
         layout.addWidget(self._center_label)
         layout.addWidget(self._center)
+        layout.addWidget(self._singles)
         layout.addWidget(self._recursive)
         layout.addWidget(self._subject)
         layout.addWidget(self._model)
@@ -97,6 +104,14 @@ class ControlPanel(QGroupBox):
 
     def center_percent(self) -> int:
         return int(self._center.value())
+
+    def show_singles(self) -> bool:
+        return self._singles.isChecked()
+
+    def set_show_singles(self, checked: bool) -> None:
+        self._singles.blockSignals(True)
+        self._singles.setChecked(checked)
+        self._singles.blockSignals(False)
 
     def recursive(self) -> bool:
         return self._recursive.isChecked()

@@ -9,7 +9,7 @@ Nothing is uploaded. There is no account and no subscription. Outburst never mod
 ## What you can do
 
 - Open a folder of RAW bursts, or JPEGs if that is what the camera wrote.
-- See the bursts in a list, and the frames in a filmstrip.
+- See the bursts in a list, and the frames in a filmstrip. A burst of one frame stays off that list until you turn on **Show single-frame bursts**.
 - Compare scores and open a larger preview of the recommended frame. It is marked **RECOMMENDED**, outlined in green, and labeled **BEST** on the filmstrip.
 - Mark keepers and rejects from the keyboard. Those marks are remembered on this computer.
 - Export the keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV report.
