@@ -9,7 +9,7 @@ Nothing is uploaded. There is no account and no subscription. Outburst never mod
 ## What you can do
 
 - Open a folder of RAW bursts, or JPEGs if that is what the camera wrote.
-- See the bursts in a list, and the frames in a filmstrip. A burst of one frame stays off that list until you turn on **Show single-frame bursts**.
+- See the bursts in a list, and the frames in a filmstrip. **Minimum frames** hides shorter bursts. The default is 2, so a single frame stays off the list.
 - Compare scores and open a larger preview. The recommended frame starts as a keeper: a green **KEEPER** stamp, a green outline, and the **Marked keeper** button pressed.
 - Change keepers with that button, or with the keyboard. Those marks are remembered on this computer.
 - Save the marked keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV report.
@@ -148,9 +148,9 @@ Scanning only writes into Outburst's cache:
 
 Delete that folder if you want Outburst to measure everything again. A log file, `outburst.log`, is kept there too.
 
-**Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. A burst with no keeper is skipped. A burst of one frame is ignored, even when that frame is marked and even when single-frame bursts are shown in the list. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
+**Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. A burst with no keeper is skipped. A burst shorter than **Minimum frames** is hidden and is not saved, even if you marked a frame in it. Lower the minimum to review and save those bursts. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
 
-**XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom-style rating is 5 for a keeper, -1 for a reject, and 0 otherwise. A one-frame burst is not saved, so a mark on that frame stays at 0 unless you rejected it. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it.
+**XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom-style rating is 5 for a keeper, -1 for a reject, and 0 otherwise. A burst shorter than the minimum is not saved, so a mark on one of those frames stays at 0 unless you rejected it. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it.
 
 **Report** writes `outburst-report.json` and `outburst-report.csv`. `examples/sample_output` shows the shape of both, plus a sample sidecar. Reports you export use full file paths.
 

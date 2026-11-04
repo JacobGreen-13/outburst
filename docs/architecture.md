@@ -70,7 +70,7 @@ The database lives in the user cache directory (`~/Library/Caches/Outburst` on m
 | Scan and score | Cache directory only |
 | Keep / reject | Cache directory only |
 | Write XMP | A new or updated `<stem>.xmp` beside the photo, and only after confirmation |
-| Save keepers | A folder the photographer chooses. Copy, or a hard link with a copy fallback. Only frames whose decision is keep, and only from bursts of two or more frames |
+| Save keepers | A folder the photographer chooses. Copy, or a hard link with a copy fallback. Only marked frames from bursts that meet Minimum frames. Hidden shorter bursts are not saved |
 | Export report | `outburst-report.json` and `outburst-report.csv` in a chosen folder |
 | Download a subject model | The models folder: `models` in this project when Outburst is run from the checkout, `models` inside the cache directory otherwise, or `OUTBURST_MODELS` when that is set |
 
@@ -78,7 +78,7 @@ Photograph files are opened for reading. Export uses `shutil.copy2` or `os.link`
 
 ## Window
 
-`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides one-frame bursts until **Show single-frame bursts** is on. When a library is shown, each burst that has no keeper yet gets its recommended frame marked keep. **Save keepers** writes only those marks, and it skips bursts of one frame. The preview has **Mark as keeper** and **Reject** buttons besides the A and X keys. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
+`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides bursts shorter than **Minimum frames** (2 by default). When a library is shown, each burst that has no keeper yet gets its recommended frame marked keep. **Save keepers** writes marked frames from the bursts that are showing and skips the hidden shorter ones. The preview has **Mark as keeper** and **Reject** buttons besides the A and X keys. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
 
 ## Subject detection
 
