@@ -20,12 +20,37 @@ The copy above is a small drawn sample so you can try the window without a memor
 
 You need Python 3.11 or newer. Outburst runs on macOS (including Apple Silicon), Windows, and Linux.
 
+Double-click the launcher in this folder:
+
+| System | Double-click |
+| --- | --- |
+| macOS | `Outburst.command` |
+| Windows | `Outburst.bat` |
+| Linux | `Outburst.desktop`, or run `./outburst.sh` |
+
+The first run creates `.venv`, downloads the libraries, and opens the window. Later runs open the window. You can close the terminal once the window is up.
+
+Open a folder straight away:
+
+```bash
+./outburst.sh examples/sample_burst
+```
+
+```bat
+Outburst.bat examples\sample_burst
+```
+
+Subject detection is a larger optional install because it includes PyTorch. Run the launcher with `subject` once, for example `./outburst.sh subject` or `Outburst.bat subject`.
+
+### Install by hand
+
 macOS and Linux:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
+outburst
 ```
 
 Windows:
@@ -34,11 +59,6 @@ Windows:
 py -3 -m venv .venv
 .venv\Scripts\activate
 pip install -e .
-```
-
-Then start the app:
-
-```bash
 outburst
 ```
 
@@ -154,16 +174,21 @@ Install Outburst with an arm64 build of Python 3.11 or newer and you do not need
 
 ## For developers
 
+The launcher's `.venv` is a normal virtual environment. Install the test extra into it when you want to run pytest:
+
 ```bash
+source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ```
+
+On Windows, activate with `.venv\Scripts\activate` instead.
 
 Core tests cover grouping, scoring, timestamp reading, preview fallback, the cache, and the non-destructive outputs. A lighter test opens the window offscreen, loads a folder, and moves between frames. The pipeline does not import Qt.
 
 See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules are allowed to write files.
 
-Packaging as a double-clickable app (pyinstaller or briefcase) is not part of this version. Installing into a virtual environment is the supported way to run Outburst today.
+The one-click launcher is the supported way to install and open Outburst.
 
 ## Roadmap
 
