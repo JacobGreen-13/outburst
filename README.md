@@ -10,9 +10,9 @@ Nothing is uploaded. There is no account and no subscription. Outburst never mod
 
 - Open a folder of RAW bursts, or JPEGs if that is what the camera wrote.
 - See the bursts in a list, and the frames in a filmstrip. A burst of one frame stays off that list until you turn on **Show single-frame bursts**.
-- Compare scores and open a larger preview of the recommended frame. It is marked **RECOMMENDED**, outlined in green, and labeled **BEST** on the filmstrip.
-- Mark keepers and rejects from the keyboard. Those marks are remembered on this computer.
-- Export the keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV report.
+- Compare scores and open a larger preview. The recommended frame starts as a keeper: a green **KEEPER** stamp, a green outline, and the **Marked keeper** button pressed.
+- Change keepers with that button, or with the keyboard. Those marks are remembered on this computer.
+- Save the marked keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV report.
 
 The copy above is a small drawn sample so you can try the window without a memory card. Real feathers score higher than these simple shapes. The ranking idea is the same: the sharp frame beats the soft ones and the blown one.
 
@@ -76,9 +76,9 @@ A normal desktop already has what PySide6 needs. If the window fails to open bec
 
 A JPEG that sits next to a RAW file with the same name is used as the preview. It is not counted as a second frame.
 
-While the scan runs, the status bar shows progress. The first visit reads each file. The next visit is much faster, because measurements and thumbnails are cached on this computer.
+While the scan runs, the status bar shows progress. The first visit reads each file. The next visit is much faster, because measurements and thumbnails are cached on this computer. **Rescan** throws away the cached measurements for the open folder and reads it again. Keeper marks stay. **Clear cache** in the View menu does that for every folder.
 
-The left column lists bursts. The large frame is the one you are reviewing. The strip along the bottom is every frame in the current burst, with a score from 0 to 100.
+The left column lists bursts. The large frame is the one you are reviewing. Under it, **Mark as keeper** and **Reject** show the choice for that frame. The strip along the bottom is every frame in the current burst, with a score from 0 to 100.
 
 **Burst gap** is how close two frames must be to stay in one burst. The default is 1.0 second. A gap of exactly 1.0 second starts a new burst. Moving the control regroups immediately.
 
@@ -96,12 +96,12 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 | Down / Up | Next or previous burst |
 | Home / End | First or last frame in the burst |
 | Enter | Jump to the recommended frame |
-| A | Mark this frame as a keeper. Press again to clear it. |
-| X | Reject this frame. Press again to clear it. |
+| A | Mark this frame as a keeper. Press again to clear it. Same as **Mark as keeper**. |
+| X | Reject this frame. Press again to clear it. Same as **Reject**. |
 | R | Reject the whole burst. Press again to clear it. |
 | Ctrl+O | Open a folder |
-| F5 | Rescan |
-| Ctrl+E | Export keepers |
+| F5 | Clear cached measurements for this folder and scan it again |
+| Ctrl+E | Save the frames marked as keepers |
 | Ctrl+Shift+E | Export a JSON and CSV report |
 | Ctrl+Shift+X | Write XMP sidecars |
 | Esc | Cancel the scan |
@@ -128,7 +128,7 @@ Scanning only writes into Outburst's cache:
 
 Delete that folder if you want Outburst to measure everything again. A log file, `outburst.log`, is kept there too.
 
-**Keepers** copies the chosen frames into a folder you pick. A frame you marked as a keeper is exported. If you mark several keepers in one burst, each of them is exported. Otherwise Outburst exports the recommendation, unless you rejected it, in which case it takes the next best frame that is still in play. A burst you fully rejected is skipped. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
+**Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. A burst with no keeper is skipped. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
 
 **XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom-style rating is 5 for a keeper, -1 for a reject, and 0 otherwise. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it.
 
@@ -142,9 +142,9 @@ This part is optional and stays off until you turn it on. The scoring panel has 
 pip install "outburst[subject]"
 ```
 
-Check **Subject-aware sharpness**. If the selected file is not already in the models folder, Outburst downloads it there and shows progress in the status bar. Cancel with Esc. When a bird or animal is found, sharpness is measured inside that box (with a small margin) and the box is drawn on the preview. If nothing is found, or the model cannot be loaded, Outburst keeps the normal full-frame score and tells you.
+Choose a model in the dropdown, or check **Subject-aware sharpness**, then press **Rescan**. That turns subject scoring on, downloads the weights into the models folder when the file is not there yet, and scores the open folder with that model. Progress shows in the status bar. Cancel with Esc. When a bird or animal is found, sharpness is measured inside that box (with a small margin) and the box is drawn on the preview. If nothing is found, or the model cannot be loaded, Outburst keeps the normal full-frame score and tells you.
 
-When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched the next time subject scoring needs it. Photos are still never uploaded.
+When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched when you choose it or when you rescan with subject scoring on. Photos are still never uploaded.
 
 On Apple Silicon the detector uses MPS when PyTorch provides it. On NVIDIA it uses CUDA. Otherwise it uses the CPU. The rest of Outburst does not need a GPU.
 

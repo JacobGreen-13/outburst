@@ -231,6 +231,78 @@ class Cache:
             )
         self._conn.commit()
 
+    def forget_folder(self, folder: Path) -> int:
+        """Drop cached measurements and preview files for photographs inside ``folder``.
+
+        Keeper and reject marks are left in place. Returns how many photograph
+        paths were forgotten.
+        """
+
+        folder = folder.expanduser().resolve()
+        rows = self._conn.execute(
+            "SELECT path, preview_rel, thumb_rel FROM frame_metrics"
+        ).fetchall()
+        paths: set[str] = set()
+        for row in rows:
+            if not _stored_path_inside(row["path"], folder):
+                continue
+            paths.add(row["path"])
+            self._delete_cached_file(row["preview_rel"])
+            self._delete_cached_file(row["thumb_rel"])
+        if not paths:
+            return 0
+        self._conn.executemany(
+            "DELETE FROM frame_metrics WHERE path = ?",
+            [(path,) for path in paths],
+        )
+        self._conn.commit()
+        return len(paths)
+
+    def clear(self) -> int:
+        """Drop every cached measurement and preview file.
+
+        Keeper and reject marks stay. Returns how many measurement rows were removed.
+        """
+
+        rows = self._conn.execute("SELECT preview_rel, thumb_rel FROM frame_metrics").fetchall()
+        for row in rows:
+            self._delete_cached_file(row["preview_rel"])
+            self._delete_cached_file(row["thumb_rel"])
+        self._conn.execute("DELETE FROM frame_metrics")
+        self._conn.commit()
+        self._sweep_preview_files()
+        return len(rows)
+
+    def _delete_cached_file(self, relative: str | None) -> None:
+        path = self._abs(relative)
+        if path is None:
+            return
+        try:
+            resolved = path.resolve()
+            root = self.directory.resolve()
+        except OSError:
+            return
+        if resolved != root and root not in resolved.parents:
+            return
+        if not resolved.is_file():
+            return
+        try:
+            resolved.unlink()
+        except OSError as exc:
+            log.warning("Could not delete cached file %s: %s", resolved, exc)
+
+    def _sweep_preview_files(self) -> None:
+        for name in ("previews", "thumbs"):
+            folder = self.directory / name
+            if not folder.is_dir():
+                continue
+            for child in folder.iterdir():
+                if child.is_file():
+                    try:
+                        child.unlink()
+                    except OSError as exc:
+                        log.warning("Could not delete cached file %s: %s", child, exc)
+
     def _rel(self, path: Path) -> str:
         return path.resolve().relative_to(self.directory.resolve()).as_posix()
 
@@ -238,6 +310,15 @@ class Cache:
         if not relative:
             return None
         return self.directory / relative
+
+
+def _stored_path_inside(stored: str, folder: Path) -> bool:
+    path = Path(stored)
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    return resolved == folder or folder in resolved.parents
 
 
 def _format_box(box: tuple[int, int, int, int] | None) -> str | None:
