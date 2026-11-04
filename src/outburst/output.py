@@ -50,13 +50,15 @@ def choose_keepers(
 ) -> list[KeeperChoice]:
     """Return the frames marked as keepers.
 
-    A frame is saved only when its decision is ``keep``. The recommended frame
-    is not included unless it was marked. Within a burst, marked frames are
-    ordered with the strongest score first.
+    A frame is saved only when its decision is ``keep`` and it belongs to a
+    burst of at least two frames. A one-frame burst is ignored. Within a burst,
+    marked frames are ordered with the strongest score first.
     """
 
     chosen: list[KeeperChoice] = []
     for burst in bursts:
+        if burst.count < 2:
+            continue
         marked = [frame for frame in burst.frames if decisions.get(frame.path) == "keep"]
         for frame in sorted(marked, key=lambda item: _rank(item, by_path)):
             chosen.append(KeeperChoice(burst.id, frame.path, "marked"))

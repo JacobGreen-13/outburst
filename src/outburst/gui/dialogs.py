@@ -86,7 +86,8 @@ class ExportKeepersDialog(QDialog):
 
         layout = QVBoxLayout(self)
         summary = QLabel(
-            "Outburst will save only the frames you marked as keepers. A burst with no keeper is skipped."
+            "Outburst will save only the frames you marked as keepers in a burst of two or more. "
+            "One-frame bursts are left out, and a burst with no keeper is skipped."
         )
         summary.setWordWrap(True)
         layout.addWidget(summary)
