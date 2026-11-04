@@ -49,7 +49,7 @@ def test_xmp_does_not_touch_the_photograph(tmp_path: Path) -> None:
     before = (_digest(photo), photo.stat().st_mtime_ns)
     frame, analysis = _frame(photo, 0.8)
     library = _library(tmp_path, [(frame, analysis)])
-    written, warnings = write_library_sidecars(library, {})
+    written, warnings = write_library_sidecars(library, {photo: "keep"})
     assert warnings == []
     assert written == [photo.with_suffix(".xmp")]
     text = written[0].read_text(encoding="utf-8")
@@ -101,11 +101,14 @@ def test_choose_keepers_and_export_modes(tmp_path: Path) -> None:
     frame_b, analysis_b = _frame(second, 0.9)
     burst = Burst("burst-001", (frame_a, frame_b))
     by_path = {first: analysis_a, second: analysis_b}
-    assert [choice.path for choice in choose_keepers([burst], by_path, {})] == [second]
-    assert [choice.path for choice in choose_keepers([burst], by_path, {second: "reject"})] == [first]
+    assert choose_keepers([burst], by_path, {}) == []
+    assert choose_keepers([burst], by_path, {second: "reject"}) == []
     assert choose_keepers([burst], by_path, {first: "reject", second: "reject"}) == []
     marked = choose_keepers([burst], by_path, {first: "keep"})
     assert [choice.path for choice in marked] == [first]
+    assert marked[0].reason == "marked"
+    both = choose_keepers([burst], by_path, {first: "keep", second: "keep"})
+    assert [choice.path for choice in both] == [second, first]
 
     copied = export_keepers([second], tmp_path / "keepers", "copy")
     assert copied[0].method == "copy"
@@ -116,6 +119,19 @@ def test_choose_keepers_and_export_modes(tmp_path: Path) -> None:
     assert linked[0].method == "hardlink"
     assert linked[0].destination.samefile(first)
     assert first.read_bytes() == b"aaa"
+
+
+def test_unmarked_frame_is_not_rated_as_a_keeper(tmp_path: Path) -> None:
+    photo = tmp_path / "IMG_0003.JPG"
+    photo.write_bytes(b"jpeg")
+    frame, analysis = _frame(photo, 0.8)
+    library = _library(tmp_path, [(frame, analysis)])
+    written, warnings = write_library_sidecars(library, {})
+    assert warnings == []
+    text = written[0].read_text(encoding="utf-8")
+    assert 'xmp:Rating="0"' in text
+    assert 'outburst:Recommended="True"' in text
+    assert _digest(photo) == hashlib.sha256(b"jpeg").digest()
 
 
 def test_report_lists_the_recommended_frame(tmp_path: Path) -> None:

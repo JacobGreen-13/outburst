@@ -48,31 +48,18 @@ def choose_keepers(
     by_path: Mapping[Path, FrameAnalysis],
     decisions: Mapping[Path, str],
 ) -> list[KeeperChoice]:
-    """Pick what to export from each burst.
+    """Return the frames marked as keepers.
 
-    Frames you marked as keepers are exported. Otherwise the recommended frame
-    is exported, unless you rejected it, in which case the next-best frame that
-    is still in play is used. A burst whose frames are all rejected is skipped.
+    A frame is saved only when its decision is ``keep``. The recommended frame
+    is not included unless it was marked. Within a burst, marked frames are
+    ordered with the strongest score first.
     """
 
     chosen: list[KeeperChoice] = []
     for burst in bursts:
-        if not burst.frames:
-            continue
         marked = [frame for frame in burst.frames if decisions.get(frame.path) == "keep"]
-        if marked:
-            for frame in sorted(marked, key=lambda item: _rank(item, by_path)):
-                chosen.append(KeeperChoice(burst.id, frame.path, "marked"))
-            continue
-        if all(decisions.get(frame.path) == "reject" for frame in burst.frames):
-            continue
-        ordered = sorted(burst.frames, key=lambda item: _rank(item, by_path))
-        best = ordered[0]
-        pick = next((frame for frame in ordered if decisions.get(frame.path) != "reject"), None)
-        if pick is None:
-            continue
-        reason = "recommended" if pick.path == best.path else "next-best"
-        chosen.append(KeeperChoice(burst.id, pick.path, reason))
+        for frame in sorted(marked, key=lambda item: _rank(item, by_path)):
+            chosen.append(KeeperChoice(burst.id, frame.path, "marked"))
     return chosen
 
 
