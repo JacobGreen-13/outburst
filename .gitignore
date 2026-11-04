@@ -18,3 +18,5 @@ htmlcov/
 Thumbs.db
 outburst_cache/
 *.spec
+models/*.pt
+models/*.pt.part

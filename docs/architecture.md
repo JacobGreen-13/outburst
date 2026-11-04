@@ -11,7 +11,7 @@ Outburst is a desktop app. The scoring pipeline does not import Qt, so it can be
 | `grouping.py` | Sorts by capture time and groups consecutive frames whose gap is strictly below the threshold. Frames with no capture time stay alone. |
 | `preview.py` | Loads a preview. Paired JPEGs win. Otherwise rawpy's embedded thumbnail is used. A byte scan for an embedded JPEG is the fallback. Full demosaic is never requested. |
 | `scoring.py` | Laplacian variance, optional Tenengrad, exposure penalties, and the weighted composite. Pure functions. |
-| `subject.py` | Optional YOLO detector. Loads only a local `.pt` file. Device order is Apple Silicon MPS, then NVIDIA CUDA, then CPU. |
+| `subject.py` | Optional YOLO detector and the model catalog. Device order is Apple Silicon MPS, then NVIDIA CUDA, then CPU. `ensure_model` downloads a missing weights file into the models folder. `load_yolo_detector` only opens a file that is already there. |
 | `cache.py` | SQLite plus JPEG previews in the user cache directory. |
 | `pipeline.py` | Ties the steps together and rebuilds scores or groups when weights or the gap change. |
 | `output.py` | XMP sidecars, keeper copies or hard links, JSON and CSV reports. |
@@ -70,13 +70,14 @@ The database lives in the user cache directory (`~/Library/Caches/Outburst` on m
 | Write XMP | A new or updated `<stem>.xmp` beside the photo, and only after confirmation |
 | Export keepers | A folder the photographer chooses. Copy, or a hard link with a copy fallback |
 | Export report | `outburst-report.json` and `outburst-report.csv` in a chosen folder |
+| Download a subject model | The models folder: `models` in this project when Outburst is run from the checkout, `models` inside the cache directory otherwise, or `OUTBURST_MODELS` when that is set |
 
 Photograph files are opened for reading. Export uses `shutil.copy2` or `os.link`. If an XMP sidecar exists and does not look like XMP, Outburst leaves it alone and reports the file.
 
 ## Window
 
-`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider or the burst-gap box has focus.
+`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
 
 ## Subject detection
 
-`load_yolo_detector` imports Ultralytics only when a model file is chosen. It does not download weights. Detections are limited to the COCO animal and bird classes. If import fails, the file is missing, or a frame has no animal, the frame keeps the normal sharpness score.
+The scoring panel lists four models. Turning subject scoring on, or changing the dropdown while it is on, calls `ensure_model` when that `.pt` file is missing or too small to be a weights archive. The download is written to `filename.pt.part` and renamed only after the file is a large zip (PyTorch weights start with `PK`). Cancel deletes the partial file. `load_yolo_detector` imports Ultralytics only after that file is on disk and does not download anything. Detections are limited to the COCO animal and bird classes. If import fails, the file is missing, or a frame has no animal, the frame keeps the normal sharpness score.
