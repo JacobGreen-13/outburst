@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from outburst import __version__
 from outburst.cache import Cache, default_cache_dir
-from outburst.display import burst_list_text, frame_info_html, thumb_badge
+from outburst.display import burst_list_text, frame_info_html, thumb_badge, visible_bursts
 from outburst.gui.burst_view import Filmstrip, Thumb
 from outburst.gui.controls import ControlPanel
 from outburst.gui.dialogs import ExportKeepersDialog, ask, notify, show_shortcuts, show_warnings
@@ -59,6 +59,10 @@ _WELCOME = (
     "Outburst groups frames shot close together, scores sharpness and exposure "
     "from embedded previews, and highlights a recommended frame.\n\n"
     "Original files stay untouched."
+)
+_SINGLES_HIDDEN = (
+    "Every group in this folder is a single frame.\n\n"
+    "Turn on Show single-frame bursts to review them."
 )
 
 
@@ -121,12 +125,7 @@ class MainWindow(QMainWindow):
         self.controls.set_threshold(library.threshold)
         self._refresh_burst_list(prefer_path=None)
         self._sync_actions()
-        burst_count = len(library.bursts)
-        noun = "burst" if burst_count == 1 else "bursts"
-        message = f"{len(library.analyses)} files · {burst_count} {noun}"
-        if library.warnings:
-            message += f" · {len(library.warnings)} notes"
-        self.statusBar().showMessage(message)
+        self.statusBar().showMessage(self._status_summary())
         if library.warnings and not library.analyses:
             self._notify("Nothing to cull", library.warnings[0], "info")
 
@@ -235,6 +234,7 @@ class MainWindow(QMainWindow):
         self.controls.weights_changed.connect(self._apply_weights)
         self.controls.subject_toggled.connect(self._on_subject_toggled)
         self.controls.model_changed.connect(self._on_model_changed)
+        self.controls.singles_toggled.connect(self._on_singles_toggled)
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -543,8 +543,33 @@ class MainWindow(QMainWindow):
         self.controls.set_model_enabled(True)
         self._sync_actions()
 
+    def _on_singles_toggled(self, _checked: bool) -> None:
+        self._refresh_burst_list(prefer_path=self._selected_path())
+        if self._library is not None:
+            self.statusBar().showMessage(self._status_summary())
+
+    def _visible_bursts(self) -> tuple[Burst, ...]:
+        if self._library is None:
+            return ()
+        return visible_bursts(self._library.bursts, show_singles=self.controls.show_singles())
+
+    def _status_summary(self) -> str:
+        library = self._library
+        if library is None:
+            return ""
+        shown = len(self._visible_bursts())
+        hidden = len(library.bursts) - shown
+        noun = "burst" if shown == 1 else "bursts"
+        message = f"{len(library.analyses)} files · {shown} {noun}"
+        if hidden:
+            frame_noun = "single frame" if hidden == 1 else "single frames"
+            message += f" · {hidden} {frame_noun} hidden"
+        if library.warnings:
+            message += f" · {len(library.warnings)} notes"
+        return message
+
     def _on_burst_row(self, row: int) -> None:
-        if row < 0 or self._library is None or row >= len(self._library.bursts):
+        if row < 0 or row >= len(self._visible_bursts()):
             return
         self._show_burst(row, prefer_path=None)
 
@@ -556,7 +581,7 @@ class MainWindow(QMainWindow):
             self.burst_list.blockSignals(False)
             self.viewer.set_placeholder(_WELCOME)
             return
-        for burst in library.bursts:
+        for burst in self._visible_bursts():
             item = QListWidgetItem(burst_list_text(burst, self._by_path, self._decisions))
             item.setData(Qt.ItemDataRole.UserRole, burst.id)
             item.setSizeHint(QSize(240, 58))
@@ -567,22 +592,29 @@ class MainWindow(QMainWindow):
         self.burst_list.blockSignals(False)
         if self.burst_list.count():
             self._show_burst(row, prefer_path=prefer_path)
+            return
+        self._burst_index = 0
+        self._frame_index = 0
+        self.filmstrip.set_cards([])
+        if library.bursts:
+            self.viewer.set_placeholder(_SINGLES_HIDDEN)
         else:
             self.viewer.set_placeholder(_WELCOME)
 
     def _refresh_burst_labels(self) -> None:
         if self._library is None:
             return
-        for row, burst in enumerate(self._library.bursts):
+        for row, burst in enumerate(self._visible_bursts()):
             item = self.burst_list.item(row)
             if item is not None:
                 item.setText(burst_list_text(burst, self._by_path, self._decisions))
 
     def _show_burst(self, index: int, prefer_path: Path | None) -> None:
-        if self._library is None or not (0 <= index < len(self._library.bursts)):
+        bursts = self._visible_bursts()
+        if not (0 <= index < len(bursts)):
             return
         self._burst_index = index
-        burst = self._library.bursts[index]
+        burst = bursts[index]
         frame_index = None
         if prefer_path is not None:
             frame_index = next((i for i, frame in enumerate(burst.frames) if frame.path == prefer_path), None)
@@ -604,9 +636,10 @@ class MainWindow(QMainWindow):
         self._select_frame(self._frame_index + delta)
 
     def _step_burst(self, delta: int) -> None:
-        if self._library is None or not self._library.bursts:
+        count = len(self._visible_bursts())
+        if count == 0:
             return
-        row = max(0, min(self._burst_index + delta, len(self._library.bursts) - 1))
+        row = max(0, min(self._burst_index + delta, count - 1))
         self.burst_list.setCurrentRow(row)
 
     def _go_to_recommended(self) -> None:
@@ -786,11 +819,10 @@ class MainWindow(QMainWindow):
         )
 
     def _current_burst(self) -> Burst | None:
-        if self._library is None or not self._library.bursts:
+        bursts = self._visible_bursts()
+        if not bursts or not (0 <= self._burst_index < len(bursts)):
             return None
-        if not 0 <= self._burst_index < len(self._library.bursts):
-            return None
-        return self._library.bursts[self._burst_index]
+        return bursts[self._burst_index]
 
     def _current_analysis(self) -> FrameAnalysis | None:
         burst = self._current_burst()
@@ -808,7 +840,7 @@ class MainWindow(QMainWindow):
     def _row_for_path(self, path: Path | None) -> int:
         if self._library is None or path is None:
             return 0
-        for index, burst in enumerate(self._library.bursts):
+        for index, burst in enumerate(self._visible_bursts()):
             if any(frame.path == path for frame in burst.frames):
                 return index
         return 0
@@ -862,6 +894,7 @@ class MainWindow(QMainWindow):
         self.controls.set_sharpness_percent(_as_int(settings.value("sharpness"), 75))
         self.controls.set_center_percent(_as_int(settings.value("center_mix"), 65))
         self.controls.set_recursive(_as_bool(settings.value("recursive"), False))
+        self.controls.set_show_singles(_as_bool(settings.value("show_single_bursts"), False))
         self.controls.set_subject_checked(_as_bool(settings.value("prefer_subject"), False))
         folder = settings.value("last_folder", "")
         if folder:
@@ -875,6 +908,7 @@ class MainWindow(QMainWindow):
         settings.setValue("sharpness", self.controls.sharpness_percent())
         settings.setValue("center_mix", self.controls.center_percent())
         settings.setValue("recursive", self.controls.recursive())
+        settings.setValue("show_single_bursts", self.controls.show_singles())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:

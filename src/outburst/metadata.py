@@ -1,8 +1,9 @@
 """Read capture timestamps without modifying the photograph.
 
 exiftool is used when it is installed because it understands the most camera
-formats, including CR3. Otherwise Outburst parses TIFF-based EXIF and JPEG APP1
-segments itself, then falls back to a date string in the file header.
+formats, including CR3. Otherwise Outburst tries the exifread library, then
+parses TIFF-based EXIF and JPEG APP1 segments itself, then looks for a date
+string in the file header.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import re
 import shutil
 import struct
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -20,9 +22,14 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 SOURCE_EXIFTOOL = "exiftool"
+SOURCE_EXIFREAD = "exifread"
 SOURCE_EXIF = "exif"
 SOURCE_HEADER = "header-scan"
 SOURCE_MISSING = "missing"
+
+# exifread recognizes TIFF, JPEG, PNG, WebP, HEIC, and JPEG XL.
+# These RAW types use a different container, so exifread does not read them.
+_EXIFREAD_UNRECOGNIZED_RAW = frozenset({".cr3", ".raf", ".x3f"})
 
 _EXIF_IFD = 0x8769
 _DATETIME = 0x0132
@@ -60,13 +67,25 @@ def read_capture_info(paths: list[Path]) -> dict[Path, CaptureInfo]:
     """Return capture metadata for each path. Missing clocks use source `missing`."""
 
     results: dict[Path, CaptureInfo] = {}
+    exiftool_used = False
     exiftool = shutil.which("exiftool")
     if exiftool and paths:
         try:
             results.update(_read_with_exiftool(exiftool, paths))
+            exiftool_used = True
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError, UnicodeError) as exc:
-            log.warning("exiftool failed (%s); using the built-in timestamp reader", exc)
+            log.warning("exiftool failed (%s); trying exifread, then the built-in reader", exc)
             results.clear()
+
+    if paths and not exiftool_used:
+        if exifread_available():
+            log.info("Reading capture times with exifread because exiftool is not installed")
+            for path in paths:
+                info = _read_with_exifread(path)
+                if info is not None and info.captured_at is not None:
+                    results[path] = info
+        else:
+            log.info("Reading capture times with the built-in reader because exiftool is not installed")
 
     for path in paths:
         current = results.get(path)
@@ -74,7 +93,8 @@ def read_capture_info(paths: list[Path]) -> dict[Path, CaptureInfo]:
             continue
         builtin = _read_with_builtin(path)
         if builtin.captured_at is not None:
-            results[path] = builtin
+            camera = builtin.camera or (current.camera if current is not None else None)
+            results[path] = CaptureInfo(builtin.captured_at, builtin.source, camera)
         elif current is None:
             results[path] = CaptureInfo(None, SOURCE_MISSING, builtin.camera)
     for path in paths:
@@ -84,6 +104,41 @@ def read_capture_info(paths: list[Path]) -> dict[Path, CaptureInfo]:
 
 def exiftool_available() -> bool:
     return shutil.which("exiftool") is not None
+
+
+def exifread_available() -> bool:
+    try:
+        import exifread  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def timestamp_reader_warning(raw_suffixes: Iterable[str]) -> str | None:
+    """Scan note when RAW files are opened without exiftool. None when exiftool is present."""
+
+    suffixes = {_suffix(value) for value in raw_suffixes}
+    suffixes.discard("")
+    if not suffixes or exiftool_available():
+        return None
+    if exifread_available():
+        text = (
+            "exiftool is not installed, so Outburst is reading capture times with exifread. "
+            "exifread covers JPEG and TIFF-based RAW such as CR2, NEF, ARW, DNG, ORF, PEF, and RW2. "
+            "CR3, RAF, and X3F are outside that set. Outburst then searches the file for a date string, "
+            "which is less reliable, and a frame with no time stays in its own burst. "
+            "Install exiftool for CR3 and the less common RAW formats."
+        )
+        weak = sorted(suffix.lstrip(".").upper() for suffix in suffixes if suffix in _EXIFREAD_UNRECOGNIZED_RAW)
+        if weak:
+            text += f" This folder includes {', '.join(weak)}."
+        return text
+    return (
+        "exiftool is not installed and exifread is not available, so Outburst is using its built-in "
+        "timestamp reader. That reader covers JPEG and many TIFF-based RAW files, then searches for a "
+        "date string. CR3 and other non-TIFF RAW files are the least reliable, and a frame with no time "
+        "stays in its own burst. Install exiftool for the most reliable burst grouping."
+    )
 
 
 def parse_exif_datetime(value: object, subsec: object | None = None) -> datetime | None:
@@ -218,6 +273,56 @@ def _read_with_exiftool(exiftool: str, paths: list[Path]) -> dict[Path, CaptureI
             argument_size = 0
     flush(chunk)
     return found
+
+
+def _read_with_exifread(path: Path) -> CaptureInfo | None:
+    try:
+        import exifread
+    except ImportError:
+        return None
+    exif_log = logging.getLogger("exifread")
+    previous = exif_log.level
+    exif_log.setLevel(logging.ERROR)
+    try:
+        with path.open("rb") as handle:
+            tags = exifread.process_file(handle, details=False, strict=False, extract_thumbnail=False)
+    except OSError as exc:
+        log.warning("Could not read %s: %s", path, exc)
+        return None
+    except Exception as exc:
+        log.debug("exifread could not read %s (%s)", path.name, exc)
+        return None
+    finally:
+        exif_log.setLevel(previous)
+    if not tags:
+        return None
+    moment = parse_exif_datetime(
+        _tag_text(tags, "EXIF DateTimeOriginal")
+        or _tag_text(tags, "EXIF DateTimeDigitized")
+        or _tag_text(tags, "Image DateTime"),
+        _tag_text(tags, "EXIF SubSecTimeOriginal")
+        or _tag_text(tags, "EXIF SubSecTime")
+        or _tag_text(tags, "EXIF SubSecTimeDigitized"),
+    )
+    camera = _tag_text(tags, "Image Model") or _tag_text(tags, "Image Make")
+    if moment is None and camera is None:
+        return None
+    return CaptureInfo(moment, SOURCE_EXIFREAD if moment is not None else SOURCE_MISSING, camera)
+
+
+def _tag_text(tags: dict[str, object], key: str) -> str | None:
+    value = tags.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _suffix(value: str) -> str:
+    text = str(value).strip().lower()
+    if not text:
+        return ""
+    return text if text.startswith(".") else f".{text}"
 
 
 def _read_with_builtin(path: Path) -> CaptureInfo:
