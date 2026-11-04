@@ -108,9 +108,15 @@ def frame_info_html(
     if recommended and decision != "reject":
         badges.append('<span style="color:#7dffc3; font-weight:600;">RECOMMENDED</span>')
     if decision == "keep":
-        badges.append('<span style="color:#7dffc3; font-weight:600;">KEEP</span>')
+        badges.append(
+            '<span style="color:#042016; background-color:#3dbe86; font-weight:700; '
+            'padding:1px 8px;">KEEPER</span>'
+        )
     elif decision == "reject":
-        badges.append('<span style="color:#e06c6c; font-weight:600;">REJECTED</span>')
+        badges.append(
+            '<span style="color:#fff5f5; background-color:#8a3a3a; font-weight:700; '
+            'padding:1px 8px;">REJECTED</span>'
+        )
     badge_html = (" &nbsp; ".join(badges)) if badges else ""
     title = (
         f'<div><span style="font-size:16px; font-weight:600;">{escape(filename)}</span>'

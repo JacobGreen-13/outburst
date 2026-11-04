@@ -64,7 +64,7 @@ class ExportRequest:
 class ExportKeepersDialog(QDialog):
     def __init__(self, parent: QWidget | None, start: Path | None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Export keepers")
+        self.setWindowTitle("Save keepers")
         self._start = start or Path.home()
         self._folder = QLineEdit(str(self._start))
         browse = QPushButton("Browse…")
@@ -85,7 +85,11 @@ class ExportKeepersDialog(QDialog):
         group.addButton(self._link)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Outburst will export one keeper from each burst that is still in play."))
+        summary = QLabel(
+            "Outburst will save only the frames you marked as keepers. A burst with no keeper is skipped."
+        )
+        summary.setWordWrap(True)
+        layout.addWidget(summary)
         row = QHBoxLayout()
         row.addWidget(self._folder, 1)
         row.addWidget(browse)
