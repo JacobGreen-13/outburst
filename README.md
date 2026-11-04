@@ -100,7 +100,7 @@ While the scan runs, the status bar shows progress. The first visit reads each f
 
 The left column lists bursts. The large frame is the one you are reviewing. Under it, **Mark as keeper** and **Reject** show the choice for that frame. The strip along the bottom is every frame in the current burst, with a score from 0 to 100.
 
-**Burst gap** is how close two frames must be to stay in one burst. The default is 1.0 second. A gap of exactly 1.0 second starts a new burst. Moving the control regroups immediately.
+**Burst gap** is how close two frames must be to stay in one burst. The default is 1.0 second. A gap of exactly 1.0 second starts a new burst. Moving the control regroups immediately. Keepers you marked stay. Outburst clears the keeper it had chosen and marks the best frame of each burst.
 
 **Sharpness** and **Center weight** change the ranking immediately, without reading the files again. Sharpness is three quarters of the score by default. The center of the frame counts a bit more than the corners, which suits a bird that is near the middle.
 
@@ -148,7 +148,7 @@ Scanning only writes into Outburst's cache:
 
 Delete that folder if you want Outburst to measure everything again. A log file, `outburst.log`, is kept there too.
 
-**Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. A burst with no keeper is skipped. A burst shorter than **Minimum frames** is hidden and is not saved, even if you marked a frame in it. Lower the minimum to review and save those bursts. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
+**Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. Changing **Burst gap** keeps the frames you marked, drops the automatic mark, and marks the best frame of each new burst. A burst with no keeper is skipped. A burst shorter than **Minimum frames** is hidden and is not saved, even if you marked a frame in it. Lower the minimum to review and save those bursts. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
 
 **XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom-style rating is 5 for a keeper, -1 for a reject, and 0 otherwise. A burst shorter than the minimum is not saved, so a mark on one of those frames stays at 0 unless you rejected it. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it.
 

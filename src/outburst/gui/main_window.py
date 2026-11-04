@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         self._library: Library | None = None
         self._by_path: dict[Path, FrameAnalysis] = {}
         self._decisions: dict[Path, str] = {}
+        self._origins: dict[Path, str] = {}
         self._folder: Path | None = None
         self._dialog_start = Path.home()
         self._model_path: Path | None = None
@@ -460,7 +461,9 @@ class MainWindow(QMainWindow):
         if self._library is None:
             return
         selected = self._selected_path()
+        self._clear_automatic_keepers()
         self._library = with_threshold(self._library, value)
+        self._mark_keepers_for_new_bursts()
         self._refresh_burst_list(prefer_path=selected)
 
     def _apply_weights(self) -> None:
@@ -702,11 +705,7 @@ class MainWindow(QMainWindow):
             return
         path = analysis.frame.path
         updated = None if self._decisions.get(path) == kind else kind
-        if updated is None:
-            self._decisions.pop(path, None)
-        else:
-            self._decisions[path] = updated
-        self._save_decision(path, updated)
+        self._apply_decision(path, updated, origin="user")
         self._refresh_burst_labels()
         self.filmstrip.refresh_flags(self._thumbs())
         self._update_viewer()
@@ -717,12 +716,7 @@ class MainWindow(QMainWindow):
             return
         clear = all(self._decisions.get(frame.path) == "reject" for frame in burst.frames)
         for frame in burst.frames:
-            decision = None if clear else "reject"
-            if decision is None:
-                self._decisions.pop(frame.path, None)
-            else:
-                self._decisions[frame.path] = decision
-            self._save_decision(frame.path, decision)
+            self._apply_decision(frame.path, None if clear else "reject", origin="user")
         self._refresh_burst_labels()
         self.filmstrip.refresh_flags(self._thumbs())
         self._update_viewer()
@@ -927,8 +921,39 @@ class MainWindow(QMainWindow):
             frame = burst.frames[recommended_offset(burst.frames, self._by_path)]
             if self._decisions.get(frame.path) == "reject":
                 continue
-            self._decisions[frame.path] = "keep"
-            self._save_decision(frame.path, "keep")
+            self._apply_decision(frame.path, "keep", origin="auto")
+
+    def _clear_automatic_keepers(self) -> None:
+        """Drop keepers Outburst chose. Marks the photographer set stay."""
+
+        automatic = [
+            path
+            for path, origin in self._origins.items()
+            if origin == "auto" and self._decisions.get(path) == "keep"
+        ]
+        for path in automatic:
+            self._apply_decision(path, None)
+
+    def _mark_keepers_for_new_bursts(self) -> None:
+        """Mark each burst's best frame after the burst gap changes.
+
+        A frame the photographer rejected stays rejected. A frame they already
+        marked as a keeper keeps that mark. Every other best frame is marked
+        automatically.
+        """
+
+        if self._library is None:
+            return
+        for burst in self._library.bursts:
+            if not burst.frames:
+                continue
+            frame = burst.frames[recommended_offset(burst.frames, self._by_path)]
+            current = self._decisions.get(frame.path)
+            if current == "reject":
+                continue
+            if current == "keep" and self._origins.get(frame.path) != "auto":
+                continue
+            self._apply_decision(frame.path, "keep", origin="auto")
 
     def _about(self) -> None:
         if os.environ.get("OUTBURST_HEADLESS") == "1":
@@ -974,19 +999,33 @@ class MainWindow(QMainWindow):
     def _load_decisions(self) -> None:
         if self._library is None:
             self._decisions = {}
+            self._origins = {}
             return
         paths = [item.frame.path for item in self._library.analyses]
         try:
             with Cache(self._cache_dir) as cache:
                 self._decisions = cache.decisions_for(paths)
+                self._origins = cache.decision_origins(paths)
         except OSError as exc:
             log.warning("Could not read saved decisions: %s", exc)
             self._decisions = {}
+            self._origins = {}
 
-    def _save_decision(self, path: Path, decision: str | None) -> None:
+    def _apply_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
+        if decision is None:
+            self._decisions.pop(path, None)
+            self._origins.pop(path, None)
+            stored_origin = "user"
+        else:
+            stored_origin = origin if decision == "keep" else "user"
+            self._decisions[path] = decision
+            self._origins[path] = stored_origin
+        self._save_decision(path, decision, origin=stored_origin)
+
+    def _save_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
         try:
             with Cache(self._cache_dir) as cache:
-                cache.set_decision(path, decision)
+                cache.set_decision(path, decision, origin=origin)
         except OSError as exc:
             self._notify("Could not save that decision", str(exc), "warning")
 
