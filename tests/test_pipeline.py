@@ -72,7 +72,8 @@ def test_threshold_change_does_not_reread_files(tmp_path: Path) -> None:
     assert rescored.analyses[0].metrics == library.analyses[0].metrics
 
 
-def test_corrupt_raw_is_reported_without_modifying_it(tmp_path: Path) -> None:
+def test_corrupt_raw_is_reported_without_modifying_it(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("outburst.metadata.shutil.which", lambda _name: None)
     raw = tmp_path / "card" / "bird.CR3"
     raw.parent.mkdir()
     raw.write_bytes(b"ftyp" + b"2024:08:09 10:11:12" + b"no-preview")
@@ -82,7 +83,9 @@ def test_corrupt_raw_is_reported_without_modifying_it(tmp_path: Path) -> None:
     assert len(library.analyses) == 1
     assert library.analyses[0].error
     assert library.analyses[0].frame.captured_at == datetime(2024, 8, 9, 10, 11, 12)
-    assert library.warnings
+    notes = " ".join(library.warnings)
+    assert "exifread" in notes
+    assert "CR3" in notes
 
 
 def test_subject_detector_is_optional(tmp_path: Path) -> None:
