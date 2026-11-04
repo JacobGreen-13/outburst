@@ -79,7 +79,7 @@ python examples/generate_sample_burst.py
 Install [exiftool](https://exiftool.org/) if you can. Outburst uses it first, because it understands the most camera formats, including CR3.
 
 - macOS: `brew install exiftool`
-- Windows: the ExifTool Windows package
+- Windows: the ExifTool Windows package. Outburst starts it without a console window, so a scan does not flash command prompts.
 - Linux: the `libimage-exiftool-perl` package, or the equivalent for your distribution
 
 Without exiftool, Outburst reads capture times with the exifread library that ships with the app. exifread covers JPEG and TIFF-based RAW such as CR2, NEF, ARW, DNG, ORF, PEF, and RW2. It does not read CR3, RAF, or X3F. Those files fall through to a search for a date string, which is less reliable. A frame with no capture time stays in a burst by itself. When a RAW folder is opened without exiftool, the window says which of those formats are in the folder.
