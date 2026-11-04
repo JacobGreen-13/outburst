@@ -38,11 +38,19 @@ from outburst.gui.controls import ControlPanel
 from outburst.gui.dialogs import ExportKeepersDialog, ask, notify, show_shortcuts, show_warnings
 from outburst.gui.image_viewer import ImageViewer
 from outburst.gui.styles import build_app_icon
-from outburst.gui.worker import AnalyzeWorker
+from outburst.gui.worker import AnalyzeWorker, ModelFetchWorker
 from outburst.models import Burst, FrameAnalysis, Library
 from outburst.output import choose_keepers, export_keepers, write_library_sidecars, write_reports
 from outburst.pipeline import with_threshold, with_weights
 from outburst.scoring import recommended_offset, score_percent
+from outburst.subject import (
+    DEFAULT_MODEL_ID,
+    MODEL_OPTIONS,
+    model_is_ready,
+    model_path,
+    models_dir,
+    option_by_id,
+)
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +76,9 @@ class MainWindow(QMainWindow):
         self._folder: Path | None = None
         self._dialog_start = Path.home()
         self._model_path: Path | None = None
+        self._download_worker: ModelFetchWorker | None = None
+        self._downloading = False
+        self._download_then_scan = False
         self._burst_index = 0
         self._frame_index = 0
         self._warnings: tuple[str, ...] = ()
@@ -157,6 +168,9 @@ class MainWindow(QMainWindow):
         if application is not None:
             application.removeEventFilter(self)
         self._save_settings()
+        if self._download_worker is not None and self._download_worker.isRunning():
+            self._download_worker.abort()
+            self._download_worker.wait(2000)
         self._stop_worker()
         super().closeEvent(event)
 
@@ -184,7 +198,7 @@ class MainWindow(QMainWindow):
             self._toggle_decision("reject")
         elif key == Qt.Key.Key_R:
             self._reject_burst()
-        elif key == Qt.Key.Key_Escape and self._scanning:
+        elif key == Qt.Key.Key_Escape and (self._scanning or self._downloading):
             self._cancel_scan()
         else:
             return False
@@ -220,7 +234,7 @@ class MainWindow(QMainWindow):
         self.controls.threshold_changed.connect(self._apply_threshold)
         self.controls.weights_changed.connect(self._apply_weights)
         self.controls.subject_toggled.connect(self._on_subject_toggled)
-        self.controls.choose_model.connect(self._choose_model)
+        self.controls.model_changed.connect(self._on_model_changed)
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -330,6 +344,12 @@ class MainWindow(QMainWindow):
     def _start_worker(self) -> None:
         if self._folder is None:
             return
+        if self.controls.prefer_subject() and not self._model_ready():
+            self._begin_download(then_scan=True)
+            return
+        if self._downloading:
+            self._download_then_scan = True
+            return
         self._scan_id += 1
         scan_id = self._scan_id
         subject_model = self._model_path if self.controls.prefer_subject() else None
@@ -367,6 +387,10 @@ class MainWindow(QMainWindow):
         return True
 
     def _cancel_scan(self) -> None:
+        if self._downloading and self._download_worker is not None:
+            self._download_worker.abort()
+            self.statusBar().showMessage("Cancelling download…")
+            return
         if self._scanning:
             self._stop_worker()
             self.statusBar().showMessage("Scan cancelled")
@@ -416,33 +440,108 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _on_subject_toggled(self, enabled: bool) -> None:
-        if enabled and self._model_path is None:
-            self._choose_model()
-            if self._model_path is None:
-                self.controls.set_subject_checked(False)
-                return
+        if not enabled:
+            self._download_then_scan = False
+            self._apply_weights()
             return
-        if enabled and self._folder is not None:
-            self.rescan()
+        if self._model_ready():
+            if self._folder is not None:
+                self.rescan()
             return
-        self._apply_weights()
+        self._begin_download(then_scan=self._folder is not None)
 
-    def _choose_model(self) -> None:
+    def _on_model_changed(self, _model_id: str) -> None:
+        if self._model_ready():
+            if self.controls.prefer_subject() and self._folder is not None:
+                self.rescan()
+            return
+        if self.controls.prefer_subject():
+            self._begin_download(then_scan=self._folder is not None)
+
+    def _model_ready(self) -> bool:
+        option = option_by_id(self.controls.model_id())
+        if option is None:
+            self._model_path = None
+            return False
+        path = model_path(option)
+        if model_is_ready(path):
+            self._model_path = path
+            return True
+        self._model_path = None
+        return False
+
+    def _begin_download(self, then_scan: bool) -> None:
         if os.environ.get("OUTBURST_HEADLESS") == "1":
+            self.controls.set_subject_checked(False)
+            self.statusBar().showMessage("Subject model is not in the models folder")
+            if then_scan and self._folder is not None:
+                self._start_worker()
             return
-        start = str(self._model_path.parent if self._model_path else Path.home())
-        chosen, _filter = QFileDialog.getOpenFileName(
-            self,
-            "Choose a YOLO model",
-            start,
-            "YOLO weights (*.pt)",
-        )
-        if not chosen:
+        if self._downloading:
+            self._download_then_scan = self._download_then_scan or then_scan
             return
-        self._model_path = Path(chosen)
-        self.controls.set_model_name(self._model_path.name)
-        if self.controls.prefer_subject() and self._folder is not None:
-            self.rescan()
+        option = option_by_id(self.controls.model_id())
+        if option is None:
+            return
+        self._download_then_scan = then_scan
+        self._downloading = True
+        worker = ModelFetchWorker(option.id, models_dir())
+        worker.progress.connect(self._on_download_progress)
+        worker.succeeded.connect(self._on_download_succeeded)
+        worker.failed.connect(self._on_download_failed)
+        worker.cancelled.connect(self._on_download_cancelled)
+        self._download_worker = worker
+        self.controls.set_model_enabled(False)
+        self._sync_actions()
+        self.progress.setRange(0, 0)
+        self.statusBar().showMessage(f"Downloading {option.label}…")
+        worker.start()
+
+    def _on_download_progress(self, done: int, total: int) -> None:
+        if total <= 0:
+            self.progress.setRange(0, 0)
+        else:
+            self.progress.setRange(0, total)
+            self.progress.setValue(min(done, total))
+        self.statusBar().showMessage(f"Downloading model… {done / (1024 * 1024):.1f} MB")
+
+    def _on_download_succeeded(self, path: str) -> None:
+        then_scan = self._download_then_scan
+        self._finish_download_ui()
+        self._model_path = Path(path)
+        self.controls.refresh_models()
+        if then_scan and self.controls.prefer_subject() and self._folder is not None:
+            self._start_worker()
+            return
+        self.statusBar().showMessage(f"Saved {Path(path).name} in the models folder")
+
+    def _on_download_failed(self, message: str) -> None:
+        then_scan = self._download_then_scan
+        self._finish_download_ui()
+        self._notify("Could not download the model", message, "warning")
+        if self.controls.prefer_subject():
+            self.controls.set_subject_checked(False)
+        if then_scan and self._folder is not None:
+            self._start_worker()
+
+    def _on_download_cancelled(self) -> None:
+        then_scan = self._download_then_scan
+        self._finish_download_ui()
+        self.statusBar().showMessage("Model download cancelled")
+        if self.controls.prefer_subject():
+            self.controls.set_subject_checked(False)
+        if then_scan and self._folder is not None:
+            self._start_worker()
+
+    def _finish_download_ui(self) -> None:
+        worker = self._download_worker
+        self._downloading = False
+        self._download_then_scan = False
+        self._download_worker = None
+        if worker is not None and worker.isRunning():
+            worker.wait(2000)
+        self.controls.set_model_enabled(True)
+        self._sync_actions()
 
     def _on_burst_row(self, row: int) -> None:
         if row < 0 or self._library is None or row >= len(self._library.bursts):
@@ -681,7 +780,9 @@ class MainWindow(QMainWindow):
             "<h2>Outburst</h2>"
             f"<p>Version {__version__}</p>"
             "<p>Outburst is a free, offline burst-culling app for wildlife and nature photographers. "
-            "Your photos stay on this computer. Outburst never modifies the original files.</p>",
+            "Your photos stay on this computer. Outburst never modifies the original files. "
+            "A subject model is downloaded into the models folder only when you turn that "
+            "feature on and the weights are not already there.</p>",
         )
 
     def _current_burst(self) -> Burst | None:
@@ -740,15 +841,17 @@ class MainWindow(QMainWindow):
         self.folder_label.setToolTip(str(self._folder))
 
     def _sync_actions(self) -> None:
+        busy = self._scanning or self._downloading
         ready = self._library is not None and not self._scanning
         self.export_action.setEnabled(ready)
         self.report_action.setEnabled(ready)
         self.xmp_action.setEnabled(ready)
-        self.rescan_action.setEnabled(self._folder is not None and not self._scanning)
-        self.cancel_action.setEnabled(self._scanning)
-        self.cancel_action.setVisible(self._scanning)
+        self.rescan_action.setEnabled(self._folder is not None and not busy)
+        self.cancel_action.setEnabled(busy)
+        self.cancel_action.setVisible(busy)
+        self.cancel_action.setText("Cancel download" if self._downloading else "Cancel scan")
         self.warnings_action.setEnabled(bool(self._warnings))
-        self.progress.setVisible(self._scanning)
+        self.progress.setVisible(busy)
 
     def _notify(self, title: str, text: str, level: str) -> None:
         notify(self, title, text, level)
@@ -763,10 +866,8 @@ class MainWindow(QMainWindow):
         folder = settings.value("last_folder", "")
         if folder:
             self._dialog_start = Path(str(folder))
-        model = settings.value("subject_model", "")
-        if model and Path(str(model)).is_file():
-            self._model_path = Path(str(model))
-            self.controls.set_model_name(self._model_path.name)
+        self.controls.set_model_id(_saved_model_id(settings))
+        self._model_ready()
 
     def _save_settings(self) -> None:
         settings = QSettings("Outburst", "Outburst")
@@ -775,6 +876,7 @@ class MainWindow(QMainWindow):
         settings.setValue("center_mix", self.controls.center_percent())
         settings.setValue("recursive", self.controls.recursive())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
+        settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:
             settings.setValue("last_folder", str(self._folder))
         if self._model_path is not None:
@@ -797,6 +899,18 @@ def _as_int(value: object, default: int) -> int:
         return int(float(value))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return default
+
+
+def _saved_model_id(settings: QSettings) -> str:
+    model_id = str(settings.value("subject_model_id", "") or "")
+    if option_by_id(model_id) is not None:
+        return model_id
+    legacy = str(settings.value("subject_model", "") or "")
+    name = Path(legacy).name if legacy else ""
+    for option in MODEL_OPTIONS:
+        if option.filename == name:
+            return option.id
+    return DEFAULT_MODEL_ID
 
 
 def _as_bool(value: object, default: bool) -> bool:

@@ -2,7 +2,7 @@
 
 Outburst is a free desktop app for culling wildlife and nature bursts on your own computer. It groups frames that were shot a fraction of a second apart, scores each one for sharpness and exposure, and shows you the frame it would keep.
 
-Nothing is uploaded. There is no account and no subscription. Outburst never modifies your original RAW or JPEG files.
+Nothing is uploaded. There is no account and no subscription. Outburst never modifies your original RAW or JPEG files. A subject model is downloaded only when you turn that feature on and the weights are not already in the models folder.
 
 ![Outburst review window with a burst selected and the recommended frame highlighted](docs/images/outburst-review.png)
 
@@ -136,13 +136,15 @@ Delete that folder if you want Outburst to measure everything again. A log file,
 
 ## Subject detection
 
-This part is optional and stays off until you choose a model. Outburst does not download one.
+This part is optional and stays off until you turn it on. The scoring panel has a model dropdown: YOLO11 Nano (the default), YOLO11 Small, YOLOv8 Nano, and YOLOv8 Small. These are the official Ultralytics weights.
 
 ```bash
 pip install "outburst[subject]"
 ```
 
-Check **Subject-aware sharpness**, then **Choose model…** and pick a local YOLO `.pt` file. When a bird or animal is found, sharpness is measured inside that box (with a small margin) and the box is drawn on the preview. If nothing is found, or the model cannot be loaded, Outburst keeps the normal full-frame score and tells you.
+Check **Subject-aware sharpness**. If the selected file is not already in the models folder, Outburst downloads it there and shows progress in the status bar. Cancel with Esc. When a bird or animal is found, sharpness is measured inside that box (with a small margin) and the box is drawn on the preview. If nothing is found, or the model cannot be loaded, Outburst keeps the normal full-frame score and tells you.
+
+When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched the next time subject scoring needs it. Photos are still never uploaded.
 
 On Apple Silicon the detector uses MPS when PyTorch provides it. On NVIDIA it uses CUDA. Otherwise it uses the CPU. The rest of Outburst does not need a GPU.
 
@@ -165,7 +167,7 @@ Packaging as a double-clickable app (pyinstaller or briefcase) is not part of th
 
 ## Roadmap
 
-This version includes the review window, timestamp grouping, preview scoring, a disk cache, adjustable weights, keyboard culling, XMP, keeper export, and reports. Subject detection is wired up and optional.
+This version includes the review window, timestamp grouping, preview scoring, a disk cache, adjustable weights, keyboard culling, XMP, keeper export, and reports. Subject detection is optional. The model dropdown downloads a missing weights file into the models folder.
 
 Later versions can add a bundled small detector, a side-by-side compare view, and signed installers for macOS and Windows.
 
