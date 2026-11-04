@@ -62,13 +62,13 @@ class ControlPanel(QGroupBox):
         self._subject = QCheckBox("Subject-aware sharpness")
         self._subject.setToolTip(
             "Score sharpness inside a detected animal. "
-            "The chosen model is downloaded into the models folder if it is not there yet."
+            "Choosing a model turns this on. Rescan downloads that model if it is not in the models folder."
         )
         self._subject.toggled.connect(self.subject_toggled.emit)
         self._model = QComboBox()
         self._model.setToolTip(
-            "Subject model. A model marked download is saved into the models folder "
-            "when subject scoring is turned on."
+            "Subject model. Choosing one turns subject scoring on. "
+            "Rescan saves a model marked download into the models folder and scores with it."
         )
         self._model_label = QLabel()
         self._model_label.setObjectName("hint")
@@ -215,7 +215,9 @@ class ControlPanel(QGroupBox):
         if model_is_ready(path):
             self._model_label.setText(f"{option.filename} is in the models folder.")
             return
-        self._model_label.setText("Downloads into the models folder when subject scoring is on.")
+        self._model_label.setText(
+            "Choosing this model turns subject scoring on. Rescan downloads it if it is not in the models folder."
+        )
 
     def _slider(self, value: int, tip: str) -> QSlider:
         slider = QSlider(Qt.Orientation.Horizontal)

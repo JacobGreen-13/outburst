@@ -82,6 +82,22 @@ QPushButton:pressed {
 QPushButton:disabled {
     color: #777777;
 }
+QPushButton#keeperButton, QPushButton#rejectButton {
+    min-height: 36px;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 16px;
+}
+QPushButton#keeperButton:checked {
+    background: #1f6b45;
+    color: #f4fff8;
+    border: 1px solid #7dffc3;
+}
+QPushButton#rejectButton:checked {
+    background: #6b2a2a;
+    color: #fff5f5;
+    border: 1px solid #e06c6c;
+}
 QSlider::groove:horizontal {
     height: 4px;
     background: #3a3a3a;
