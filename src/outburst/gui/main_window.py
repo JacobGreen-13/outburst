@@ -61,10 +61,13 @@ _WELCOME = (
     "Use Mark as keeper under the preview to choose what Save keepers writes. "
     "Original files stay untouched."
 )
-_SINGLES_HIDDEN = (
-    "Every group in this folder is a single frame.\n\n"
-    "Turn on Show single-frame bursts to review them."
-)
+
+
+def _short_bursts_hidden(minimum: int) -> str:
+    return (
+        f"Every burst in this folder has fewer than {minimum} frames.\n\n"
+        "Lower Minimum frames to review them."
+    )
 
 
 class MainWindow(QMainWindow):
@@ -253,7 +256,7 @@ class MainWindow(QMainWindow):
         self.controls.weights_changed.connect(self._apply_weights)
         self.controls.subject_toggled.connect(self._on_subject_toggled)
         self.controls.model_changed.connect(self._on_model_changed)
-        self.controls.singles_toggled.connect(self._on_singles_toggled)
+        self.controls.minimum_changed.connect(self._on_minimum_changed)
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -586,7 +589,7 @@ class MainWindow(QMainWindow):
         self.controls.set_model_enabled(True)
         self._sync_actions()
 
-    def _on_singles_toggled(self, _checked: bool) -> None:
+    def _on_minimum_changed(self, _value: int) -> None:
         self._refresh_burst_list(prefer_path=self._selected_path())
         if self._library is not None:
             self.statusBar().showMessage(self._status_summary())
@@ -594,7 +597,7 @@ class MainWindow(QMainWindow):
     def _visible_bursts(self) -> tuple[Burst, ...]:
         if self._library is None:
             return ()
-        return visible_bursts(self._library.bursts, show_singles=self.controls.show_singles())
+        return visible_bursts(self._library.bursts, minimum_frames=self.controls.minimum_frames())
 
     def _status_summary(self) -> str:
         library = self._library
@@ -605,8 +608,10 @@ class MainWindow(QMainWindow):
         noun = "burst" if shown == 1 else "bursts"
         message = f"{len(library.analyses)} files · {shown} {noun}"
         if hidden:
-            frame_noun = "single frame" if hidden == 1 else "single frames"
-            message += f" · {hidden} {frame_noun} hidden"
+            hidden_noun = "burst" if hidden == 1 else "bursts"
+            message += (
+                f" · {hidden} {hidden_noun} under {self.controls.minimum_frames()} frames hidden"
+            )
         if library.warnings:
             message += f" · {len(library.warnings)} notes"
         return message
@@ -640,7 +645,7 @@ class MainWindow(QMainWindow):
         self._frame_index = 0
         self.filmstrip.set_cards([])
         if library.bursts:
-            self.viewer.set_placeholder(_SINGLES_HIDDEN)
+            self.viewer.set_placeholder(_short_bursts_hidden(self.controls.minimum_frames()))
         else:
             self.viewer.set_placeholder(_WELCOME)
 
@@ -799,11 +804,17 @@ class MainWindow(QMainWindow):
         request = ExportKeepersDialog.ask(self, self._folder)
         if request is None:
             return
-        choices = choose_keepers(self._library.bursts, self._by_path, self._decisions)
+        minimum = self.controls.minimum_frames()
+        choices = choose_keepers(
+            self._library.bursts,
+            self._by_path,
+            self._decisions,
+            minimum_frames=minimum,
+        )
         if not choices:
             self._notify(
                 "No keepers to save",
-                "Mark a keeper in a burst of two or more frames. One-frame bursts are not saved.",
+                f"Mark a keeper in a burst of at least {minimum} frames. Shorter bursts are hidden and are not saved.",
                 "info",
             )
             return
@@ -829,7 +840,12 @@ class MainWindow(QMainWindow):
         if not chosen:
             return
         try:
-            json_path, csv_path = write_reports(self._library, self._decisions, Path(chosen))
+            json_path, csv_path = write_reports(
+                self._library,
+                self._decisions,
+                Path(chosen),
+                minimum_frames=self.controls.minimum_frames(),
+            )
         except OSError as exc:
             self._notify("Report failed", str(exc), "warning")
             return
@@ -845,7 +861,11 @@ class MainWindow(QMainWindow):
             f"Write sidecars next to {count} files?\n\nOriginal RAW and JPEG files stay unchanged.",
         ):
             return
-        written, warnings = write_library_sidecars(self._library, self._decisions)
+        written, warnings = write_library_sidecars(
+            self._library,
+            self._decisions,
+            minimum_frames=self.controls.minimum_frames(),
+        )
         message = f"Wrote {len(written)} sidecar(s)."
         if warnings:
             message += " " + warnings[0]
@@ -1000,7 +1020,7 @@ class MainWindow(QMainWindow):
         self.controls.set_sharpness_percent(_as_int(settings.value("sharpness"), 75))
         self.controls.set_center_percent(_as_int(settings.value("center_mix"), 65))
         self.controls.set_recursive(_as_bool(settings.value("recursive"), False))
-        self.controls.set_show_singles(_as_bool(settings.value("show_single_bursts"), False))
+        self.controls.set_minimum_frames(_saved_minimum_frames(settings))
         self.controls.set_subject_checked(_as_bool(settings.value("prefer_subject"), False))
         folder = settings.value("last_folder", "")
         if folder:
@@ -1014,7 +1034,7 @@ class MainWindow(QMainWindow):
         settings.setValue("sharpness", self.controls.sharpness_percent())
         settings.setValue("center_mix", self.controls.center_percent())
         settings.setValue("recursive", self.controls.recursive())
-        settings.setValue("show_single_bursts", self.controls.show_singles())
+        settings.setValue("minimum_frames", self.controls.minimum_frames())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:
@@ -1039,6 +1059,15 @@ def _as_int(value: object, default: int) -> int:
         return int(float(value))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return default
+
+
+def _saved_minimum_frames(settings: QSettings) -> int:
+    stored = settings.value("minimum_frames")
+    if stored not in (None, ""):
+        return max(1, _as_int(stored, 2))
+    if _as_bool(settings.value("show_single_bursts"), False):
+        return 1
+    return 2
 
 
 def _saved_model_id(settings: QSettings) -> str:

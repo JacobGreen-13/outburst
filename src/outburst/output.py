@@ -47,17 +47,19 @@ def choose_keepers(
     bursts: Sequence[Burst],
     by_path: Mapping[Path, FrameAnalysis],
     decisions: Mapping[Path, str],
+    *,
+    minimum_frames: int = 2,
 ) -> list[KeeperChoice]:
-    """Return the frames marked as keepers.
+    """Return the frames marked as keepers in bursts that meet ``minimum_frames``.
 
-    A frame is saved only when its decision is ``keep`` and it belongs to a
-    burst of at least two frames. A one-frame burst is ignored. Within a burst,
-    marked frames are ordered with the strongest score first.
+    A shorter burst is hidden in the review list and is not saved. Within a
+    burst, marked frames are ordered with the strongest score first.
     """
 
+    minimum = max(1, int(minimum_frames))
     chosen: list[KeeperChoice] = []
     for burst in bursts:
-        if burst.count < 2:
+        if burst.count < minimum:
             continue
         marked = [frame for frame in burst.frames if decisions.get(frame.path) == "keep"]
         for frame in sorted(marked, key=lambda item: _rank(item, by_path)):
@@ -108,11 +110,21 @@ def export_keepers(
 def write_library_sidecars(
     library: Library,
     decisions: Mapping[Path, str],
+    *,
+    minimum_frames: int = 2,
 ) -> tuple[list[Path], list[str]]:
     """Write one XMP sidecar per frame. Returns written paths and warning strings."""
 
     by_path = {item.frame.path: item for item in library.analyses}
-    keepers = {choice.path for choice in choose_keepers(library.bursts, by_path, decisions)}
+    keepers = {
+        choice.path
+        for choice in choose_keepers(
+            library.bursts,
+            by_path,
+            decisions,
+            minimum_frames=minimum_frames,
+        )
+    }
     recommended: set[Path] = set()
     burst_of: dict[Path, str] = {}
     for burst in library.bursts:
@@ -207,11 +219,13 @@ def write_reports(
     library: Library,
     decisions: Mapping[Path, str],
     dest_dir: Path,
+    *,
+    minimum_frames: int = 2,
 ) -> tuple[Path, Path]:
     """Write `outburst-report.json` and `outburst-report.csv`."""
 
     dest_dir.mkdir(parents=True, exist_ok=True)
-    report = build_report(library, decisions)
+    report = build_report(library, decisions, minimum_frames=minimum_frames)
     json_path = dest_dir / "outburst-report.json"
     csv_path = dest_dir / "outburst-report.csv"
     json_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -224,9 +238,14 @@ def write_reports(
     return json_path, csv_path
 
 
-def build_report(library: Library, decisions: Mapping[Path, str]) -> dict[str, object]:
+def build_report(
+    library: Library,
+    decisions: Mapping[Path, str],
+    *,
+    minimum_frames: int = 2,
+) -> dict[str, object]:
     by_path = {item.frame.path: item for item in library.analyses}
-    keepers = choose_keepers(library.bursts, by_path, decisions)
+    keepers = choose_keepers(library.bursts, by_path, decisions, minimum_frames=minimum_frames)
     keeper_paths = {choice.path for choice in keepers}
     frames: list[dict[str, object]] = []
     bursts_out: list[dict[str, object]] = []

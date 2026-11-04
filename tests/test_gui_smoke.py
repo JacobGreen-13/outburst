@@ -68,7 +68,22 @@ def test_window_reviews_a_burst(qt_app, tmp_path: Path) -> None:
     qt_app.processEvents()
 
 
-def test_single_frame_bursts_stay_hidden_until_requested(qt_app, tmp_path: Path) -> None:
+def test_old_show_singles_setting_lowers_the_minimum(qt_app, tmp_path: Path) -> None:
+    from PySide6.QtCore import QSettings
+
+    from outburst.gui.main_window import MainWindow
+
+    _isolate_settings(tmp_path / "settings")
+    settings = QSettings("Outburst", "Outburst")
+    settings.setValue("show_single_bursts", True)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    qt_app.processEvents()
+    assert window.controls.minimum_frames() == 1
+    window.close()
+    qt_app.processEvents()
+
+
+def test_bursts_shorter_than_the_minimum_stay_hidden(qt_app, tmp_path: Path) -> None:
     from datetime import datetime, timedelta
 
     from outburst.gui.main_window import MainWindow
@@ -89,12 +104,12 @@ def test_single_frame_bursts_stay_hidden_until_requested(qt_app, tmp_path: Path)
     window.show()
     window.present(library)
     qt_app.processEvents()
-    assert window.controls.show_singles() is False
+    assert window.controls.minimum_frames() == 2
     assert window.burst_list.count() == 1
-    assert "1 single frame hidden" in window.statusBar().currentMessage()
+    assert "1 burst under 2 frames hidden" in window.statusBar().currentMessage()
     assert "a.jpg" in window.viewer.info.text()
 
-    window.controls._singles.setChecked(True)
+    window.controls._minimum.setValue(1)
     qt_app.processEvents()
     assert window.burst_list.count() == 2
     assert "hidden" not in window.statusBar().currentMessage()
@@ -103,18 +118,24 @@ def test_single_frame_bursts_stay_hidden_until_requested(qt_app, tmp_path: Path)
     qt_app.processEvents()
     assert "c.jpg" in window.viewer.info.text()
 
-    window.controls._singles.setChecked(False)
+    window.controls._minimum.setValue(2)
     qt_app.processEvents()
     assert window.burst_list.count() == 1
     assert "a.jpg" in window.viewer.info.text()
+
+    window.controls._minimum.setValue(3)
+    qt_app.processEvents()
+    assert window.burst_list.count() == 0
+    assert "fewer than 3 frames" in window.viewer.preview.text()
 
     solo = tmp_path / "solo"
     solo.mkdir()
     write_jpeg(solo / "only.jpg", sharp_frame(seed=4), base)
     window.present(analyze_folder(solo, cache_dir=tmp_path / "cache2", threshold=1.0))
     qt_app.processEvents()
+    assert window.controls.minimum_frames() == 3
     assert window.burst_list.count() == 0
-    assert "Show single-frame bursts" in window.viewer.preview.text()
+    assert "Minimum frames" in window.viewer.preview.text()
     window.close()
     qt_app.processEvents()
 

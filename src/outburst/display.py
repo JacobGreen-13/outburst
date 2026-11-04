@@ -14,12 +14,11 @@ from outburst.models import Burst, FrameAnalysis, Metrics, Weights
 from outburst.scoring import effective_sharpness, recommended_offset, score_percent
 
 
-def visible_bursts(bursts: Sequence[Burst], *, show_singles: bool) -> tuple[Burst, ...]:
-    """Bursts to list. A one-frame burst stays hidden until the photographer asks for it."""
+def visible_bursts(bursts: Sequence[Burst], *, minimum_frames: int) -> tuple[Burst, ...]:
+    """Bursts long enough to list. Shorter bursts stay hidden and are not saved."""
 
-    if show_singles:
-        return tuple(bursts)
-    return tuple(burst for burst in bursts if burst.count > 1)
+    minimum = max(1, int(minimum_frames))
+    return tuple(burst for burst in bursts if burst.count >= minimum)
 
 
 def human_burst_name(burst_id: str) -> str:
