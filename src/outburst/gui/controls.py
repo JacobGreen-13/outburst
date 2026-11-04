@@ -5,23 +5,31 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
+    QSizePolicy,
     QSlider,
     QVBoxLayout,
 )
 
 from outburst.models import Weights
+from outburst.subject import (
+    DEFAULT_MODEL_ID,
+    MODEL_OPTIONS,
+    model_is_ready,
+    model_path,
+    models_dir,
+    option_by_id,
+)
 
 
 class ControlPanel(QGroupBox):
     threshold_changed = Signal(float)
     weights_changed = Signal()
     subject_toggled = Signal(bool)
-    choose_model = Signal()
+    model_changed = Signal(str)
 
     def __init__(self) -> None:
         super().__init__("Scoring")
@@ -47,15 +55,21 @@ class ControlPanel(QGroupBox):
         self._recursive = QCheckBox("Include subfolders on the next scan")
         self._subject = QCheckBox("Subject-aware sharpness")
         self._subject.setToolTip(
-            "Score sharpness inside a detected animal. Requires a local YOLO .pt file. "
-            "Outburst does not download one."
+            "Score sharpness inside a detected animal. "
+            "The chosen model is downloaded into the models folder if it is not there yet."
         )
         self._subject.toggled.connect(self.subject_toggled.emit)
-        self._model_button = QPushButton("Choose model…")
-        self._model_button.clicked.connect(self.choose_model.emit)
-        self._model_label = QLabel("No model selected")
+        self._model = QComboBox()
+        self._model.setToolTip(
+            "Subject model. A model marked download is saved into the models folder "
+            "when subject scoring is turned on."
+        )
+        self._model_label = QLabel()
         self._model_label.setObjectName("hint")
         self._model_label.setWordWrap(True)
+        self._model_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self._rebuild_model_items()
+        self._model.currentIndexChanged.connect(lambda index: self._emit_model(int(index)))
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Burst gap"))
@@ -66,14 +80,12 @@ class ControlPanel(QGroupBox):
         layout.addWidget(self._center)
         layout.addWidget(self._recursive)
         layout.addWidget(self._subject)
-        row = QHBoxLayout()
-        row.addWidget(self._model_button)
-        row.addStretch(1)
-        layout.addLayout(row)
+        layout.addWidget(self._model)
         layout.addWidget(self._model_label)
         hint = QLabel("Sharpness and exposure update the ranking immediately.")
         hint.setObjectName("hint")
         hint.setWordWrap(True)
+        hint.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         layout.addWidget(hint)
         self._refresh_labels()
 
@@ -126,8 +138,69 @@ class ControlPanel(QGroupBox):
         self._subject.setChecked(checked)
         self._subject.blockSignals(False)
 
-    def set_model_name(self, name: str) -> None:
-        self._model_label.setText(name)
+    def model_id(self) -> str:
+        value = self._model.currentData()
+        if isinstance(value, str) and value:
+            return value
+        return DEFAULT_MODEL_ID
+
+    def model_ids(self) -> tuple[str, ...]:
+        return tuple(
+            str(self._model.itemData(index))
+            for index in range(self._model.count())
+            if self._model.itemData(index)
+        )
+
+    def set_model_id(self, model_id: str) -> None:
+        index = self._model.findData(model_id)
+        if index < 0:
+            return
+        self._model.blockSignals(True)
+        self._model.setCurrentIndex(index)
+        self._model.blockSignals(False)
+        self._update_model_hint()
+
+    def set_model_enabled(self, enabled: bool) -> None:
+        self._model.setEnabled(enabled)
+
+    def refresh_models(self) -> None:
+        self._rebuild_model_items()
+
+    def _emit_model(self, _index: int) -> None:
+        self._update_model_hint()
+        self.model_changed.emit(self.model_id())
+
+    def _rebuild_model_items(self) -> None:
+        current = self.model_id() if self._model.count() else DEFAULT_MODEL_ID
+        directory = models_dir()
+        self._model.blockSignals(True)
+        self._model.clear()
+        for option in MODEL_OPTIONS:
+            ready = model_is_ready(model_path(option, directory))
+            state = "ready" if ready else "download"
+            self._model.addItem(f"{option.label}  ·  {state}", option.id)
+            self._model.setItemData(
+                self._model.count() - 1,
+                f"{option.note}\n{directory / option.filename}",
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        index = self._model.findData(current)
+        self._model.setCurrentIndex(index if index >= 0 else 0)
+        self._model.blockSignals(False)
+        self._update_model_hint()
+
+    def _update_model_hint(self) -> None:
+        option = option_by_id(self.model_id())
+        directory = models_dir()
+        if option is None:
+            self._model_label.setText(str(directory))
+            return
+        path = model_path(option, directory)
+        self._model_label.setToolTip(str(path))
+        if model_is_ready(path):
+            self._model_label.setText(f"{option.filename} is in the models folder.")
+            return
+        self._model_label.setText("Downloads into the models folder when subject scoring is on.")
 
     def _slider(self, value: int, tip: str) -> QSlider:
         slider = QSlider(Qt.Orientation.Horizontal)
