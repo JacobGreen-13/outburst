@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "outburst"
+dynamic = ["version"]
+description = "Local, offline burst culling for wildlife and nature photographers"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Outburst contributors" }]
+keywords = ["photography", "raw", "culling", "wildlife", "burst", "pyside6"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics :: Viewers",
+]
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    "PySide6>=6.6",
+    "rawpy>=0.21",
+]
+
+[project.optional-dependencies]
+subject = ["ultralytics>=8.3"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+outburst = "outburst.main:main"
+
+[project.gui-scripts]
+outburst-gui = "outburst.main:main"
+
+[tool.hatch.version]
+path = "src/outburst/__init__.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
