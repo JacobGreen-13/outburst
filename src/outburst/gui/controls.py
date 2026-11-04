@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QSizePolicy,
     QSlider,
+    QSpinBox,
     QVBoxLayout,
 )
 
@@ -30,7 +31,7 @@ class ControlPanel(QGroupBox):
     weights_changed = Signal()
     subject_toggled = Signal(bool)
     model_changed = Signal(str)
-    singles_toggled = Signal(bool)
+    minimum_changed = Signal(int)
 
     def __init__(self) -> None:
         super().__init__("Scoring")
@@ -53,11 +54,14 @@ class ControlPanel(QGroupBox):
         self._sharpness.valueChanged.connect(self._refresh_labels)
         self._center.valueChanged.connect(self._refresh_labels)
 
-        self._singles = QCheckBox("Show single-frame bursts")
-        self._singles.setToolTip(
-            "A burst with only one frame stays off the list until this is on."
+        self._minimum = QSpinBox()
+        self._minimum.setRange(1, 99)
+        self._minimum.setValue(2)
+        self._minimum.setSuffix(" frames")
+        self._minimum.setToolTip(
+            "Bursts with fewer frames than this stay off the list and are left out when you save keepers."
         )
-        self._singles.toggled.connect(self.singles_toggled.emit)
+        self._minimum.valueChanged.connect(lambda value: self.minimum_changed.emit(int(value)))
         self._recursive = QCheckBox("Include subfolders on the next scan")
         self._subject = QCheckBox("Subject-aware sharpness")
         self._subject.setToolTip(
@@ -84,7 +88,8 @@ class ControlPanel(QGroupBox):
         layout.addWidget(self._sharpness)
         layout.addWidget(self._center_label)
         layout.addWidget(self._center)
-        layout.addWidget(self._singles)
+        layout.addWidget(QLabel("Minimum frames"))
+        layout.addWidget(self._minimum)
         layout.addWidget(self._recursive)
         layout.addWidget(self._subject)
         layout.addWidget(self._model)
@@ -105,13 +110,13 @@ class ControlPanel(QGroupBox):
     def center_percent(self) -> int:
         return int(self._center.value())
 
-    def show_singles(self) -> bool:
-        return self._singles.isChecked()
+    def minimum_frames(self) -> int:
+        return int(self._minimum.value())
 
-    def set_show_singles(self, checked: bool) -> None:
-        self._singles.blockSignals(True)
-        self._singles.setChecked(checked)
-        self._singles.blockSignals(False)
+    def set_minimum_frames(self, value: int) -> None:
+        self._minimum.blockSignals(True)
+        self._minimum.setValue(max(1, int(value)))
+        self._minimum.blockSignals(False)
 
     def recursive(self) -> bool:
         return self._recursive.isChecked()

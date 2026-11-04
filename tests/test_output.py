@@ -119,8 +119,11 @@ def test_choose_keepers_and_export_modes(tmp_path: Path) -> None:
     by_path[third] = analysis_c
     single = Burst("burst-002", (frame_c,))
     assert choose_keepers([single], by_path, {third: "keep"}) == []
+    shown = choose_keepers([single], by_path, {third: "keep"}, minimum_frames=1)
+    assert [choice.path for choice in shown] == [third]
     mixed = choose_keepers([burst, single], by_path, {first: "keep", third: "keep"})
     assert [choice.path for choice in mixed] == [first]
+    assert choose_keepers([burst], by_path, {first: "keep"}, minimum_frames=3) == []
 
     copied = export_keepers([second], tmp_path / "keepers", "copy")
     assert copied[0].method == "copy"

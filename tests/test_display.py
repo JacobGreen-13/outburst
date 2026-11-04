@@ -9,7 +9,7 @@ from outburst.display import burst_list_text, frame_info_html, thumb_badge, visi
 from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
 
 
-def test_single_frame_bursts_are_hidden_until_requested() -> None:
+def test_bursts_shorter_than_the_minimum_stay_hidden() -> None:
     when = datetime(2024, 6, 1, 12, 0, 0)
     pair = Burst(
         "burst-001",
@@ -19,8 +19,9 @@ def test_single_frame_bursts_are_hidden_until_requested() -> None:
         ),
     )
     single = Burst("burst-002", (Frame(Path("c.jpg"), "jpeg", when, "exif", None, 1, 1),))
-    assert visible_bursts([pair, single], show_singles=False) == (pair,)
-    assert visible_bursts([pair, single], show_singles=True) == (pair, single)
+    assert visible_bursts([pair, single], minimum_frames=2) == (pair,)
+    assert visible_bursts([pair, single], minimum_frames=1) == (pair, single)
+    assert visible_bursts([pair, single], minimum_frames=3) == ()
 
 
 def test_html_escapes_filenames_and_marks_the_recommendation() -> None:
