@@ -142,9 +142,9 @@ This part is optional and stays off until you turn it on. The scoring panel has 
 pip install "outburst[subject]"
 ```
 
-Check **Subject-aware sharpness**. If the selected file is not already in the models folder, Outburst downloads it there and shows progress in the status bar. Cancel with Esc. When a bird or animal is found, sharpness is measured inside that box (with a small margin) and the box is drawn on the preview. If nothing is found, or the model cannot be loaded, Outburst keeps the normal full-frame score and tells you.
+Choose a model in the dropdown, or check **Subject-aware sharpness**, then press **Rescan**. That turns subject scoring on, downloads the weights into the models folder when the file is not there yet, and scores the open folder with that model. Progress shows in the status bar. Cancel with Esc. When a bird or animal is found, sharpness is measured inside that box (with a small margin) and the box is drawn on the preview. If nothing is found, or the model cannot be loaded, Outburst keeps the normal full-frame score and tells you.
 
-When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched the next time subject scoring needs it. Photos are still never uploaded.
+When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched when you choose it or when you rescan with subject scoring on. Photos are still never uploaded.
 
 On Apple Silicon the detector uses MPS when PyTorch provides it. On NVIDIA it uses CUDA. Otherwise it uses the CPU. The rest of Outburst does not need a GPU.
 
