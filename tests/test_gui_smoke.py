@@ -206,6 +206,79 @@ def test_rescan_forgets_cached_measurements_for_the_open_folder(
     qt_app.processEvents()
 
 
+def _ready_weights(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"PK" + b"0" * (1_000_000 - 2))
+
+
+def test_choosing_a_model_turns_subject_scoring_on_and_rescans_with_it(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    monkeypatch.setenv("OUTBURST_MODELS", str(tmp_path / "models"))
+    _ready_weights(tmp_path / "models" / "yolo11s.pt")
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    started: list[Path | None] = []
+
+    def spy_start(self: AnalyzeWorker) -> None:
+        started.append(self._subject_model)
+
+    monkeypatch.setattr(AnalyzeWorker, "start", spy_start)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.present(library)
+    qt_app.processEvents()
+    assert window.controls.prefer_subject() is False
+
+    window.controls._model.setCurrentIndex(window.controls._model.findData("yolo11s"))
+    qt_app.processEvents()
+
+    assert window.controls.prefer_subject() is True
+    assert window.controls.model_id() == "yolo11s"
+    assert [path.name if path is not None else None for path in started] == ["yolo11s.pt"]
+    window._scanning = False
+    window.close()
+    qt_app.processEvents()
+
+
+def test_rescan_downloads_the_selected_model_before_scoring(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    monkeypatch.setenv("OUTBURST_MODELS", str(tmp_path / "models"))
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    calls: list[tuple[str, bool, bool]] = []
+
+    def spy_download(self: MainWindow, then_scan: bool) -> None:
+        calls.append((self.controls.model_id(), then_scan, self.controls.prefer_subject()))
+
+    monkeypatch.setattr(MainWindow, "_begin_download", spy_download)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.present(library)
+    qt_app.processEvents()
+
+    window.controls._model.setCurrentIndex(window.controls._model.findData("yolov8s"))
+    qt_app.processEvents()
+    assert calls == [("yolov8s", True, True)]
+
+    calls.clear()
+    window.controls.set_model_id("yolo11n")
+    window.controls.set_subject_checked(True)
+    window.rescan()
+    qt_app.processEvents()
+    assert calls == [("yolo11n", True, True)]
+    window.close()
+    qt_app.processEvents()
+
+
 def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from outburst.gui.main_window import MainWindow
 

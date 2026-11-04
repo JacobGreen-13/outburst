@@ -84,6 +84,8 @@ class MainWindow(QMainWindow):
         self._download_worker: ModelFetchWorker | None = None
         self._downloading = False
         self._download_then_scan = False
+        self._download_model_id: str | None = None
+        self._replace_download = False
         self._burst_index = 0
         self._frame_index = 0
         self._warnings: tuple[str, ...] = ()
@@ -162,6 +164,9 @@ class MainWindow(QMainWindow):
             )
             return
         self._forget_folder_cache(folder)
+        if self.controls.prefer_subject() and not self._model_ready():
+            self._begin_download(then_scan=True)
+            return
         self.open_path(folder)
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
@@ -315,7 +320,9 @@ class MainWindow(QMainWindow):
         self.open_action.setIconText("Open")
         self.rescan_action.setIconText("Rescan")
         self.rescan_action.setToolTip(
-            "Clear cached measurements for this folder and scan it again. Keeper marks stay."
+            "Clear cached measurements for this folder and scan it again. "
+            "With subject scoring on, Rescan downloads the selected model if it is missing and scores with it. "
+            "Keeper marks stay."
         )
         self.export_action.setIconText("Save")
         self.export_action.setToolTip("Save the frames marked as keepers. Originals stay where they are.")
@@ -474,12 +481,13 @@ class MainWindow(QMainWindow):
         self._begin_download(then_scan=self._folder is not None)
 
     def _on_model_changed(self, _model_id: str) -> None:
-        if self._model_ready():
-            if self.controls.prefer_subject() and self._folder is not None:
-                self.rescan()
+        if not self.controls.prefer_subject():
+            self.controls.set_subject_checked(True)
+        if self._folder is None:
+            if not self._model_ready():
+                self._begin_download(then_scan=False)
             return
-        if self.controls.prefer_subject():
-            self._begin_download(then_scan=self._folder is not None)
+        self.rescan()
 
     def _model_ready(self) -> bool:
         option = option_by_id(self.controls.model_id())
@@ -500,13 +508,20 @@ class MainWindow(QMainWindow):
             if then_scan and self._folder is not None:
                 self._start_worker()
             return
-        if self._downloading:
-            self._download_then_scan = self._download_then_scan or then_scan
-            return
         option = option_by_id(self.controls.model_id())
         if option is None:
             return
+        if self._downloading:
+            if self._download_model_id == option.id:
+                self._download_then_scan = self._download_then_scan or then_scan
+                return
+            self._replace_download = True
+            self._download_then_scan = then_scan
+            if self._download_worker is not None:
+                self._download_worker.abort()
+            return
         self._download_then_scan = then_scan
+        self._download_model_id = option.id
         self._downloading = True
         worker = ModelFetchWorker(option.id, models_dir())
         worker.progress.connect(self._on_download_progress)
@@ -548,8 +563,13 @@ class MainWindow(QMainWindow):
             self._start_worker()
 
     def _on_download_cancelled(self) -> None:
+        replace = self._replace_download
         then_scan = self._download_then_scan
+        self._replace_download = False
         self._finish_download_ui()
+        if replace:
+            self._begin_download(then_scan)
+            return
         self.statusBar().showMessage("Model download cancelled")
         if self.controls.prefer_subject():
             self.controls.set_subject_checked(False)
