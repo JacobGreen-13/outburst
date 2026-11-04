@@ -44,6 +44,21 @@ def test_html_escapes_filenames_and_marks_the_recommendation() -> None:
     assert "<script>" not in html
     assert "&lt;b&gt;" in html
     assert "RECOMMENDED" in html
+    assert "KEEPER" not in html
+    kept = frame_info_html(
+        filename=frame.path.name,
+        frame_number=1,
+        frame_count=1,
+        burst_id="burst-004",
+        captured_at=frame.captured_at,
+        camera=frame.camera,
+        analysis=analysis,
+        weights=Weights(),
+        recommended=True,
+        decision="keep",
+        subject_active=False,
+    )
+    assert "KEEPER" in kept
     assert "Burst 4" in html
     assert "08:00:00.200" in html
 

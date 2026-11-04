@@ -57,7 +57,8 @@ log = logging.getLogger(__name__)
 _WELCOME = (
     "Open a folder of RAW bursts to start culling.\n\n"
     "Outburst groups frames shot close together, scores sharpness and exposure "
-    "from embedded previews, and highlights a recommended frame.\n\n"
+    "from embedded previews, and marks the recommended frame as a keeper.\n\n"
+    "Use Mark as keeper under the preview to choose what Save keepers writes. "
     "Original files stay untouched."
 )
 _SINGLES_HIDDEN = (
@@ -90,6 +91,8 @@ class MainWindow(QMainWindow):
         self._scan_id = 0
         self._scanning = False
         self._build_ui()
+        self.viewer.keeper_clicked.connect(lambda: self._toggle_decision("keep"))
+        self.viewer.reject_clicked.connect(lambda: self._toggle_decision("reject"))
         self._build_actions()
         self._load_settings()
         self._sync_actions()
@@ -121,6 +124,7 @@ class MainWindow(QMainWindow):
         self._by_path = {item.frame.path: item for item in library.analyses}
         self._warnings = library.warnings
         self._load_decisions()
+        self._mark_recommended_keepers()
         self._set_folder_label()
         self.controls.set_threshold(library.threshold)
         self._refresh_burst_list(prefer_path=None)
@@ -147,8 +151,18 @@ class MainWindow(QMainWindow):
         self._start_worker()
 
     def rescan(self) -> None:
-        if self._folder is not None:
-            self.open_path(self._folder)
+        if self._folder is None:
+            return
+        folder = self._folder
+        if not self._stop_worker():
+            self._notify(
+                "Still working",
+                "Outburst is still stopping the previous scan. Try again in a moment.",
+                "warning",
+            )
+            return
+        self._forget_folder_cache(folder)
+        self.open_path(folder)
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
         if event.type() == QEvent.Type.KeyPress and watched is QApplication.focusWidget():
@@ -284,19 +298,27 @@ class MainWindow(QMainWindow):
 
         self.open_action = self._action("Open folder…", self._open_folder_dialog, "Ctrl+O", open_icon)
         self.rescan_action = self._action("Rescan", self.rescan, "F5", refresh_icon)
-        self.export_action = self._action("Export keepers…", self._export_keepers, "Ctrl+E", save_icon)
+        self.export_action = self._action("Save keepers…", self._export_keepers, "Ctrl+E", save_icon)
         self.report_action = self._action("Export report…", self._export_report, "Ctrl+Shift+E")
         self.xmp_action = self._action("Write XMP sidecars…", self._write_xmp, "Ctrl+Shift+X")
         self.cancel_action = self._action("Cancel scan", self._cancel_scan, "Esc")
         quit_action = self._action("Quit", self.close, "Ctrl+Q")
         self.warnings_action = self._action("Scan notes", self._show_warnings)
         cache_action = self._action("Open cache folder", self._open_cache_folder)
+        self.clear_cache_action = self._action("Clear cache…", self._clear_cache)
+        self.clear_cache_action.setToolTip(
+            "Delete saved measurements and preview images for every folder. Keeper marks stay."
+        )
         shortcuts_action = self._action("Keyboard shortcuts", lambda: show_shortcuts(self))
         about_action = self._action("About Outburst", self._about)
 
         self.open_action.setIconText("Open")
         self.rescan_action.setIconText("Rescan")
-        self.export_action.setIconText("Keepers")
+        self.rescan_action.setToolTip(
+            "Clear cached measurements for this folder and scan it again. Keeper marks stay."
+        )
+        self.export_action.setIconText("Save")
+        self.export_action.setToolTip("Save the frames marked as keepers. Originals stay where they are.")
         self.report_action.setIconText("Report")
         self.xmp_action.setIconText("XMP")
         for action in (
@@ -314,6 +336,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(quit_action)
         view_menu.addAction(self.warnings_action)
         view_menu.addAction(cache_action)
+        view_menu.addAction(self.clear_cache_action)
         help_menu.addAction(shortcuts_action)
         help_menu.addAction(about_action)
         toolbar.addAction(self.cancel_action)
@@ -706,15 +729,24 @@ class MainWindow(QMainWindow):
             decision=decision,
             subject_active=show_subject,
         )
-        if decision == "reject":
+        keeper = decision == "keep"
+        rejected = decision == "reject"
+        if rejected:
             border = "#8a3a3a"
-        elif recommended:
+        elif keeper:
             border = "#3dbe86"
-        elif decision == "keep":
-            border = "#7dffc3"
+        elif recommended:
+            border = "#c9a227"
         else:
             border = "#2e2e2e"
-        self.viewer.set_frame(analysis.preview_path, box, html, border)
+        self.viewer.set_frame(
+            analysis.preview_path,
+            box,
+            html,
+            border,
+            keeper=keeper,
+            rejected=rejected,
+        )
 
     def _thumbs(self) -> list[Thumb]:
         burst = self._current_burst()
@@ -749,15 +781,19 @@ class MainWindow(QMainWindow):
             return
         choices = choose_keepers(self._library.bursts, self._by_path, self._decisions)
         if not choices:
-            self._notify("Nothing to export", "Every burst is rejected, or there is nothing to cull.", "info")
+            self._notify(
+                "No keepers marked",
+                "Mark at least one frame as a keeper, then press Save keepers.",
+                "info",
+            )
             return
         try:
             results = export_keepers([choice.path for choice in choices], request.folder, request.mode)
         except OSError as exc:
-            self._notify("Export failed", str(exc), "warning")
+            self._notify("Save failed", str(exc), "warning")
             return
         notes = [result.note for result in results if result.note]
-        message = f"Exported {len(results)} keeper(s) to {request.folder}"
+        message = f"Saved {len(results)} keeper(s) to {request.folder}"
         if notes:
             message += " " + notes[0]
         self.statusBar().showMessage(message)
@@ -803,6 +839,56 @@ class MainWindow(QMainWindow):
 
     def _open_cache_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._cache_dir)))
+
+    def _clear_cache(self) -> None:
+        if self._scanning or self._downloading:
+            self._notify("Scan in progress", "Cancel the scan before clearing the cache.", "warning")
+            return
+        if not ask(
+            self,
+            "Clear cache",
+            "Remove saved measurements and preview images for every folder?\n\n"
+            "Keeper and reject marks stay. If a folder is open, Outburst measures it again.",
+        ):
+            return
+        try:
+            with Cache(self._cache_dir) as cache:
+                removed = cache.clear()
+        except OSError as exc:
+            self._notify("Could not clear the cache", str(exc), "warning")
+            return
+        self.statusBar().showMessage(f"Cleared cached measurements for {removed} files")
+        if self._folder is not None:
+            self.rescan()
+
+    def _forget_folder_cache(self, folder: Path) -> int:
+        try:
+            with Cache(self._cache_dir) as cache:
+                return cache.forget_folder(folder)
+        except OSError as exc:
+            log.warning("Could not clear cached measurements for %s: %s", folder, exc)
+            self._notify(
+                "Could not clear the cache",
+                f"Outburst will rescan, but some saved measurements may be reused. {exc}",
+                "warning",
+            )
+            return 0
+
+    def _mark_recommended_keepers(self) -> None:
+        """Mark the recommended frame when a burst does not already have a keeper."""
+
+        if self._library is None:
+            return
+        for burst in self._library.bursts:
+            if not burst.frames:
+                continue
+            if any(self._decisions.get(frame.path) == "keep" for frame in burst.frames):
+                continue
+            frame = burst.frames[recommended_offset(burst.frames, self._by_path)]
+            if self._decisions.get(frame.path) == "reject":
+                continue
+            self._decisions[frame.path] = "keep"
+            self._save_decision(frame.path, "keep")
 
     def _about(self) -> None:
         if os.environ.get("OUTBURST_HEADLESS") == "1":

@@ -83,3 +83,53 @@ def test_missing_preview_file_is_a_cache_miss(tmp_path: Path) -> None:
     preview.unlink()
     assert cache.get(photo, 1, 1, "") is None
     cache.close()
+
+
+def _put(cache: Cache, photo: Path, preview_name: str) -> tuple[Path, Path]:
+    preview = cache.directory / "previews" / preview_name
+    thumb = cache.directory / "thumbs" / preview_name
+    preview.write_bytes(b"preview")
+    thumb.write_bytes(b"thumb")
+    cache.put(
+        photo,
+        10,
+        20,
+        "",
+        captured_at=None,
+        timestamp_source="missing",
+        camera=None,
+        metrics=_metrics(),
+        preview_path=preview,
+        thumb_path=thumb,
+    )
+    return preview, thumb
+
+
+def test_forget_folder_drops_measurements_and_keeps_decisions(tmp_path: Path) -> None:
+    cache = Cache(tmp_path)
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    inside = folder / "bird.jpg"
+    outside = tmp_path / "photos-extra" / "other.jpg"
+    outside.parent.mkdir()
+    inside_preview, inside_thumb = _put(cache, inside, "inside.jpg")
+    outside_preview, _outside_thumb = _put(cache, outside, "outside.jpg")
+    cache.set_decision(inside, "keep")
+
+    assert cache.forget_folder(folder) == 1
+    assert cache.get(inside, 10, 20, "") is None
+    assert not inside_preview.exists()
+    assert not inside_thumb.exists()
+    assert cache.get(outside, 10, 20, "") is not None
+    assert outside_preview.exists()
+    assert cache.decisions_for([inside])[inside] == "keep"
+    assert cache.forget_folder(folder) == 0
+
+    orphan = cache.directory / "previews" / "orphan.jpg"
+    orphan.write_bytes(b"orphan")
+    assert cache.clear() == 1
+    assert cache.get(outside, 10, 20, "") is None
+    assert not outside_preview.exists()
+    assert not orphan.exists()
+    assert cache.decisions_for([inside])[inside] == "keep"
+    cache.close()
