@@ -59,7 +59,7 @@ The window shows `composite * 100` as a whole number. The recommended frame is t
 
 ## Cache and decisions
 
-The database lives in the user cache directory (`~/Library/Caches/Outburst` on macOS, `%LOCALAPPDATA%\Outburst\Cache` on Windows, `$XDG_CACHE_HOME/outburst` or `~/.cache/outburst` on Linux). Keeper and reject marks are rows in the same database, keyed by the photograph's path. They survive a restart and a cache clear. They are not written into the photograph.
+The database lives in the user cache directory (`~/Library/Caches/Outburst` on macOS, `%LOCALAPPDATA%\Outburst\Cache` on Windows, `$XDG_CACHE_HOME/outburst` or `~/.cache/outburst` on Linux). Keeper and reject marks are rows in the same database, keyed by the photograph's path. A keep row also records whether Outburst chose it (`auto`) or the photographer did (`user`). Rows written before that column existed are treated as the photographer's marks. Decisions survive a restart and a cache clear. They are not written into the photograph.
 
 `Cache.forget_folder` deletes measurement rows and their preview files for paths inside one folder. **Rescan** calls it before reading that folder again. `Cache.clear` does the same for every folder. Neither call deletes decision rows.
 
@@ -78,7 +78,7 @@ Photograph files are opened for reading. Export uses `shutil.copy2` or `os.link`
 
 ## Window
 
-`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides bursts shorter than **Minimum frames** (2 by default). When a library is shown, each burst that has no keeper yet gets its recommended frame marked keep. **Save keepers** writes marked frames from the bursts that are showing and skips the hidden shorter ones. The preview has **Mark as keeper** and **Reject** buttons besides the A and X keys. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
+`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides bursts shorter than **Minimum frames** (2 by default). When a library is shown, each burst that has no keeper yet gets its recommended frame marked keep, stored as `auto`. Changing the burst gap deletes those automatic keeps, leaves `user` keeps, and marks the best frame of each regrouped burst as `auto` unless that frame is rejected or already a user keep. **Save keepers** writes marked frames from the bursts that are showing and skips the hidden shorter ones. The preview has **Mark as keeper** and **Reject** buttons besides the A and X keys. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
 
 ## Subject detection
 

@@ -164,7 +164,9 @@ def test_recommended_frame_starts_marked_and_save_uses_that_mark(qt_app, tmp_pat
     recommended = burst.frames[recommended_offset(burst.frames, {item.frame.path: item for item in library.analyses})]
     assert recommended.path == written["sharp"]
     assert window._decisions[written["sharp"]] == "keep"
+    assert window._origins[written["sharp"]] == "auto"
     assert window._decisions[written["second_sharp"]] == "keep"
+    assert window._origins[written["second_sharp"]] == "auto"
     assert window.viewer.keeper_button.isChecked()
     assert window.viewer.keeper_button.text() == "Marked keeper"
     assert "KEEPER" in window.viewer.info.text()
@@ -183,7 +185,74 @@ def test_recommended_frame_starts_marked_and_save_uses_that_mark(qt_app, tmp_pat
     window.viewer.keeper_button.click()
     qt_app.processEvents()
     assert window._decisions[written["blur"]] == "keep"
+    assert window._origins[written["blur"]] == "user"
     assert window.viewer.keeper_button.isChecked()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_burst_gap_replaces_automatic_keepers_and_keeps_user_marks(qt_app, tmp_path: Path) -> None:
+    from outburst.cache import Cache
+    from outburst.gui.main_window import MainWindow
+    from outburst.output import choose_keepers
+    from outburst.pipeline import analyze_folder
+    from outburst.scoring import recommended_offset
+
+    _isolate_settings(tmp_path / "settings")
+    written = write_burst_folder(tmp_path / "photos")
+    cache_dir = tmp_path / "cache"
+    library = analyze_folder(written["folder"], cache_dir=cache_dir, threshold=1.0)
+    window = MainWindow(cache_dir=cache_dir)
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+
+    assert window._decisions[written["sharp"]] == "keep"
+    assert window._origins[written["sharp"]] == "auto"
+    assert window._decisions[written["second_sharp"]] == "keep"
+    assert window._origins[written["second_sharp"]] == "auto"
+    decisions = dict(window._decisions)
+    origins = dict(window._origins)
+    window._apply_weights()
+    assert window._decisions == decisions
+    assert window._origins == origins
+
+    window._toggle_decision("reject")
+    window._select_frame(1)
+    window._toggle_decision("keep")
+    qt_app.processEvents()
+    assert window._decisions[written["sharp"]] == "reject"
+    assert window._decisions[written["blur"]] == "keep"
+    assert window._origins[written["blur"]] == "user"
+
+    window.controls._threshold.setValue(10.0)
+    qt_app.processEvents()
+    assert window._library is not None
+    assert len(window._library.bursts) == 1
+    burst = window._library.bursts[0]
+    best = burst.frames[recommended_offset(burst.frames, window._by_path)]
+    assert window._decisions[written["sharp"]] == "reject"
+    assert window._decisions[written["blur"]] == "keep"
+    assert window._origins[written["blur"]] == "user"
+    if best.path == written["blur"]:
+        assert window._origins[best.path] == "user"
+    elif window._decisions.get(best.path) == "keep":
+        assert window._origins[best.path] == "auto"
+    else:
+        assert window._decisions[best.path] == "reject"
+    for path, origin in window._origins.items():
+        if origin == "auto":
+            assert path == best.path
+            assert window._decisions[path] == "keep"
+
+    saved = [choice.path for choice in choose_keepers(window._library.bursts, window._by_path, window._decisions)]
+    assert written["blur"] in saved
+    assert written["sharp"] not in saved
+    with Cache(cache_dir) as cache:
+        stored = cache.decision_origins([written["blur"], written["sharp"]])
+    assert stored[written["blur"]] == "user"
+    assert stored[written["sharp"]] == "user"
     window.close()
     qt_app.processEvents()
 
