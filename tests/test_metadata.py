@@ -88,6 +88,29 @@ def test_missing_clock_is_reported(tmp_path: Path) -> None:
     assert info.source == "missing"
 
 
+def test_exiftool_process_is_hidden_on_windows(monkeypatch) -> None:
+    from outburst import metadata
+
+    assert metadata._hidden_windows_kwargs() == {}
+
+    class StartupInfo:
+        def __init__(self) -> None:
+            self.dwFlags = 0
+            self.wShowWindow = None
+
+    monkeypatch.setattr(metadata.sys, "platform", "win32")
+    monkeypatch.setattr(metadata.subprocess, "STARTUPINFO", StartupInfo, raising=False)
+    monkeypatch.setattr(metadata.subprocess, "STARTF_USESHOWWINDOW", 0x1, raising=False)
+    monkeypatch.setattr(metadata.subprocess, "SW_HIDE", 0, raising=False)
+    monkeypatch.setattr(metadata.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    flags = metadata._hidden_windows_kwargs()
+    info = flags["startupinfo"]
+    assert isinstance(info, StartupInfo)
+    assert info.dwFlags & 0x1
+    assert info.wShowWindow == 0
+    assert flags["creationflags"] == 0x08000000
+
+
 def test_exiftool_json_is_preferred(monkeypatch, tmp_path: Path) -> None:
     path = (tmp_path / "a.jpg").resolve()
     path.write_bytes(b"not a photo")

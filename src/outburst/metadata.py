@@ -14,6 +14,7 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -194,6 +195,24 @@ def inject_exif(
     return jpeg[:2] + segment + jpeg[2:]
 
 
+def _hidden_windows_kwargs() -> dict[str, object]:
+    """Stop Windows from opening a console for each exiftool process.
+
+    A windowed app has no console to share, so each batch would otherwise
+    flash an exiftool command window and close it.
+    """
+
+    if sys.platform != "win32":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+    }
+
+
 def _read_with_exiftool(exiftool: str, paths: list[Path]) -> dict[Path, CaptureInfo]:
     found: dict[Path, CaptureInfo] = {}
     unique_names = len({path.name for path in paths}) == len(paths)
@@ -227,6 +246,7 @@ def _read_with_exiftool(exiftool: str, paths: list[Path]) -> dict[Path, CaptureI
             capture_output=True,
             check=False,
             timeout=180,
+            **_hidden_windows_kwargs(),
         )
         if completed.returncode not in (0, 1):
             log.warning(
