@@ -46,13 +46,17 @@ def _digest(path: Path) -> bytes:
 def test_xmp_does_not_touch_the_photograph(tmp_path: Path) -> None:
     photo = tmp_path / "IMG_0001.CR3"
     photo.write_bytes(b"original-raw-bytes")
+    partner = tmp_path / "IMG_0002.CR3"
+    partner.write_bytes(b"partner-raw-bytes")
     before = (_digest(photo), photo.stat().st_mtime_ns)
     frame, analysis = _frame(photo, 0.8)
-    library = _library(tmp_path, [(frame, analysis)])
+    partner_frame, partner_analysis = _frame(partner, 0.2)
+    library = _library(tmp_path, [(frame, analysis), (partner_frame, partner_analysis)])
     written, warnings = write_library_sidecars(library, {photo: "keep"})
     assert warnings == []
-    assert written == [photo.with_suffix(".xmp")]
-    text = written[0].read_text(encoding="utf-8")
+    sidecar = photo.with_suffix(".xmp")
+    assert sidecar in written
+    text = sidecar.read_text(encoding="utf-8")
     assert 'xmp:Rating="5"' in text
     assert "outburst:Score" in text
     assert "Outburst" in text
@@ -109,6 +113,14 @@ def test_choose_keepers_and_export_modes(tmp_path: Path) -> None:
     assert marked[0].reason == "marked"
     both = choose_keepers([burst], by_path, {first: "keep", second: "keep"})
     assert [choice.path for choice in both] == [second, first]
+    third = tmp_path / "c.jpg"
+    third.write_bytes(b"ccc")
+    frame_c, analysis_c = _frame(third, 0.5)
+    by_path[third] = analysis_c
+    single = Burst("burst-002", (frame_c,))
+    assert choose_keepers([single], by_path, {third: "keep"}) == []
+    mixed = choose_keepers([burst, single], by_path, {first: "keep", third: "keep"})
+    assert [choice.path for choice in mixed] == [first]
 
     copied = export_keepers([second], tmp_path / "keepers", "copy")
     assert copied[0].method == "copy"
