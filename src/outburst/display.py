@@ -5,12 +5,21 @@ Kept outside the Qt layer so the wording can be tested without a display.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from html import escape
 from pathlib import Path
 
 from outburst.models import Burst, FrameAnalysis, Metrics, Weights
 from outburst.scoring import effective_sharpness, recommended_offset, score_percent
+
+
+def visible_bursts(bursts: Sequence[Burst], *, show_singles: bool) -> tuple[Burst, ...]:
+    """Bursts to list. A one-frame burst stays hidden until the photographer asks for it."""
+
+    if show_singles:
+        return tuple(bursts)
+    return tuple(burst for burst in bursts if burst.count > 1)
 
 
 def human_burst_name(burst_id: str) -> str:
