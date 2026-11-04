@@ -802,8 +802,8 @@ class MainWindow(QMainWindow):
         choices = choose_keepers(self._library.bursts, self._by_path, self._decisions)
         if not choices:
             self._notify(
-                "No keepers marked",
-                "Mark at least one frame as a keeper, then press Save keepers.",
+                "No keepers to save",
+                "Mark a keeper in a burst of two or more frames. One-frame bursts are not saved.",
                 "info",
             )
             return
