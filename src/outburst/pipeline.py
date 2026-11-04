@@ -14,7 +14,7 @@ from pathlib import Path
 
 from outburst.cache import Cache, default_cache_dir
 from outburst.grouping import group_frames
-from outburst.metadata import exiftool_available, read_capture_info
+from outburst.metadata import read_capture_info, timestamp_reader_warning
 from outburst.models import Frame, FrameAnalysis, Library, Weights
 from outburst.preview import (
     PreviewError,
@@ -77,11 +77,9 @@ def analyze_folder(
         _report(progress, 0, 0, "No photographs found")
         return Library(folder, (), (), ("No RAW or JPEG files were found in that folder.",), threshold, weights, False)
 
-    if any(item.kind == "raw" for item in files) and not exiftool_available():
-        warnings.append(
-            "exiftool is not installed, so Outburst is using its built-in timestamp reader. "
-            "Install exiftool for the most reliable burst grouping, especially with CR3 files."
-        )
+    reader_note = timestamp_reader_warning(item.path.suffix for item in files if item.kind == "raw")
+    if reader_note:
+        warnings.append(reader_note)
 
     cache: Cache | None
     try:
