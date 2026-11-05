@@ -195,7 +195,7 @@ The model is birds only. It was trained on studio and Flickr-style bird photos, 
 
 When a burst has two or more frames with a rated eye, the sharpest of those eyes is the best frame and Outburst marks it as a keeper. A reject on that frame stays rejected. A keeper you already set stays yours. Other automatic keepers in that burst are cleared. A burst with fewer than two rated eyes uses the usual sharpness rank, and Outburst marks a keeper only when the burst does not already have one.
 
-The eye is drawn as an amber circle on the preview. Turning the checkbox off scans the folder again with the usual sharpness ranking.
+A detected eye is drawn on the preview as a gold ring labeled EYE. The info line says the eye was detected. The filmstrip card says EYE, and the burst row counts the eyes in that burst. The status bar counts every detected eye in the folder, including frames in bursts that are hidden because they are shorter than Minimum frames. Turning the checkbox off scans the folder again with the usual sharpness ranking.
 
 ## Apple Silicon
 

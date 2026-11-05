@@ -1,6 +1,6 @@
 """The review window can load a folder and move between frames.
 
-``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, automatic keepers, rescan, a blank preview while scoring, model download, zoom, filmstrip order, compare, stars, bird eye detection, and a save that stays disabled until the copy finishes.
+``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, automatic keepers, rescan, a blank preview while scoring, model download, zoom, filmstrip order, compare, stars, bird eye detection, a hidden single-frame folder that still reports detected eyes, and a save that stays disabled until the copy finishes.
 """
 
 from __future__ import annotations
@@ -664,9 +664,11 @@ def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
     assert window._decisions[sharp] == "keep"
     assert window._origins[sharp] == "auto"
     assert soft not in window._decisions
-    assert "Bird eye" in window.viewer.info.text()
-    assert "eye" in window.burst_list.item(0).text()
+    assert "Bird eye detected" in window.viewer.info.text()
+    assert "2 eyes" in window.burst_list.item(0).text()
     assert "bird eye detection" in window.statusBar().currentMessage()
+    assert "2 bird eyes" in window.statusBar().currentMessage()
+    assert any("EYE" in card.score_text for card in window._thumbs())
     assert window.viewer.keeper_button.isChecked()
 
     window._apply_decision(soft, "keep", origin="user")
@@ -698,6 +700,42 @@ def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
     assert window._decisions[soft] == "keep"
     assert window._origins[soft] == "user"
     window._scanning = False
+    window.close()
+    qt_app.processEvents()
+
+
+def test_hidden_single_frames_still_say_when_an_eye_was_found(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import datetime, timedelta
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.pipeline import analyze_folder
+    from tests.helpers import write_jpeg
+    from tests.test_eyes import PortraitEyeFinder, _portrait
+
+    _isolate_settings(tmp_path / "settings")
+    monkeypatch.setenv("OUTBURST_MODELS", str(tmp_path / "models"))
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    moment = datetime(2026, 6, 8, 7, 42, 0)
+    write_jpeg(folder / "heron.jpg", _portrait(36), moment)
+    write_jpeg(folder / "duck.jpg", _portrait(36, seed=2), moment + timedelta(seconds=62))
+    library = analyze_folder(
+        folder,
+        cache_dir=tmp_path / "cache",
+        threshold=1.0,
+        eye_scoring=True,
+        eye_finder=PortraitEyeFinder(),
+    )
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+    assert window.controls.minimum_frames() == 2
+    assert window.burst_list.count() == 0
+    assert "found an eye on 2 frames" in window.viewer.preview.text()
+    assert "2 bird eyes" in window.statusBar().currentMessage()
     window.close()
     qt_app.processEvents()
 
