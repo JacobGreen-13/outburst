@@ -35,6 +35,14 @@ class ThumbCard(QFrame):
     clicked = Signal(int, bool)
 
     def __init__(self, index: int, thumb: Thumb) -> None:
+        """
+        Build one filmstrip card from a thumbnail description.
+
+        Inputs: index, the shooting-order frame index this card represents; thumb, the title, score, badge, image path, and flags.
+        Output: no return value. The card shows the scaled thumbnail, or the text "No preview", and paints its border.
+        Uses: one frame in the filmstrip.
+        Limitations: the thumbnail is scaled to 164 by 108 from the embedded preview path. A null pixmap shows "No preview".
+        """
         super().__init__()
         self.index = index
         self._best = thumb.best
@@ -75,20 +83,52 @@ class ThumbCard(QFrame):
         self._apply_style()
 
     def mousePressEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        """
+        Turn a left click into a card signal, including Shift.
+
+        Inputs: event, the mouse press.
+        Output: no return value. A left click emits clicked with the frame index and whether Shift is held, then the base handler runs.
+        Uses: selecting a filmstrip frame, or Shift-click to compare it.
+        Limitations: only the left button emits the signal.
+        """
         if event.button() == Qt.MouseButton.LeftButton:
             shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             self.clicked.emit(self.index, shift)
         super().mousePressEvent(event)
 
     def set_selected(self, selected: bool) -> None:
+        """
+        Show or hide the selection border on this card.
+
+        Inputs: selected, whether this card is the current frame.
+        Output: no return value. The card border is redrawn.
+        Uses: the filmstrip selection.
+        Limitations: this updates the card only. The filmstrip scrolls the selected card into view.
+        """
         self._selected = selected
         self._apply_style()
 
     def set_compared(self, compared: bool) -> None:
+        """
+        Show or hide the compare border on this card.
+
+        Inputs: compared, whether this card is the other side of compare.
+        Output: no return value. The card border is redrawn.
+        Uses: the compare highlight in the filmstrip.
+        Limitations: a selected card keeps the selection color. The compare color is used when the card is not selected.
+        """
         self._compared = compared
         self._apply_style()
 
     def set_flags(self, *, best: bool, decision: str | None, badge: str, score_text: str) -> None:
+        """
+        Update the best, decision, badge, and score text without rebuilding the card.
+
+        Inputs: best; decision, "keep", "reject", or None; badge; score_text.
+        Output: no return value. The badge and score labels change and the border is redrawn.
+        Uses: refreshing filmstrip marks after a decision or a rescore.
+        Limitations: the thumbnail image and the title stay as they were.
+        """
         self._best = best
         self._decision = decision
         self.badge.setText(badge)
@@ -96,6 +136,14 @@ class ThumbCard(QFrame):
         self._apply_style()
 
     def _apply_style(self) -> None:
+        """
+        Paint the card border and label colors from its current flags.
+
+        Inputs: none.
+        Output: no return value. The frame stylesheet and the badge color are replaced.
+        Uses: the filmstrip card appearance.
+        Limitations: selection is green when the card is also the best frame and blue otherwise. Compare gold, reject red, and keeper green apply only when the card is not selected.
+        """
         if self._selected and self._best:
             color = "#7dffc3"
         elif self._selected:
@@ -127,12 +175,20 @@ class Filmstrip(QScrollArea):
     compare_chosen = Signal(int)
 
     def __init__(self) -> None:
+        """
+        Build an empty horizontal filmstrip.
+
+        Inputs: none.
+        Output: no return value. A scroll area with a trailing stretch is ready for cards.
+        Uses: the filmstrip under the preview.
+        Limitations: the vertical scrollbar stays off. The minimum height is 196 pixels, so extra frames scroll sideways.
+        """
         super().__init__()
         self.setObjectName("filmstrip")
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setMinimumHeight(214)
+        self.setMinimumHeight(196)
         self._inner = QWidget()
         self._layout = QHBoxLayout(self._inner)
         self._layout.setContentsMargins(8, 8, 8, 8)
@@ -142,6 +198,14 @@ class Filmstrip(QScrollArea):
         self._cards: list[ThumbCard] = []
 
     def set_cards(self, cards: list[Thumb]) -> None:
+        """
+        Replace the filmstrip with a new row of cards.
+
+        Inputs: cards, thumbnail descriptions in display order.
+        Output: no return value. Old cards are removed, new cards are inserted, and a selected card is scrolled into view.
+        Uses: showing one burst in the filmstrip.
+        Limitations: the cards are shown in the order given. Time is shooting order and Score puts the highest composite first with ties in shooting order; that order is chosen by the caller.
+        """
         self._clear()
         for thumb in cards:
             card = ThumbCard(thumb.frame_index, thumb)
@@ -153,6 +217,14 @@ class Filmstrip(QScrollArea):
             self.mark_selected(selected)
 
     def mark_selected(self, index: int) -> None:
+        """
+        Mark one card as the current frame and scroll it into view.
+
+        Inputs: index, the shooting-order frame index to select.
+        Output: no return value. Each card's selection flag is updated, and a matching card is kept visible.
+        Uses: the filmstrip selection.
+        Limitations: an index that matches no card clears every selection and does not scroll.
+        """
         chosen: ThumbCard | None = None
         for card in self._cards:
             selected = card.index == index
@@ -163,16 +235,40 @@ class Filmstrip(QScrollArea):
             self.ensureWidgetVisible(chosen, 24, 0)
 
     def mark_compared(self, index: int | None) -> None:
+        """
+        Mark the card that is the other side of compare.
+
+        Inputs: index, the shooting-order frame index to highlight, or None to clear the highlight.
+        Output: no return value. Each card's compare flag is updated.
+        Uses: the compare highlight in the filmstrip.
+        Limitations: None clears every compare highlight, including when compare is turned off.
+        """
         for card in self._cards:
             card.set_compared(index is not None and card.index == index)
 
     def _on_card(self, index: int, shift: bool) -> None:
+        """
+        Route a card click to compare or to selection.
+
+        Inputs: index, the shooting-order frame index; shift, whether Shift was held.
+        Output: no return value. Shift emits compare_chosen. A click without Shift emits selected.
+        Uses: filmstrip clicks.
+        Limitations: a Shift-click emits only the compare signal.
+        """
         if shift:
             self.compare_chosen.emit(index)
             return
         self.selected.emit(index)
 
     def refresh_flags(self, cards: list[Thumb]) -> None:
+        """
+        Update card marks, or rebuild the row when the frame order changed.
+
+        Inputs: cards, thumbnail descriptions in the current display order.
+        Output: no return value. Flags, selection, and compare state update in place when the indexes match. A different index order rebuilds the row.
+        Uses: keeper, reject, star, and score updates on the filmstrip.
+        Limitations: a changed order deletes the existing cards and builds new ones, so thumbnail images are loaded again.
+        """
         incoming = [thumb.frame_index for thumb in cards]
         if incoming != [card.index for card in self._cards]:
             self.set_cards(cards)
@@ -188,12 +284,28 @@ class Filmstrip(QScrollArea):
             card.set_compared(thumb.compared)
 
     def wheelEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        """
+        Scroll the filmstrip sideways with the mouse wheel.
+
+        Inputs: event, the wheel event.
+        Output: no return value. The horizontal scrollbar moves by the wheel delta and the event is accepted.
+        Uses: the filmstrip.
+        Limitations: a vertical wheel delta is used when it is non-zero; otherwise the horizontal delta is used. The scrollbar moves by the opposite of that delta.
+        """
         delta = event.angleDelta().y() or event.angleDelta().x()
         bar = self.horizontalScrollBar()
         bar.setValue(bar.value() - delta)
         event.accept()
 
     def _clear(self) -> None:
+        """
+        Delete every card and leave the trailing stretch.
+
+        Inputs: none.
+        Output: no return value. Card widgets are scheduled for deletion and the card list is emptied.
+        Uses: replacing the filmstrip contents.
+        Limitations: the stretch item at the end of the layout is kept.
+        """
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
             widget = item.widget()

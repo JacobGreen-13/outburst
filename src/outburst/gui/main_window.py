@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -74,6 +75,14 @@ _WELCOME = (
 
 
 def _short_bursts_hidden(minimum: int) -> str:
+    """
+    Explain that every burst is shorter than the minimum and therefore hidden.
+
+    Inputs: minimum, the Minimum frames setting.
+    Output: placeholder text that names the minimum and tells the photographer to lower it.
+    Uses: the preview when a scanned folder has no visible burst.
+    Limitations: the text describes the minimum. It does not change the control.
+    """
     return (
         f"Every burst in this folder has fewer than {minimum} frames.\n\n"
         "Lower Minimum frames to review them."
@@ -82,6 +91,14 @@ def _short_bursts_hidden(minimum: int) -> str:
 
 class MainWindow(QMainWindow):
     def __init__(self, cache_dir: Path | None = None) -> None:
+        """
+        Build the review window, restore settings, and listen for keyboard shortcuts.
+
+        Inputs: cache_dir, where measurements and marks are stored, or None for the default cache.
+        Output: no return value. The window is sized, empty of a library, and ready to open a folder.
+        Uses: the review window.
+        Limitations: no folder is scanned until open_path runs. The application event filter is installed so review keys can be handled before the focused widget.
+        """
         super().__init__()
         self.setWindowTitle("Outburst")
         self.setWindowIcon(build_app_icon())
@@ -131,22 +148,61 @@ class MainWindow(QMainWindow):
 
     @property
     def library(self) -> Library | None:
+        """
+        The library currently shown, if a scan has finished.
+
+        Inputs: none.
+        Output: the Library, or None before the first successful scan in this window.
+        Uses: tests and the review window state.
+        Limitations: this is the in-memory library. It is not a fresh read from disk.
+        """
         return self._library
 
     @property
     def is_scanning(self) -> bool:
+        """
+        Whether a folder scan is in progress.
+
+        Inputs: none.
+        Output: True while this window's scan flag is set.
+        Uses: tests and actions that wait for a scan.
+        Limitations: a model download and a keeper save are separate flags and are not reported here.
+        """
         return self._scanning
 
     @property
     def current_burst_index(self) -> int:
+        """
+        The row of the burst on screen.
+
+        Inputs: none.
+        Output: the index into the bursts that meet Minimum frames.
+        Uses: the burst list selection.
+        Limitations: the index can stay 0 when the visible list is empty. Bursts under Minimum frames are not counted.
+        """
         return self._burst_index
 
     @property
     def current_frame_index(self) -> int:
+        """
+        The frame index inside the current burst.
+
+        Inputs: none.
+        Output: the index in shooting order.
+        Uses: the preview and the filmstrip selection.
+        Limitations: arrow keys follow the on-screen order, but this value stays the frame's shooting index.
+        """
         return self._frame_index
 
     def present(self, library: Library) -> None:
-        """Show a finished library. Tests and the scan worker both use this."""
+        """
+        Show a finished library. Tests and the scan worker both use this.
+
+        Inputs: library, the scanned folder, bursts, analyses, and warnings.
+        Output: no return value. Decisions are loaded, recommended keepers are marked, and the burst list, preview, and status summary update.
+        Uses: the review window after a scan.
+        Limitations: a library with warnings and no analyses shows the first warning as a notice. Original files are not modified.
+        """
 
         self._library = library
         self._folder = library.folder
@@ -163,6 +219,14 @@ class MainWindow(QMainWindow):
             self._notify("Nothing to cull", library.warnings[0], "info")
 
     def open_path(self, folder: Path) -> None:
+        """
+        Open a folder and start a scan.
+
+        Inputs: folder, the directory of bursts. The path is expanded and resolved.
+        Output: no return value. A directory is stored and a scan starts. A missing directory, or a previous scan that will not stop, shows a warning.
+        Uses: Open folder and a folder passed on the command line.
+        Limitations: the path must already be a directory. The folder is left unchanged when the previous scan does not stop within the wait.
+        """
         folder = folder.expanduser().resolve()
         if not folder.is_dir():
             self._notify("Folder not found", f"Outburst couldn't open {folder}.", "warning")
@@ -180,6 +244,14 @@ class MainWindow(QMainWindow):
         self._start_worker()
 
     def rescan(self) -> None:
+        """
+        Drop cached measurements for the open folder and scan it again.
+
+        Inputs: none.
+        Output: no return value. With no folder, nothing happens. Otherwise the folder cache is forgotten and a scan starts, after a missing subject model is downloaded when subject scoring is on.
+        Uses: the Rescan action.
+        Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not forget the cache.
+        """
         if self._folder is None:
             return
         folder = self._folder
@@ -197,18 +269,42 @@ class MainWindow(QMainWindow):
         self.open_path(folder)
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
+        """
+        Handle review shortcuts before the focused widget sees the key.
+
+        Inputs: watched, the object that received the event; event, the Qt event.
+        Output: True when a review shortcut was handled. Otherwise the base filter's result.
+        Uses: keyboard review while the window is open.
+        Limitations: keys are ignored while a spin box, slider, line edit, or combo box is focused. Only a KeyPress whose target is the focus widget is considered.
+        """
         if event.type() == QEvent.Type.KeyPress and watched is QApplication.focusWidget():
             if not _typing_target(watched) and self._handle_key(event.key()):
                 return True
         return super().eventFilter(watched, event)
 
     def keyPressEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        """
+        Handle a key delivered to the window itself.
+
+        Inputs: event, the key press.
+        Output: no return value. A handled shortcut is accepted. Any other key goes to the base handler.
+        Uses: keyboard review.
+        Limitations: keys are ignored while a spin box, slider, line edit, or combo box is focused.
+        """
         if not _typing_target(QApplication.focusWidget()) and self._handle_key(event.key()):
             event.accept()
             return
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        """
+        Save settings and stop background work before the window closes.
+
+        Inputs: event, the close event.
+        Output: no return value. The event filter is removed, settings are written, a download is aborted, a save is given three seconds, and a scan is stopped. The base close then runs.
+        Uses: quitting the review window.
+        Limitations: the download wait is two seconds and the save wait is three seconds. The save id changes first, so a late save result is ignored.
+        """
         application = QApplication.instance()
         if application is not None:
             application.removeEventFilter(self)
@@ -223,6 +319,14 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _handle_key(self, key: int) -> bool:
+        """
+        Run the review shortcut for one key.
+
+        Inputs: key, the Qt key code.
+        Output: True when the key is a review shortcut, and False when it is not.
+        Uses: frame, burst, rating, compare, zoom, peaking, and cancel shortcuts.
+        Limitations: the caller ignores keys while a spin box is focused. Arrow keys follow the on-screen filmstrip order. Home and End use that same order. Escape cancels only while a scan or a download is active.
+        """
         if key == Qt.Key.Key_Right:
             self._step_frame(1)
         elif key == Qt.Key.Key_Left:
@@ -274,30 +378,22 @@ class MainWindow(QMainWindow):
         return True
 
     def _build_ui(self) -> None:
+        """
+        Lay out the burst list, controls, preview, and filmstrip.
+
+        Inputs: none.
+        Output: no return value. The central widget, splitters, sort buttons, progress bar, and status bar are created.
+        Uses: the review window layout.
+        Limitations: Time starts checked, so the filmstrip mode begins as shooting order. The progress bar stays hidden until work starts. The initial status says to open a folder.
+        """
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(12, 10, 12, 8)
+        root.setContentsMargins(10, 8, 10, 8)
         root.setSpacing(8)
-        header = QHBoxLayout()
-        titles = QVBoxLayout()
-        title = QLabel("Outburst")
-        title.setObjectName("title")
-        subtitle = QLabel("Offline burst culling for wildlife and nature")
-        subtitle.setObjectName("subtitle")
-        titles.addWidget(title)
-        titles.addWidget(subtitle)
-        header.addLayout(titles)
-        header.addStretch(1)
-        self.folder_label = QLabel("No folder open")
-        self.folder_label.setObjectName("folderLabel")
-        self.folder_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.folder_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        header.addWidget(self.folder_label, 1)
-        root.addLayout(header)
 
         self.burst_list = QListWidget()
         self.burst_list.setObjectName("burstList")
-        self.burst_list.setMinimumHeight(168)
+        self.burst_list.setMinimumHeight(120)
         self.burst_list.currentRowChanged.connect(self._on_burst_row)
         self.controls = ControlPanel()
         self.controls.threshold_changed.connect(self._apply_threshold)
@@ -306,13 +402,19 @@ class MainWindow(QMainWindow):
         self.controls.eye_toggled.connect(self._on_eye_toggled)
         self.controls.model_changed.connect(self._on_model_changed)
         self.controls.minimum_changed.connect(self._on_minimum_changed)
+        bursts = QGroupBox("Bursts")
+        bursts.setObjectName("sectionBox")
+        bursts_layout = QVBoxLayout(bursts)
+        bursts_layout.setContentsMargins(8, 8, 8, 8)
+        bursts_layout.addWidget(self.burst_list, 1)
         left = QWidget()
+        left.setObjectName("sidePanel")
+        left.setMinimumWidth(320)
+        left.setMaximumWidth(420)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        bursts_label = QLabel("Bursts")
-        bursts_label.setObjectName("subtitle")
-        left_layout.addWidget(bursts_label)
-        left_layout.addWidget(self.burst_list, 1)
+        left_layout.setSpacing(8)
+        left_layout.addWidget(bursts, 1)
         left_layout.addWidget(self.controls)
 
         self.viewer = ImageViewer()
@@ -339,18 +441,19 @@ class MainWindow(QMainWindow):
             button.toggled.connect(lambda checked, chosen=mode: self._on_filmstrip_sort(chosen, checked))
             self._sort_group.addButton(button)
         self.sort_time.setChecked(True)
-        order_label = QLabel("Order")
-        order_label.setObjectName("subtitle")
+        order_label = QLabel("Frames")
+        order_label.setObjectName("fieldLabel")
         strip_header = QHBoxLayout()
-        strip_header.setContentsMargins(8, 0, 8, 0)
+        strip_header.setContentsMargins(8, 6, 8, 0)
         strip_header.setSpacing(8)
         strip_header.addWidget(order_label)
+        strip_header.addStretch(1)
         strip_header.addWidget(self.sort_time)
         strip_header.addWidget(self.sort_score)
-        strip_header.addStretch(1)
         strip_box = QWidget()
+        strip_box.setObjectName("filmstripFrame")
         strip_layout = QVBoxLayout(strip_box)
-        strip_layout.setContentsMargins(0, 0, 0, 0)
+        strip_layout.setContentsMargins(0, 0, 0, 6)
         strip_layout.setSpacing(4)
         strip_layout.addLayout(strip_header)
         strip_layout.addWidget(self.filmstrip, 1)
@@ -360,7 +463,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self.viewer)
         top.setStretchFactor(0, 0)
         top.setStretchFactor(1, 1)
-        top.setSizes([320, 900])
+        top.setSizes([360, 920])
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(top)
         splitter.addWidget(strip_box)
@@ -376,10 +479,23 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Open a folder to start")
 
     def _build_actions(self) -> None:
+        """
+        Create the menus, toolbar, and view toggles.
+
+        Inputs: none.
+        Output: no return value. File, View, and Help actions are added. Cancel and the folder label are on the toolbar.
+        Uses: the review window commands.
+        Limitations: Compare, Zoom, and Focus peaking start unchecked. The folder label starts as "No folder open".
+        """
         toolbar = QToolBar("Main")
         toolbar.setMovable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.addToolBar(toolbar)
+        self.folder_label = QLabel("No folder open", toolbar)
+        self.folder_label.setObjectName("folderLabel")
+        self.folder_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.folder_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.folder_label.setMinimumWidth(180)
         style = self.style()
         open_icon = style.standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon)
         refresh_icon = style.standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
@@ -455,6 +571,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(shortcuts_action)
         help_menu.addAction(about_action)
         toolbar.addAction(self.cancel_action)
+        toolbar.addWidget(self.folder_label)
 
     def _action(
         self,
@@ -463,6 +580,14 @@ class MainWindow(QMainWindow):
         shortcut: str | None = None,
         icon=None,  # noqa: ANN001
     ) -> QAction:
+        """
+        Create a menu action that calls a slot with no arguments.
+
+        Inputs: text, the label; slot, the callback; shortcut, a key sequence or None; icon, a toolbar icon or None.
+        Output: the action, already parented to the window and connected.
+        Uses: File, View, and Help commands.
+        Limitations: a missing icon, or a null icon, is omitted. The triggered handler discards Qt's checked argument.
+        """
         action = QAction(text, self)
         if icon is not None and not icon.isNull():
             action.setIcon(icon)
@@ -472,15 +597,39 @@ class MainWindow(QMainWindow):
         return action
 
     def _check_action(self, text: str, tooltip: str) -> QAction:
+        """
+        Create a checkable view action.
+
+        Inputs: text, the label; tooltip, the explanation.
+        Output: an unchecked checkable action parented to the window.
+        Uses: Compare, Zoom, and Focus peaking.
+        Limitations: the action is not added to a menu here, and this method sets no shortcut.
+        """
         action = QAction(text, self)
         action.setCheckable(True)
         action.setToolTip(tooltip)
         return action
 
     def _set_checked(self, action: QAction, checked: bool) -> None:
+        """
+        Set a checkable action and let its toggled handler run.
+
+        Inputs: action, the view action; checked, the new state.
+        Output: no return value. The action's checked state changes.
+        Uses: the C and Z keys, and Shift-click when compare is still off.
+        Limitations: signals are not blocked, so the toggled slot runs when the state changes.
+        """
         action.setChecked(checked)
 
     def _open_folder_dialog(self) -> None:
+        """
+        Ask for a folder and open it.
+
+        Inputs: none.
+        Output: no return value. A chosen directory is passed to open_path.
+        Uses: the Open folder action.
+        Limitations: a headless process returns without a dialog. Cancelling the dialog leaves the current folder in place. The dialog starts at the open folder, or the last saved folder.
+        """
         if os.environ.get("OUTBURST_HEADLESS") == "1":
             return
         start = str(self._folder or self._dialog_start)
@@ -489,6 +638,14 @@ class MainWindow(QMainWindow):
             self.open_path(Path(chosen))
 
     def _start_worker(self) -> None:
+        """
+        Start a background scan of the open folder.
+
+        Inputs: none. The folder, recursion, gap, weights, cache, subject model, and eye scoring are read from the window.
+        Output: no return value. The progress bar is shown and the worker starts. Subject scoring with a missing model starts a download instead.
+        Uses: opening and rescanning a folder.
+        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes.
+        """
         if self._folder is None:
             return
         if self.controls.prefer_subject() and not self._model_ready():
@@ -522,6 +679,14 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _stop_worker(self) -> bool:
+        """
+        Abort the scan worker and wait for it to finish.
+
+        Inputs: none.
+        Output: True when no scan is running or the worker stops within ten seconds. False when it is still running.
+        Uses: opening another folder, rescanning, cancelling, and closing.
+        Limitations: the scan id changes before the wait, so a late result from the old worker is ignored even when the wait fails.
+        """
         self._scan_id += 1
         worker = self._worker
         if worker is None:
@@ -535,6 +700,14 @@ class MainWindow(QMainWindow):
         return True
 
     def _cancel_scan(self) -> None:
+        """
+        Cancel the download or the scan that is in progress.
+
+        Inputs: none.
+        Output: no return value. A download is aborted and the status says it is cancelling. A scan is stopped and the status says it was cancelled.
+        Uses: Escape and the Cancel toolbar action.
+        Limitations: a download is cancelled ahead of a scan. Nothing happens when neither is running.
+        """
         if self._downloading and self._download_worker is not None:
             self._download_worker.abort()
             self.statusBar().showMessage("Cancelling download…")
@@ -545,11 +718,27 @@ class MainWindow(QMainWindow):
             self._sync_actions()
 
     def _on_progress(self, done: int, total: int, message: str) -> None:
+        """
+        Show scan or save progress on the status bar.
+
+        Inputs: done, the finished count; total, the expected count; message, the status text.
+        Output: no return value. The progress bar range and value update, and the status bar shows the message.
+        Uses: the progress bar during a scan or a save.
+        Limitations: the range maximum is at least 1, and the value is clamped to that range.
+        """
         self.progress.setRange(0, max(total, 1))
         self.progress.setValue(min(max(done, 0), max(total, 1)))
         self.statusBar().showMessage(message)
 
     def _on_success(self, scan_id: int, library: object) -> None:
+        """
+        Show a library from the scan that is still current.
+
+        Inputs: scan_id, the scan this result belongs to; library, the scan result.
+        Output: no return value. A matching Library is rescored with the current weights and burst gap, then presented.
+        Uses: the end of a successful scan.
+        Limitations: a stale scan id, or a payload that is not a Library, is ignored.
+        """
         if scan_id != self._scan_id or not isinstance(library, Library):
             return
         self._scanning = False
@@ -558,6 +747,14 @@ class MainWindow(QMainWindow):
         self.present(library)
 
     def _on_failed(self, scan_id: int, message: str) -> None:
+        """
+        Report a scan failure for the scan that is still current.
+
+        Inputs: scan_id, the scan this result belongs to; message, the error text.
+        Output: no return value. Scanning stops, actions refresh, and a warning notice is shown.
+        Uses: a failed scan.
+        Limitations: a stale scan id is ignored.
+        """
         if scan_id != self._scan_id:
             return
         self._scanning = False
@@ -565,6 +762,14 @@ class MainWindow(QMainWindow):
         self._notify("Scan failed", message, "warning")
 
     def _on_cancelled(self, scan_id: int) -> None:
+        """
+        Clear the scanning state after the worker reports cancellation.
+
+        Inputs: scan_id, the scan this result belongs to.
+        Output: no return value. Actions refresh and the status bar says the scan was cancelled.
+        Uses: a scan that stopped because it was aborted.
+        Limitations: a stale scan id is ignored.
+        """
         if scan_id != self._scan_id:
             return
         self._scanning = False
@@ -572,6 +777,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Scan cancelled")
 
     def _apply_threshold(self, value: float) -> None:
+        """
+        Regroup the open library with a new burst gap.
+
+        Inputs: value, the gap in seconds.
+        Output: no return value. Automatic keepers are cleared, bursts are rebuilt, new best frames are marked, and the list keeps the current file when it is still visible.
+        Uses: the Burst gap control.
+        Limitations: nothing happens before a library is loaded. This regroups measurements already in memory and does not read the files again.
+        """
         if self._library is None:
             return
         selected = self._selected_path()
@@ -581,6 +794,14 @@ class MainWindow(QMainWindow):
         self._refresh_burst_list(prefer_path=selected)
 
     def _apply_weights(self) -> None:
+        """
+        Rescore the open library with the current sharpness, exposure, center, and subject settings.
+
+        Inputs: none. Weights are read from the control panel.
+        Output: no return value. The analysis map, burst labels, filmstrip scores, and preview refresh.
+        Uses: the Sharp and Center sliders, and turning subject scoring off.
+        Limitations: nothing happens before a library is loaded. This rescores cached measurements and does not scan the files again.
+        """
         if self._library is None:
             return
         self._library = with_weights(self._library, self.controls.weights())
@@ -590,6 +811,14 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _on_subject_toggled(self, enabled: bool) -> None:
+        """
+        Turn subject-aware sharpness on or off.
+
+        Inputs: enabled, whether the checkbox is now checked.
+        Output: no return value. Turning it off forgets a pending follow-up scan and rescores the open library. Turning it on rescans when the model is ready and a folder is open, or downloads a missing model.
+        Uses: the Subject-aware sharpness checkbox.
+        Limitations: with no folder open, a ready model does not start a scan. A missing model downloads, and the scan follows only when a folder is open.
+        """
         if not enabled:
             self._download_then_scan = False
             self._apply_weights()
@@ -601,6 +830,14 @@ class MainWindow(QMainWindow):
         self._begin_download(then_scan=self._folder is not None)
 
     def _on_model_changed(self, _model_id: str) -> None:
+        """
+        Switch to the selected subject model and turn subject scoring on.
+
+        Inputs: _model_id, the id emitted by the combo. The argument is unused; the panel is read instead.
+        Output: no return value. Subject scoring is checked without re-entering its toggle. A missing model downloads. An open folder is rescanned.
+        Uses: the subject model combo.
+        Limitations: with no folder, a missing model downloads and does not scan afterward. A ready model with no folder does not scan.
+        """
         if not self.controls.prefer_subject():
             self.controls.set_subject_checked(True)
         if self._folder is None:
@@ -610,6 +847,14 @@ class MainWindow(QMainWindow):
         self.rescan()
 
     def _model_ready(self) -> bool:
+        """
+        Remember the selected model path when its file is already in the models folder.
+
+        Inputs: none.
+        Output: True when the selected model file is ready. The stored path is set, or cleared when it is not ready.
+        Uses: deciding whether a scan can score subjects without a download.
+        Limitations: an unknown model id returns False and clears the stored path.
+        """
         option = option_by_id(self.controls.model_id())
         if option is None:
             self._model_path = None
@@ -622,6 +867,14 @@ class MainWindow(QMainWindow):
         return False
 
     def _begin_download(self, then_scan: bool) -> None:
+        """
+        Download the selected subject model, then scan when asked.
+
+        Inputs: then_scan, whether a scan should start after the download ends.
+        Output: no return value. The combo is disabled, actions refresh, and the status names the model being downloaded.
+        Uses: subject scoring when the weights are not already in the models folder.
+        Limitations: a headless process turns subject scoring off, says the model is missing, and scans without it when then_scan is set and a folder is open. A download of the same model only updates whether to scan afterward.
+        """
         if os.environ.get("OUTBURST_HEADLESS") == "1":
             self.controls.set_subject_checked(False)
             self.statusBar().showMessage("Subject model is not in the models folder")
@@ -656,6 +909,14 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _on_download_progress(self, done: int, total: int) -> None:
+        """
+        Show how much of the subject model has downloaded.
+
+        Inputs: done, bytes received; total, the expected size, or 0 when the size is unknown.
+        Output: no return value. The progress bar updates and the status shows the received size in megabytes.
+        Uses: the status bar during a model download.
+        Limitations: a total of 0 or less leaves the progress bar busy with no endpoint.
+        """
         if total <= 0:
             self.progress.setRange(0, 0)
         else:
@@ -664,6 +925,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Downloading model… {done / (1024 * 1024):.1f} MB")
 
     def _on_download_succeeded(self, path: str) -> None:
+        """
+        Store a downloaded model and scan when that was requested.
+
+        Inputs: path, the saved model file.
+        Output: no return value. The download UI is cleared, the model list refreshes, and a requested scan starts when subject scoring is still on and a folder is open.
+        Uses: the end of a subject-model download.
+        Limitations: without a following scan, the status names the saved file and no scan starts.
+        """
         then_scan = self._download_then_scan
         self._finish_download_ui()
         self._model_path = Path(path)
@@ -674,6 +943,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Saved {Path(path).name} in the models folder")
 
     def _on_download_failed(self, message: str) -> None:
+        """
+        Report a failed model download and continue with a scan when one was requested.
+
+        Inputs: message, the error text.
+        Output: no return value. A warning is shown, subject scoring is turned off, and a requested scan starts when a folder is open.
+        Uses: a subject-model download that failed.
+        Limitations: subject scoring is cleared only when it is still checked. The scan then runs without the model.
+        """
         then_scan = self._download_then_scan
         self._finish_download_ui()
         self._notify("Could not download the model", message, "warning")
@@ -683,6 +960,14 @@ class MainWindow(QMainWindow):
             self._start_worker()
 
     def _on_download_cancelled(self) -> None:
+        """
+        Finish a cancelled download, or start the model the photographer picked instead.
+
+        Inputs: none.
+        Output: no return value. A replacement download starts when one was requested. Otherwise the status says the download was cancelled, subject scoring is turned off, and a requested scan starts.
+        Uses: cancelling a subject-model download.
+        Limitations: a replacement download returns before the cancelled status is shown.
+        """
         replace = self._replace_download
         then_scan = self._download_then_scan
         self._replace_download = False
@@ -697,6 +982,14 @@ class MainWindow(QMainWindow):
             self._start_worker()
 
     def _finish_download_ui(self) -> None:
+        """
+        Clear the download flags and enable the model combo again.
+
+        Inputs: none.
+        Output: no return value. The worker reference is dropped, a still-running worker is given two seconds, and actions refresh.
+        Uses: every end of a subject-model download.
+        Limitations: the flag that remembers a following scan is cleared here, so the caller must read it first.
+        """
         worker = self._download_worker
         self._downloading = False
         self._download_then_scan = False
@@ -707,16 +1000,40 @@ class MainWindow(QMainWindow):
         self._sync_actions()
 
     def _on_minimum_changed(self, _value: int) -> None:
+        """
+        Hide or show bursts after Minimum frames changes.
+
+        Inputs: _value, the new minimum. The argument is unused; the control panel is read while the list is rebuilt.
+        Output: no return value. The burst list refreshes and keeps the current file when it is still visible. An open library also refreshes the status summary.
+        Uses: the Minimum control.
+        Limitations: bursts shorter than the minimum stay off the list and out of the filmstrip.
+        """
         self._refresh_burst_list(prefer_path=self._selected_path())
         if self._library is not None:
             self.statusBar().showMessage(self._status_summary())
 
     def _visible_bursts(self) -> tuple[Burst, ...]:
+        """
+        Return the bursts long enough to review.
+
+        Inputs: none.
+        Output: the bursts whose frame count meets Minimum frames, in library order, or an empty tuple before a library is loaded.
+        Uses: the burst list, filmstrip, and status summary.
+        Limitations: shorter bursts stay hidden and are not returned.
+        """
         if self._library is None:
             return ()
         return visible_bursts(self._library.bursts, minimum_frames=self.controls.minimum_frames())
 
     def _status_summary(self) -> str:
+        """
+        Summarize the open library for the status bar.
+
+        Inputs: none.
+        Output: an empty string before a library is loaded. Otherwise file and visible-burst counts, hidden bursts, note count, eye scoring, and compare, zoom, or peaking when those are on.
+        Uses: the status bar.
+        Limitations: hidden bursts are counted and not named. A zoom of 1 is shown as 1:1. Any other zoom is shown as an integer ratio.
+        """
         library = self._library
         if library is None:
             return ""
@@ -747,11 +1064,27 @@ class MainWindow(QMainWindow):
         return message
 
     def _on_burst_row(self, row: int) -> None:
+        """
+        Show the burst the photographer selected in the list.
+
+        Inputs: row, the list row.
+        Output: no return value. A row inside the visible bursts shows that burst, starting at its recommended frame.
+        Uses: the burst list.
+        Limitations: a negative row, or a row past the visible bursts, is ignored.
+        """
         if row < 0 or row >= len(self._visible_bursts()):
             return
         self._show_burst(row, prefer_path=None)
 
     def _refresh_burst_list(self, prefer_path: Path | None) -> None:
+        """
+        Rebuild the burst list from the visible bursts.
+
+        Inputs: prefer_path, a file to keep selected, or None to select the first visible burst.
+        Output: no return value. The list, filmstrip, and preview update. No visible bursts shows the short-burst message when the library has bursts, and the welcome message otherwise.
+        Uses: the burst list after a scan, a gap change, or a minimum change.
+        Limitations: bursts under Minimum frames stay off the list. List signals are blocked while the rows are rebuilt.
+        """
         library = self._library
         self.burst_list.blockSignals(True)
         self.burst_list.clear()
@@ -780,6 +1113,14 @@ class MainWindow(QMainWindow):
             self.viewer.set_placeholder(_WELCOME)
 
     def _refresh_burst_labels(self) -> None:
+        """
+        Rewrite the burst-list text without changing which row is selected.
+
+        Inputs: none.
+        Output: no return value. Each visible row's text is updated from the current scores and decisions.
+        Uses: the burst list after a mark or a rescore.
+        Limitations: nothing happens before a library is loaded. Rows are not added or removed.
+        """
         if self._library is None:
             return
         for row, burst in enumerate(self._visible_bursts()):
@@ -788,6 +1129,14 @@ class MainWindow(QMainWindow):
                 item.setText(burst_list_text(burst, self._by_path, self._decisions))
 
     def _show_burst(self, index: int, prefer_path: Path | None) -> None:
+        """
+        Show one visible burst and choose which frame is current.
+
+        Inputs: index, the visible-burst index; prefer_path, a file to select, or None for the recommended frame.
+        Output: no return value. The compare partner is cleared, the filmstrip is rebuilt, and the preview updates.
+        Uses: moving between bursts.
+        Limitations: an index outside the visible bursts returns immediately. A preferred path that is not in the burst falls back to the recommended frame.
+        """
         bursts = self._visible_bursts()
         if not (0 <= index < len(bursts)):
             return
@@ -804,6 +1153,14 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _select_frame(self, index: int) -> None:
+        """
+        Make one frame in the current burst the current frame.
+
+        Inputs: index, the shooting-order frame index.
+        Output: no return value. The index is clamped, the filmstrip selection moves, and the preview updates.
+        Uses: the filmstrip, the arrow keys, Home and End, and the recommended-frame shortcut.
+        Limitations: a burst with no frames returns immediately. When the compare partner was this frame, the partner moves to another frame in on-screen order.
+        """
         burst = self._current_burst()
         if burst is None or not burst.frames:
             return
@@ -814,6 +1171,14 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _step_frame(self, delta: int) -> None:
+        """
+        Move to the next or previous frame in on-screen order.
+
+        Inputs: delta, a positive step toward the end of the filmstrip or a negative step toward the start.
+        Output: no return value. The frame at the neighboring filmstrip position becomes current.
+        Uses: Right and Left.
+        Limitations: arrow keys follow the on-screen order. The step stops at the first and last card. An empty filmstrip does nothing. A current index missing from the order starts from the first card.
+        """
         order = self._filmstrip_indexes()
         if not order:
             return
@@ -825,6 +1190,14 @@ class MainWindow(QMainWindow):
         self._select_frame(order[position])
 
     def _on_filmstrip_sort(self, mode: str, checked: bool) -> None:
+        """
+        Switch the filmstrip between shooting order and score order.
+
+        Inputs: mode, "time" or "score"; checked, whether that button is now checked.
+        Output: no return value. A newly checked mode is stored, and an open burst rebuilds the filmstrip and preview.
+        Uses: the Time and Score buttons above the filmstrip.
+        Limitations: an unchecked signal, or the mode that is already active, is ignored. Time is shooting order and Score puts the highest composite first with ties in shooting order.
+        """
         if not checked or mode == self._filmstrip_sort:
             return
         self._filmstrip_sort = mode
@@ -834,6 +1207,14 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _filmstrip_indexes(self) -> list[int]:
+        """
+        List frame indexes in the current filmstrip order.
+
+        Inputs: none.
+        Output: shooting-order indexes, or score order. An empty list when no burst is current.
+        Uses: arrow keys, Home and End, compare movement, and the filmstrip cards.
+        Limitations: Time is shooting order and Score puts the highest composite first with ties in shooting order. A frame with no analysis contributes no score and stays at the right in score order.
+        """
         burst = self._current_burst()
         if burst is None:
             return []
@@ -844,6 +1225,14 @@ class MainWindow(QMainWindow):
         return filmstrip_order(scores, self._filmstrip_sort)
 
     def _step_burst(self, delta: int) -> None:
+        """
+        Move to the next or previous visible burst.
+
+        Inputs: delta, a positive step toward the end of the list or a negative step toward the start.
+        Output: no return value. The burst list selection moves, which shows that burst.
+        Uses: Down and Up.
+        Limitations: the step stops at the first and last visible burst. An empty list does nothing.
+        """
         count = len(self._visible_bursts())
         if count == 0:
             return
@@ -851,12 +1240,28 @@ class MainWindow(QMainWindow):
         self.burst_list.setCurrentRow(row)
 
     def _go_to_recommended(self) -> None:
+        """
+        Select the recommended frame in the current burst.
+
+        Inputs: none.
+        Output: no return value. The recommended frame becomes current.
+        Uses: the Enter shortcut.
+        Limitations: a missing burst, or a burst with no frames, does nothing.
+        """
         burst = self._current_burst()
         if burst is None or not burst.frames:
             return
         self._select_frame(recommended_offset(burst.frames, self._by_path))
 
     def _toggle_decision(self, kind: str) -> None:
+        """
+        Toggle the current frame between a mark and no mark.
+
+        Inputs: kind, "keep" or "reject".
+        Output: no return value. The same mark clears. A different mark replaces it. The list, filmstrip, and preview refresh.
+        Uses: the keeper and reject buttons and the A and X keys.
+        Limitations: nothing happens while a scan or a save is running, or when no frame is current. The mark is stored as a photographer mark. Original files are not modified.
+        """
         analysis = self._current_analysis()
         if analysis is None or self._review_locked():
             return
@@ -868,6 +1273,14 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _reject_burst(self) -> None:
+        """
+        Reject every frame in the current burst, or clear those rejects.
+
+        Inputs: none.
+        Output: no return value. When every frame is already rejected, the rejects are cleared. Otherwise every frame is rejected. The list, filmstrip, and preview refresh.
+        Uses: the R key.
+        Limitations: nothing happens while a scan or a save is running, or when no burst is current. Original files are not modified.
+        """
         burst = self._current_burst()
         if burst is None or self._review_locked():
             return
@@ -879,22 +1292,54 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _on_compare_toggled(self, checked: bool) -> None:
+        """
+        Show or hide the second preview.
+
+        Inputs: checked, whether Compare is on.
+        Output: no return value. The preview updates and the status summary is refreshed.
+        Uses: the Compare action and the C key.
+        Limitations: the partner frame is chosen when the preview is redrawn. This method only stores the flag and refreshes.
+        """
         self._compare = checked
         self._update_viewer()
         self._show_mode_status()
 
     def _on_loupe_toggled(self, checked: bool) -> None:
+        """
+        Turn the 1:1 preview on or off.
+
+        Inputs: checked, whether Zoom is on.
+        Output: no return value. Checked sets the scale to 1. Unchecked returns to fit. Both panes and the status summary update.
+        Uses: the Zoom action and the Z key.
+        Limitations: this toggle is only fit or 1:1. The 2:1 and 4:1 steps come from the wheel or the plus and minus keys. Zoom uses the embedded preview.
+        """
         self._zoom_scale = 1.0 if checked else None
         self._loupe = checked
         self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self._show_mode_status()
 
     def _on_peak_toggled(self, checked: bool) -> None:
+        """
+        Turn focus peaking on or off.
+
+        Inputs: checked, whether the strongest edges should be painted green.
+        Output: no return value. Both previews redraw and the status summary updates.
+        Uses: the Focus peaking action and the F key.
+        Limitations: peaking uses the embedded preview. The current zoom scale is left as it is.
+        """
         self._peaking = checked
         self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self._show_mode_status()
 
     def _on_zoom_changed(self, scale: float) -> None:
+        """
+        Remember a zoom change that came from the preview.
+
+        Inputs: scale, the new scale, or 0 when the preview returned to fit.
+        Output: no return value. The stored scale and the Zoom action match the preview, without toggling zoom again, and the status summary updates.
+        Uses: the scroll wheel over the preview.
+        Limitations: a scale of 0 or below is stored as fit. Zoom steps are fit, 1, 2, and 4 and use the embedded preview.
+        """
         self._zoom_scale = None if scale <= 0 else scale
         self._loupe = self._zoom_scale is not None
         self.loupe_action.blockSignals(True)
@@ -903,6 +1348,14 @@ class MainWindow(QMainWindow):
         self._show_mode_status()
 
     def _step_zoom(self, steps: int) -> None:
+        """
+        Move the preview one zoom step.
+
+        Inputs: steps, a positive step to zoom in or a negative step to zoom out.
+        Output: no return value. The scale becomes the next of fit, 1:1, 2:1, and 4:1. Both panes, the Zoom action, and the status summary update.
+        Uses: the plus and minus keys.
+        Limitations: zoom steps are fit, 1, 2, and 4 and use the embedded preview. This path does not keep a cursor anchor.
+        """
         self._zoom_scale = next_zoom(self._zoom_scale, steps)
         self._loupe = self._zoom_scale is not None
         self.loupe_action.blockSignals(True)
@@ -912,10 +1365,26 @@ class MainWindow(QMainWindow):
         self._show_mode_status()
 
     def _show_mode_status(self) -> None:
+        """
+        Refresh the status bar after compare, zoom, or peaking changes.
+
+        Inputs: none.
+        Output: no return value. When a library is open, the status bar shows the library summary.
+        Uses: the status bar.
+        Limitations: nothing is written before a library is loaded.
+        """
         if self._library is not None:
             self.statusBar().showMessage(self._status_summary())
 
     def _select_partner(self) -> None:
+        """
+        Make the compare frame the current frame and keep the previous frame as the partner.
+
+        Inputs: none.
+        Output: no return value. The partner becomes the old current frame when that frame is different, and the partner frame becomes current.
+        Uses: a click on the compare preview.
+        Limitations: a missing burst, or no other frame, does nothing. When compare has not chosen a partner, the partner starts as the best other frame.
+        """
         burst = self._current_burst()
         if burst is None:
             return
@@ -929,6 +1398,14 @@ class MainWindow(QMainWindow):
         self._select_frame(partner)
 
     def _set_compare_frame(self, index: int) -> None:
+        """
+        Choose the other side of compare.
+
+        Inputs: index, a shooting-order frame index in the current burst.
+        Output: no return value. The partner index is stored. Compare is turned on when it was off. The status asks for a different frame when the index is the current frame or out of range.
+        Uses: Shift-click on a thumbnail and the bracket keys.
+        Limitations: a burst with fewer than two frames does nothing. Turning compare on returns through the Compare toggle, which redraws the preview.
+        """
         burst = self._current_burst()
         if burst is None or not burst.frames or len(burst.frames) < 2:
             return
@@ -943,6 +1420,14 @@ class MainWindow(QMainWindow):
         self._show_mode_status()
 
     def _step_compare(self, delta: int) -> None:
+        """
+        Move the compare partner along the filmstrip.
+
+        Inputs: delta, a positive or negative direction. The sign chooses the direction.
+        Output: no return value. The partner becomes another frame in on-screen order.
+        Uses: the [ and ] keys.
+        Limitations: the step follows the on-screen order and wraps. A burst with fewer than two frames, or no other frame, does nothing. When compare is off or has no partner, the step starts from the best other frame.
+        """
         burst = self._current_burst()
         if burst is None or len(burst.frames) < 2:
             return
@@ -957,6 +1442,14 @@ class MainWindow(QMainWindow):
         self._set_compare_frame(chosen)
 
     def _adjacent_frame(self, start: int, delta: int) -> int | None:
+        """
+        Find another frame in on-screen order, skipping the current frame.
+
+        Inputs: start, a shooting-order index; delta, the direction. The sign of delta chooses the way around the filmstrip.
+        Output: a shooting-order index, or None when the filmstrip has fewer than two frames, delta is 0, or every other candidate is the current frame.
+        Uses: moving the compare partner and keeping the partner different from the current frame.
+        Limitations: the search follows the on-screen order and wraps. A start index that is not on the filmstrip begins at the first card.
+        """
         order = self._filmstrip_indexes()
         if len(order) < 2 or delta == 0:
             return None
@@ -972,7 +1465,14 @@ class MainWindow(QMainWindow):
         return None
 
     def _reject_obvious(self) -> None:
-        """Reject soft or badly clipped frames, leaving the best frame and your keepers."""
+        """
+        Reject soft or badly clipped frames, leaving the best frame and your keepers. Pressing again restores the frames this action rejected in the same burst.
+
+        Inputs: none.
+        Output: no return value. Obvious misses are rejected, or the remembered rejects are cleared when they are all still rejected. The list, filmstrip, preview, and status update.
+        Uses: the G key.
+        Limitations: nothing happens while a scan or a save is running, or when no burst or library is current. A burst with no obvious misses only updates the status bar. Original files are not modified.
+        """
 
         burst = self._current_burst()
         if burst is None or self._review_locked() or self._library is None:
@@ -1010,6 +1510,14 @@ class MainWindow(QMainWindow):
         )
 
     def _update_viewer(self) -> None:
+        """
+        Redraw the preview, marks, and compare pane for the current frame.
+
+        Inputs: none.
+        Output: no return value. The preview shows the frame, its info, border, badges, and stars. Compare shows the partner, or a one-frame message when there is no other frame.
+        Uses: the large preview.
+        Limitations: zoom uses the embedded preview. With no current frame the welcome placeholder is shown. A rejected frame uses the red border ahead of the keeper and recommended colors. The subject box is drawn only when subject scoring is active and preferred.
+        """
         analysis = self._current_analysis()
         burst = self._current_burst()
         if analysis is None or burst is None or self._library is None:
@@ -1101,6 +1609,14 @@ class MainWindow(QMainWindow):
         )
 
     def _thumbs(self) -> list[Thumb]:
+        """
+        Build the filmstrip cards for the current burst.
+
+        Inputs: none.
+        Output: thumbnail descriptions in filmstrip order, or an empty list when no burst or library is current.
+        Uses: the filmstrip.
+        Limitations: Time is shooting order and Score puts the highest composite first with ties in shooting order. A filename longer than 22 characters is shortened in the card title. The tooltip keeps the full name.
+        """
         burst = self._current_burst()
         if burst is None or self._library is None:
             return []
@@ -1133,6 +1649,14 @@ class MainWindow(QMainWindow):
         return [cards[index] for index in self._filmstrip_indexes()]
 
     def _export_keepers(self) -> None:
+        """
+        Ask where to save marked keepers and start that save.
+
+        Inputs: none.
+        Output: no return value. A chosen folder starts a copy or hard-link save. No marked keepers in bursts that meet the minimum shows a notice.
+        Uses: the Save keepers action.
+        Limitations: bursts under Minimum frames are left out. A cancelled dialog, or a headless process, does nothing. Original files are not modified.
+        """
         if self._library is None:
             return
         request = ExportKeepersDialog.ask(self, self._folder)
@@ -1158,6 +1682,14 @@ class MainWindow(QMainWindow):
         )
 
     def _export_report(self) -> None:
+        """
+        Write a JSON report and a CSV report for the open library into a chosen folder.
+
+        Inputs: none.
+        Output: no return value. The status bar names the two files. A write error shows a warning.
+        Uses: the Export report action.
+        Limitations: a headless process, or no library, returns without a dialog. Cancelling the dialog does nothing. The report is given the current stars and Minimum frames.
+        """
         if self._library is None or os.environ.get("OUTBURST_HEADLESS") == "1":
             return
         chosen = QFileDialog.getExistingDirectory(
@@ -1181,6 +1713,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Wrote {json_path.name} and {csv_path.name}")
 
     def _write_xmp(self) -> None:
+        """
+        Confirm, then write XMP sidecars for keepers and star-rated frames.
+
+        Inputs: none.
+        Output: no return value. After confirmation, a background write starts. No matching frames shows a notice.
+        Uses: the Write XMP sidecars action.
+        Limitations: sidecars are keepers and star-rated frames only. headless ask() returns False, so the write does not start. Original files are not modified.
+        """
         if self._library is None:
             return
         count = len(
@@ -1219,12 +1759,36 @@ class MainWindow(QMainWindow):
         )
 
     def _show_warnings(self) -> None:
+        """
+        Open the scan-notes dialog for the warnings stored on the window.
+
+        Inputs: none.
+        Output: no return value. The stored warnings are passed to the dialog helper.
+        Uses: the Scan notes action.
+        Limitations: an empty warning list, or a headless process, opens nothing.
+        """
         show_warnings(self, self._warnings)
 
     def _open_cache_folder(self) -> None:
+        """
+        Open the cache directory in the system file browser.
+
+        Inputs: none.
+        Output: no return value. The desktop service is asked to open the cache path.
+        Uses: the Open cache folder action.
+        Limitations: this asks the operating system to open the path. It does not create the folder.
+        """
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._cache_dir)))
 
     def _clear_cache(self) -> None:
+        """
+        Delete cached measurements and previews after confirmation, then rescan an open folder.
+
+        Inputs: none.
+        Output: no return value. On confirmation the measurement cache is cleared, the status counts the removed files, and an open folder is rescanned.
+        Uses: the Clear cache action.
+        Limitations: headless ask() returns False, so nothing is deleted. A scan, download, or save in progress shows a warning and returns. Keeper, reject, and star marks stay.
+        """
         if self._scanning or self._downloading or self._saving:
             self._notify("Still working", "Wait until the current save or scan finishes before clearing the cache.", "warning")
             return
@@ -1246,6 +1810,14 @@ class MainWindow(QMainWindow):
             self.rescan()
 
     def _forget_folder_cache(self, folder: Path) -> int:
+        """
+        Delete cached measurements for one folder.
+
+        Inputs: folder, the folder whose cached measurements should be dropped.
+        Output: the number of forgotten photograph paths, or 0 when the cache cannot be cleared.
+        Uses: Rescan, so the next scan measures that folder again.
+        Limitations: a cache error shows a warning and returns 0. Keeper, reject, and star marks stay.
+        """
         try:
             with Cache(self._cache_dir) as cache:
                 return cache.forget_folder(folder)
@@ -1259,12 +1831,15 @@ class MainWindow(QMainWindow):
             return 0
 
     def _mark_recommended_keepers(self) -> None:
-        """Mark the recommended frame when a burst does not already have a keeper.
+        """
+        Mark the recommended frame when a burst does not already have a keeper.
 
-        When two or more frames have a rated eye, the sharpest eye is the
-        frame Outburst marks. Earlier automatic keepers in that burst are
-        cleared. A reject stays rejected, and a keeper the photographer set
-        keeps its origin.
+        When two or more frames have a rated eye, the sharpest eye is the frame Outburst marks. Earlier automatic keepers in that burst are cleared. A reject stays rejected, and a keeper the photographer set keeps its origin.
+
+        Inputs: none.
+        Output: no return value. A burst with no keeper gains an automatic keeper on the recommended frame, except when that frame is already rejected.
+        Uses: showing a library after a scan.
+        Limitations: nothing happens before a library is loaded. A rejected recommended frame is skipped. Original files are not modified.
         """
 
         if self._library is None:
@@ -1296,12 +1871,28 @@ class MainWindow(QMainWindow):
             self._apply_decision(frame.path, "keep", origin="auto")
 
     def _on_eye_toggled(self, enabled: bool) -> None:
+        """
+        Rescan after eye sharpness is turned on or off.
+
+        Inputs: enabled, the new checkbox state. The argument is unused.
+        Output: no return value. Automatic keepers are cleared. An open folder is rescanned.
+        Uses: the Eye sharpness checkbox.
+        Limitations: with no folder open, only the automatic keepers are cleared. The new checkbox value is not read here.
+        """
         del enabled
         self._clear_automatic_keepers()
         if self._folder is not None:
             self.rescan()
 
     def _eye_circle(self, analysis: FrameAnalysis) -> tuple[int, int, int] | None:
+        """
+        Return the eye circle to draw on a preview.
+
+        Inputs: analysis, the frame measurement.
+        Output: center x, center y, and radius as integers, or None when eye scoring is off or this frame has no eye center or radius.
+        Uses: the eye mark on the preview and the compare pane.
+        Limitations: the circle is in embedded-preview pixels. A missing library, or eye scoring that is not active on the library, returns None.
+        """
         if self._library is None or not self._library.eye_active:
             return None
         metrics = analysis.metrics
@@ -1311,7 +1902,14 @@ class MainWindow(QMainWindow):
         return (int(x), int(y), int(metrics.eye_radius))
 
     def _clear_automatic_keepers(self) -> None:
-        """Drop keepers Outburst chose. Marks the photographer set stay."""
+        """
+        Drop keepers Outburst chose. Marks the photographer set stay.
+
+        Inputs: none.
+        Output: no return value. Keep marks whose origin is automatic are cleared.
+        Uses: a burst-gap change and turning eye scoring on or off.
+        Limitations: a photographer's keep or reject is left in place. Original files are not modified.
+        """
 
         automatic = [
             path
@@ -1322,11 +1920,15 @@ class MainWindow(QMainWindow):
             self._apply_decision(path, None)
 
     def _mark_keepers_for_new_bursts(self) -> None:
-        """Mark each burst's best frame after the burst gap changes.
+        """
+        Mark each burst's best frame after the burst gap changes.
 
-        A frame the photographer rejected stays rejected. A frame they already
-        marked as a keeper keeps that mark. Every other best frame is marked
-        automatically.
+        A frame the photographer rejected stays rejected. A frame they already marked as a keeper keeps that mark. Every other best frame is marked automatically.
+
+        Inputs: none.
+        Output: no return value. The recommended frame of each burst is stored as an automatic keeper unless it was rejected or the photographer already kept it.
+        Uses: the Burst gap control.
+        Limitations: nothing happens before a library is loaded. Every burst in the library is considered, including bursts hidden by Minimum frames. Original files are not modified.
         """
 
         if self._library is None:
@@ -1343,6 +1945,14 @@ class MainWindow(QMainWindow):
             self._apply_decision(frame.path, "keep", origin="auto")
 
     def _about(self) -> None:
+        """
+        Show the About Outburst message.
+
+        Inputs: none.
+        Output: no return value. A message box names the version and says the photographs stay on this computer.
+        Uses: the Help menu.
+        Limitations: a headless process returns without a message box. The text says original files are not modified.
+        """
         if os.environ.get("OUTBURST_HEADLESS") == "1":
             return
         QMessageBox.about(
@@ -1357,12 +1967,28 @@ class MainWindow(QMainWindow):
         )
 
     def _current_burst(self) -> Burst | None:
+        """
+        Return the burst selected in the list.
+
+        Inputs: none.
+        Output: the visible burst at the current index, or None when the list is empty or the index is out of range.
+        Uses: the preview, filmstrip, and keyboard navigation.
+        Limitations: bursts under Minimum frames are not returned.
+        """
         bursts = self._visible_bursts()
         if not bursts or not (0 <= self._burst_index < len(bursts)):
             return None
         return bursts[self._burst_index]
 
     def _current_analysis(self) -> FrameAnalysis | None:
+        """
+        Return the measurement for the current frame.
+
+        Inputs: none.
+        Output: the frame analysis, or None when no frame is current or the path has no measurement.
+        Uses: the preview and the keeper, reject, and star actions.
+        Limitations: the index is clamped to the burst before the path is read.
+        """
         burst = self._current_burst()
         if burst is None or not burst.frames:
             return None
@@ -1370,12 +1996,28 @@ class MainWindow(QMainWindow):
         return self._by_path.get(burst.frames[index].path)
 
     def _selected_path(self) -> Path | None:
+        """
+        Return the file path of the current frame.
+
+        Inputs: none.
+        Output: the photograph path, or None when no frame analysis is current.
+        Uses: keeping the same file selected after the burst list is rebuilt.
+        Limitations: a current frame with no analysis returns None.
+        """
         analysis = self._current_analysis()
         if analysis is None:
             return None
         return analysis.frame.path
 
     def _row_for_path(self, path: Path | None) -> int:
+        """
+        Find the burst-list row that contains a file.
+
+        Inputs: path, a photograph path, or None.
+        Output: the visible-burst index, or 0 when no library is loaded, the path is None, or the file is not in a visible burst.
+        Uses: restoring the selection after Minimum frames or the burst gap changes.
+        Limitations: a burst hidden by Minimum frames is not searched, so a file in that burst returns 0.
+        """
         if self._library is None or path is None:
             return 0
         for index, burst in enumerate(self._visible_bursts()):
@@ -1384,6 +2026,14 @@ class MainWindow(QMainWindow):
         return 0
 
     def _load_decisions(self) -> None:
+        """
+        Load saved keeper, reject, and star marks for the open library.
+
+        Inputs: none.
+        Output: no return value. The in-memory decisions, origins, and stars are replaced from the cache.
+        Uses: showing a library.
+        Limitations: a cache error logs a warning and clears the in-memory marks. No library clears them as well.
+        """
         if self._library is None:
             self._decisions = {}
             self._origins = {}
@@ -1402,6 +2052,14 @@ class MainWindow(QMainWindow):
             self._stars = {}
 
     def _apply_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
+        """
+        Store one keep or reject mark and write it to the cache.
+
+        Inputs: path, the photograph; decision, "keep", "reject", or None to clear; origin, "user" or "auto", used for a keep.
+        Output: no return value. The in-memory maps update and the cache is asked to save the mark.
+        Uses: keeper and reject actions, including automatic keepers.
+        Limitations: a reject is stored with user origin. Clearing a mark drops both the decision and its origin. Original files are not modified.
+        """
         if decision is None:
             self._decisions.pop(path, None)
             self._origins.pop(path, None)
@@ -1413,6 +2071,14 @@ class MainWindow(QMainWindow):
         self._save_decision(path, decision, origin=stored_origin)
 
     def _set_stars(self, stars: int) -> None:
+        """
+        Set or clear the star rating on the current frame.
+
+        Inputs: stars, 0 to clear, or 1 through 5.
+        Output: no return value. The same rating again clears it. The rating is saved, and the list, filmstrip, and preview refresh.
+        Uses: the star buttons and the 0 through 5 keys.
+        Limitations: nothing happens while a scan or a save is running, or when no frame is current. The rating is stored in the cache. The photograph file is not modified.
+        """
         analysis = self._current_analysis()
         if analysis is None or self._review_locked():
             return
@@ -1429,6 +2095,14 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _save_stars(self, path: Path, stars: int | None) -> None:
+        """
+        Write one star rating to the cache.
+
+        Inputs: path, the photograph; stars, 1 through 5, or None to clear.
+        Output: no return value. A cache error shows a warning.
+        Uses: the star rating on the current frame.
+        Limitations: the photograph file is not modified.
+        """
         try:
             with Cache(self._cache_dir) as cache:
                 cache.set_stars(path, stars)
@@ -1436,6 +2110,14 @@ class MainWindow(QMainWindow):
             self._notify("Could not save that rating", str(exc), "warning")
 
     def _save_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
+        """
+        Write one keep or reject mark to the cache.
+
+        Inputs: path, the photograph; decision, "keep", "reject", or None; origin, "user" or "auto".
+        Output: no return value. A cache error shows a warning.
+        Uses: keeper and reject marks.
+        Limitations: original files are not modified. A cache error leaves the in-memory mark in place and shows a warning.
+        """
         try:
             with Cache(self._cache_dir) as cache:
                 cache.set_decision(path, decision, origin=origin)
@@ -1443,6 +2125,14 @@ class MainWindow(QMainWindow):
             self._notify("Could not save that decision", str(exc), "warning")
 
     def _set_folder_label(self) -> None:
+        """
+        Show the open folder path on the toolbar.
+
+        Inputs: none.
+        Output: no return value. The label and its tooltip show the folder path, or the text "No folder open" with an empty tooltip.
+        Uses: the toolbar folder label.
+        Limitations: a missing folder clears both the text and the tooltip.
+        """
         if self._folder is None:
             self.folder_label.setText("No folder open")
             self.folder_label.setToolTip("")
@@ -1451,9 +2141,25 @@ class MainWindow(QMainWindow):
         self.folder_label.setToolTip(str(self._folder))
 
     def _review_locked(self) -> bool:
+        """
+        Report whether keeper, reject, and star changes should wait.
+
+        Inputs: none.
+        Output: True while a scan or a save is running.
+        Uses: the mark and rating actions.
+        Limitations: a model download does not lock review.
+        """
         return self._scanning or self._saving
 
     def _start_save(self, worker: QThread, message: str) -> None:
+        """
+        Run a keeper save or a sidecar write on a background thread.
+
+        Inputs: worker, the export or sidecar thread; message, the status text shown while it runs.
+        Output: no return value. The progress bar resets, the status shows the message, and the worker starts.
+        Uses: Save keepers and Write XMP sidecars.
+        Limitations: a save already in progress is ignored, including its worker. This method does not abort the worker.
+        """
         if self._saving:
             return
         self._save_id += 1
@@ -1470,6 +2176,14 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _on_save_finished(self, save_id: int, payload: object) -> None:
+        """
+        Report a finished keeper save or sidecar write.
+
+        Inputs: save_id, the save this result belongs to; payload, a sidecar tuple of written paths and warnings, or a list of export results.
+        Output: no return value. Saving stops and the status bar summarizes what was written. Sidecar warnings replace the stored scan notes.
+        Uses: the end of Save keepers or Write XMP sidecars.
+        Limitations: a stale save id is ignored. A payload that is neither a tuple nor a list is summarized as zero keepers.
+        """
         if save_id != self._save_id:
             return
         self._saving = False
@@ -1493,6 +2207,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message)
 
     def _on_save_failed(self, save_id: int, message: str) -> None:
+        """
+        Report a failed keeper save or sidecar write.
+
+        Inputs: save_id, the save this result belongs to; message, the error text.
+        Output: no return value. Saving stops, actions refresh, and a warning notice is shown.
+        Uses: a failed Save keepers or Write XMP sidecars action.
+        Limitations: a stale save id is ignored.
+        """
         if save_id != self._save_id:
             return
         self._saving = False
@@ -1501,6 +2223,14 @@ class MainWindow(QMainWindow):
         self._notify("Save failed", message, "warning")
 
     def _sync_actions(self) -> None:
+        """
+        Enable the actions that match the current scan, download, and save state.
+
+        Inputs: none.
+        Output: no return value. Save, report, and sidecar actions need a library and no scan or save. Cancel is shown during a scan or a download. The progress bar is shown during a scan, download, or save.
+        Uses: the toolbar and menus.
+        Limitations: Open is disabled only while saving. Rescan needs an open folder and no scan, download, or save. Save actions stay available during a model download when a library is already loaded.
+        """
         busy = self._scanning or self._downloading or self._saving
         ready = self._library is not None and not self._scanning and not self._saving
         self.export_action.setEnabled(ready)
@@ -1515,6 +2245,14 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(busy)
 
     def _set_filmstrip_sort(self, mode: str) -> None:
+        """
+        Set the filmstrip order without handling the button toggle.
+
+        Inputs: mode, "score", or any other string, which selects Time.
+        Output: no return value. The stored mode updates and the matching button is checked.
+        Uses: restoring the saved filmstrip order when the window opens.
+        Limitations: button signals are blocked, so the filmstrip is not rebuilt here. Time is shooting order and Score puts the highest composite first with ties in shooting order.
+        """
         chosen = "score" if mode == "score" else "time"
         self._filmstrip_sort = chosen
         button = self.sort_score if chosen == "score" else self.sort_time
@@ -1525,9 +2263,25 @@ class MainWindow(QMainWindow):
             item.blockSignals(False)
 
     def _notify(self, title: str, text: str, level: str) -> None:
+        """
+        Show a notice through the shared dialog helper.
+
+        Inputs: title, the notice title; text, the message; level, "warning" or "info".
+        Output: no return value. The helper logs the notice and shows a message box when one can be shown.
+        Uses: warnings and information from the review window.
+        Limitations: a headless process logs the notice and does not open a message box.
+        """
         notify(self, title, text, level)
 
     def _load_settings(self) -> None:
+        """
+        Restore the controls and the last folder from saved settings.
+
+        Inputs: none.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, subject, eye, filmstrip order, and model id are applied. A saved folder becomes the next dialog start.
+        Uses: opening the review window.
+        Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise.
+        """
         settings = QSettings("Outburst", "Outburst")
         self.controls.set_threshold(_as_float(settings.value("threshold"), 1.0))
         self.controls.set_sharpness_percent(_as_int(settings.value("sharpness"), 75))
@@ -1544,6 +2298,14 @@ class MainWindow(QMainWindow):
         self._model_ready()
 
     def _save_settings(self) -> None:
+        """
+        Store the controls and the open folder for the next launch.
+
+        Inputs: none.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, subject, eye, filmstrip order, and model id are written.
+        Uses: closing the review window.
+        Limitations: the folder is saved only when one is open. The resolved model path is saved only when one is stored.
+        """
         settings = QSettings("Outburst", "Outburst")
         settings.setValue("threshold", self.controls.threshold())
         settings.setValue("sharpness", self.controls.sharpness_percent())
@@ -1561,10 +2323,26 @@ class MainWindow(QMainWindow):
 
 
 def _typing_target(widget: QWidget | None) -> bool:
+    """
+    Report whether the focused widget should keep the key for itself.
+
+    Inputs: widget, the focused widget, or None.
+    Output: True for a line edit, spin box, slider, or combo box.
+    Uses: the keyboard filter, so review shortcuts do not take those keys.
+    Limitations: keys are ignored while a spin box is focused. The same is true for a slider, a line edit, and a combo box.
+    """
     return isinstance(widget, (QLineEdit, QAbstractSpinBox, QAbstractSlider, QComboBox))
 
 
 def _as_float(value: object, default: float) -> float:
+    """
+    Read a saved setting as a float.
+
+    Inputs: value, the stored object; default, the value used when conversion fails.
+    Output: the float, or default.
+    Uses: restoring the burst gap.
+    Limitations: a value that cannot be converted, including None, returns default.
+    """
     try:
         return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -1572,6 +2350,14 @@ def _as_float(value: object, default: float) -> float:
 
 
 def _as_int(value: object, default: int) -> int:
+    """
+    Read a saved setting as an integer.
+
+    Inputs: value, the stored object; default, the value used when conversion fails.
+    Output: the integer, after converting through float, or default.
+    Uses: restoring sharpness, center, and minimum frames.
+    Limitations: a non-numeric value returns default. A fractional value is truncated toward zero.
+    """
     try:
         return int(float(value))  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -1579,6 +2365,14 @@ def _as_int(value: object, default: int) -> int:
 
 
 def _saved_minimum_frames(settings: QSettings) -> int:
+    """
+    Read the saved minimum burst length, including the older single-burst setting.
+
+    Inputs: settings, the application settings.
+    Output: at least 1. A stored minimum is used. When none was stored, a true older show-single-bursts setting returns 1, and otherwise the result is 2.
+    Uses: restoring Minimum frames.
+    Limitations: a stored value below 1 is raised to 1. The older setting is used only when minimum_frames was never stored.
+    """
     stored = settings.value("minimum_frames")
     if stored not in (None, ""):
         return max(1, _as_int(stored, 2))
@@ -1588,6 +2382,14 @@ def _saved_minimum_frames(settings: QSettings) -> int:
 
 
 def _saved_model_id(settings: QSettings) -> str:
+    """
+    Read the saved subject model id, including an older saved path.
+
+    Inputs: settings, the application settings.
+    Output: a known model id, or the default model id.
+    Uses: restoring the subject model combo.
+    Limitations: an unknown id falls back to a model whose filename matches the old stored path, and then to the default id.
+    """
     model_id = str(settings.value("subject_model_id", "") or "")
     if option_by_id(model_id) is not None:
         return model_id
@@ -1600,6 +2402,14 @@ def _saved_model_id(settings: QSettings) -> str:
 
 
 def _as_bool(value: object, default: bool) -> bool:
+    """
+    Read a saved setting as a boolean.
+
+    Inputs: value, the stored object; default, the value used when the setting is missing.
+    Output: a real bool is returned as itself. None returns default. Otherwise the strings "1", "true", and "yes", in any case, are True.
+    Uses: restoring checkboxes.
+    Limitations: any other string, including "false", returns False rather than default.
+    """
     if isinstance(value, bool):
         return value
     if value is None:

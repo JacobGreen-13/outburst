@@ -12,6 +12,14 @@ from outburst.logsetup import configure_logging
 
 
 def main(argv: list[str] | None = None) -> int:
+    """
+    Parse the command line and open the review window.
+
+    Inputs: argv, the argument list, or None to read the process arguments.
+    Output: the Qt event-loop exit code, or 1 when PySide6 cannot be imported.
+    Uses: the application entry point that shows the review window.
+    Limitations: a folder argument is optional; without one the window opens empty. If preparing the cache directory raises OSError, logging is configured with no cache directory.
+    """
     parser = argparse.ArgumentParser(
         prog="outburst",
         description="Outburst — local, offline burst culling for wildlife and nature photographers.",
@@ -27,6 +35,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_gui(folder: Path | None) -> int:
+    """
+    Create the Qt application, show the review window, and run the event loop.
+
+    Inputs: folder, a burst folder to open, or None.
+    Output: the integer exit code from the Qt event loop, or 1 when PySide6 cannot be imported.
+    Uses: review-window startup.
+    Limitations: an existing QApplication is reused. The font size is raised to 12 only when the current point size is already positive. A folder is opened after the window is shown.
+    """
     try:
         from PySide6.QtGui import QFont
         from PySide6.QtWidgets import QApplication

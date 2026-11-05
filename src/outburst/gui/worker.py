@@ -32,6 +32,14 @@ class AnalyzeWorker(QThread):
         subject_model: Path | None,
         eye_scoring: bool = False,
     ) -> None:
+        """
+        Store the folder and scoring options for a background scan.
+
+        Inputs: folder; recursive; threshold, the burst gap in seconds; weights; cache_dir; subject_model, or None; eye_scoring.
+        Output: no return value. The worker is ready and its abort flag is clear.
+        Uses: the scan that fills the review window.
+        Limitations: storing the options does not start the scan. The thread runs when start is called.
+        """
         super().__init__()
         self._folder = folder
         self._recursive = recursive
@@ -43,9 +51,25 @@ class AnalyzeWorker(QThread):
         self._abort = False
 
     def abort(self) -> None:
+        """
+        Ask the running scan to stop.
+
+        Inputs: none.
+        Output: no return value. The abort flag is set for the pipeline's cancel check.
+        Uses: Cancel scan and closing the review window.
+        Limitations: the scan stops when the pipeline next checks the flag, so the current step can finish.
+        """
         self._abort = True
 
     def run(self) -> None:
+        """
+        Scan the folder and emit the finished library, a failure, or cancellation.
+
+        Inputs: none. The folder and options were stored on the worker.
+        Output: no return value. Emits succeeded with a library, failed with the exception text, or cancelled.
+        Uses: the background scan behind the review window.
+        Limitations: an abort discovered after a successful scan emits cancelled and does not emit the library. Original files are not modified.
+        """
         try:
             library = analyze_folder(
                 self._folder,
@@ -71,6 +95,14 @@ class AnalyzeWorker(QThread):
         self.succeeded.emit(library)
 
     def _on_progress(self, done: int, total: int, message: str) -> None:
+        """
+        Forward one scan progress update to the window.
+
+        Inputs: done, the finished count; total, the expected count; message, the status text.
+        Output: no return value. Emits the progress signal with those three values.
+        Uses: the status bar and progress bar during a scan.
+        Limitations: this method emits the signal and does not update widgets itself.
+        """
         self.progress.emit(done, total, message)
 
 
@@ -83,15 +115,39 @@ class ModelFetchWorker(QThread):
     cancelled = Signal()
 
     def __init__(self, model_id: str, directory: Path) -> None:
+        """
+        Store which subject model to download and where to save it.
+
+        Inputs: model_id, a subject-model identifier; directory, the models folder.
+        Output: no return value. The worker is ready and its abort flag is clear.
+        Uses: subject scoring setup before a scan.
+        Limitations: an unknown model id is reported later, when run executes.
+        """
         super().__init__()
         self._model_id = model_id
         self._directory = directory
         self._abort = False
 
     def abort(self) -> None:
+        """
+        Ask the model download to stop.
+
+        Inputs: none.
+        Output: no return value. The abort flag is set for the downloader's cancel check.
+        Uses: Cancel download and closing the review window.
+        Limitations: the download stops when the downloader next checks the flag.
+        """
         self._abort = True
 
     def run(self) -> None:
+        """
+        Download the selected subject model and emit its saved path.
+
+        Inputs: none. The model id and directory were stored on the worker.
+        Output: no return value. Emits succeeded with the path, failed with a message, or cancelled.
+        Uses: the subject-model download before a scan.
+        Limitations: an unknown model id emits failed with "Unknown subject model" and does not write a file. An abort after a successful download emits cancelled.
+        """
         option = option_by_id(self._model_id)
         if option is None:
             self.failed.emit("Unknown subject model")
@@ -124,12 +180,28 @@ class ExportWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, sources: list[Path], folder: Path, mode: str) -> None:
+        """
+        Store the keeper files, destination folder, and copy or link mode.
+
+        Inputs: sources, the files to save; folder, the destination; mode, "copy" or "hardlink".
+        Output: no return value. The worker is ready to start.
+        Uses: Save keepers.
+        Limitations: this worker has no abort flag. Original files are not modified.
+        """
         super().__init__()
         self._sources = sources
         self._folder = folder
         self._mode = mode
 
     def run(self) -> None:
+        """
+        Copy or link the keeper files and emit the results.
+
+        Inputs: none. Sources, folder, and mode were stored on the worker.
+        Output: no return value. Emits succeeded with the export results, or failed with the exception text.
+        Uses: Save keepers, off the window thread.
+        Limitations: the copies run two at a time. A file already in the destination is left as it is. Original files are not modified.
+        """
         try:
             results = export_keepers(
                 self._sources,
@@ -158,6 +230,14 @@ class SidecarWorker(QThread):
         stars: dict[Path, int],
         minimum_frames: int,
     ) -> None:
+        """
+        Store the library and the marks to write into sidecars.
+
+        Inputs: library; decisions, each path's keep or reject mark; stars, each path's rating; minimum_frames.
+        Output: no return value. The worker is ready to start.
+        Uses: Write XMP sidecars.
+        Limitations: this worker has no abort flag. It keeps the decision and star maps it was given.
+        """
         super().__init__()
         self._library = library
         self._decisions = decisions
@@ -165,6 +245,14 @@ class SidecarWorker(QThread):
         self._minimum_frames = minimum_frames
 
     def run(self) -> None:
+        """
+        Write XMP sidecars for the marked frames and emit what was written.
+
+        Inputs: none. The library, decisions, stars, and minimum were stored on the worker.
+        Output: no return value. Emits succeeded with the written paths and warnings, or failed with the exception text.
+        Uses: Write XMP sidecars, off the window thread.
+        Limitations: sidecars are keepers and star-rated frames only. The writes run two at a time. Original files are not modified.
+        """
         try:
             written, warnings = write_library_sidecars(
                 self._library,

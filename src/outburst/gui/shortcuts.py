@@ -29,6 +29,14 @@ SHORTCUTS: tuple[tuple[str, str], ...] = (
 
 
 def shortcuts_html() -> str:
+    """
+    Build the HTML table of keyboard shortcuts.
+
+    Inputs: none.
+    Output: an HTML fragment with one row per shortcut and a note about focus.
+    Uses: the Help menu shortcuts dialog.
+    Limitations: the note says these shortcuts are ignored while a slider or number box has focus, because arrow keys then adjust that control.
+    """
     rows = "".join(
         f"<tr><td style='padding:4px 16px 4px 0; font-weight:600;'>{keys}</td><td>{description}</td></tr>"
         for keys, description in SHORTCUTS
