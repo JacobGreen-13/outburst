@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
+
 import outburst.preview as preview_module
 from outburst.pipeline import analyze_folder, with_threshold, with_weights
 from outburst.models import Weights
@@ -86,6 +88,63 @@ def test_corrupt_raw_is_reported_without_modifying_it(tmp_path: Path, monkeypatc
     notes = " ".join(library.warnings)
     assert "exifread" in notes
     assert "CR3" in notes
+
+
+def test_preview_scoring_runs_on_more_than_one_thread(tmp_path: Path, monkeypatch) -> None:
+    import threading
+
+    import outburst.pipeline as pipeline_module
+
+    folder = tmp_path / "many"
+    folder.mkdir()
+    moment = datetime(2024, 3, 1, 8, 0, 0)
+    for index in range(4):
+        write_jpeg(folder / f"IMG_{index}.jpg", sharp_frame(seed=index), moment)
+    idents: set[int] = set()
+    original = pipeline_module.score_bgr
+
+    def counting(*args, **kwargs):  # type: ignore[no-untyped-def]
+        idents.add(threading.get_ident())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "score_bgr", counting)
+    library = analyze_folder(folder, cache_dir=tmp_path / "cache", threshold=1.0)
+    assert len(library.analyses) == 4
+    assert len(idents) >= 2
+
+
+def test_subject_detection_stays_on_the_calling_thread(tmp_path: Path) -> None:
+    import threading
+
+    folder = tmp_path / "birds"
+    folder.mkdir()
+    moment = datetime(2024, 3, 1, 8, 0, 0)
+    for index in range(5):
+        write_jpeg(folder / f"IMG_{index}.jpg", sharp_frame(seed=index + 3), moment)
+    idents: set[int] = set()
+
+    class FakeDetector:
+        def detect(self, image):  # type: ignore[no-untyped-def]
+            idents.add(threading.get_ident())
+            height, width = image.shape[:2]
+            return Detection((0, 0, width // 2, height // 2), "bird", 0.5)
+
+    library = analyze_folder(folder, cache_dir=tmp_path / "cache", detector=FakeDetector(), threshold=1.0)
+    assert len(library.analyses) == 5
+    assert idents == {threading.get_ident()}
+    assert all(item.metrics is not None and item.metrics.subject_label == "bird" for item in library.analyses)
+
+
+def test_cancel_stops_before_a_library_is_returned(tmp_path: Path) -> None:
+    from outburst.pipeline import CancelledError
+
+    folder = tmp_path / "cancel"
+    folder.mkdir()
+    moment = datetime(2024, 3, 1, 8, 0, 0)
+    for index in range(3):
+        write_jpeg(folder / f"IMG_{index}.jpg", sharp_frame(seed=index), moment)
+    with pytest.raises(CancelledError):
+        analyze_folder(folder, cache_dir=tmp_path / "cache", should_cancel=lambda: True)
 
 
 def test_subject_detector_is_optional(tmp_path: Path) -> None:

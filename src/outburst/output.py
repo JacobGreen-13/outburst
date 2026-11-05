@@ -11,13 +11,14 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from outburst import __version__
 from outburst.models import Burst, Frame, FrameAnalysis, Library
+from outburst.parallel import EXPORT_WORKERS, XMP_WORKERS, run_ordered
 from outburst.scoring import recommended_offset
 
 _XMP_NS = "http://ns.adobe.com/xap/1.0/"
@@ -82,40 +83,48 @@ def export_keepers(
     sources: Sequence[Path],
     dest_dir: Path,
     mode: str = "copy",
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> list[ExportResult]:
-    """Copy or hard-link keeper files. Existing different files are not overwritten."""
+    """Copy or hard-link keeper files. Existing different files are not overwritten.
+
+    Filenames are chosen on this thread. The copies themselves run two at a time.
+    """
 
     if mode not in {"copy", "hardlink"}:
         raise ValueError("mode must be 'copy' or 'hardlink'")
     dest_dir.mkdir(parents=True, exist_ok=True)
     reserved: set[str] = set()
-    results: list[ExportResult] = []
+    planned: list[tuple[Path, Path, bool]] = []
     for source in sources:
         if not source.is_file():
             raise FileNotFoundError(source)
         destination, already = _destination(source, dest_dir, reserved)
+        planned.append((source, destination, already))
+
+    def copy_at(index: int) -> ExportResult:
+        source, destination, already = planned[index]
         if already:
-            results.append(ExportResult(source, destination, "existing", "Already in the keepers folder"))
-            continue
+            return ExportResult(source, destination, "existing", "Already in the keepers folder")
         if mode == "hardlink":
             try:
                 os.link(source, destination)
             except OSError as exc:
                 shutil.copy2(source, destination)
-                results.append(
-                    ExportResult(
-                        source,
-                        destination,
-                        "copy",
-                        f"Hard link unavailable ({exc.__class__.__name__}); copied instead",
-                    )
+                return ExportResult(
+                    source,
+                    destination,
+                    "copy",
+                    f"Hard link unavailable ({exc.__class__.__name__}); copied instead",
                 )
-            else:
-                results.append(ExportResult(source, destination, "hardlink"))
-        else:
-            shutil.copy2(source, destination)
-            results.append(ExportResult(source, destination, "copy"))
-    return results
+            return ExportResult(source, destination, "hardlink")
+        shutil.copy2(source, destination)
+        return ExportResult(source, destination, "copy")
+
+    def report(index: int, _result: ExportResult) -> None:
+        if progress is not None:
+            progress(index + 1, len(planned), f"Saving {planned[index][0].name}")
+
+    return run_ordered(len(planned), copy_at, workers=EXPORT_WORKERS, on_finished=report)
 
 
 def sidecar_rating(decision: str | None, stars: int | None) -> int:
@@ -174,6 +183,7 @@ def write_library_sidecars(
     *,
     stars: Mapping[Path, int] | None = None,
     minimum_frames: int = 2,
+    progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[list[Path], list[str]]:
     """Write one XMP sidecar per frame. Returns written paths and warning strings."""
 
@@ -197,9 +207,8 @@ def write_library_sidecars(
         index = recommended_offset(burst.frames, by_path)
         recommended.add(burst.frames[index].path)
 
-    written: list[Path] = []
-    warnings: list[str] = []
     star_ratings = {} if stars is None else stars
+    jobs: list[tuple[Path, dict[str, str | None]]] = []
     for analysis in library.analyses:
         frame = analysis.frame
         decision = decisions.get(frame.path)
@@ -220,10 +229,28 @@ def write_library_sidecars(
             "outburst:App": "Outburst",
             "outburst:Version": __version__,
         }
+        jobs.append((frame.path, fields))
+
+    def write_at(index: int) -> tuple[Path | None, str | None]:
+        path, fields = jobs[index]
         try:
-            written.append(write_xmp_sidecar(frame.path, fields))
+            return write_xmp_sidecar(path, fields), None
         except (OSError, SidecarError) as exc:
-            warnings.append(f"{frame.path.name}: {exc}")
+            return None, f"{path.name}: {exc}"
+
+    written: list[Path] = []
+    warnings: list[str] = []
+
+    def collect(index: int, item: tuple[Path | None, str | None]) -> None:
+        path, warning = item
+        if path is not None:
+            written.append(path)
+        if warning is not None:
+            warnings.append(warning)
+        if progress is not None:
+            progress(index + 1, len(jobs), f"Writing {jobs[index][0].name}")
+
+    run_ordered(len(jobs), write_at, workers=XMP_WORKERS, on_finished=collect)
     return written, warnings
 
 

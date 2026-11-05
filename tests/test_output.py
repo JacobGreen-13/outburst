@@ -136,6 +136,16 @@ def test_choose_keepers_and_export_modes(tmp_path: Path) -> None:
     assert linked[0].destination.samefile(first)
     assert first.read_bytes() == b"aaa"
 
+    names = []
+    for index in range(4):
+        path = tmp_path / f"keep_{index}.jpg"
+        path.write_bytes(f"body-{index}".encode())
+        names.append(path)
+    copied_many = export_keepers(names, tmp_path / "batch", "copy")
+    assert [item.source for item in copied_many] == names
+    assert [item.destination.name for item in copied_many] == [path.name for path in names]
+    assert copied_many[3].destination.read_bytes() == b"body-3"
+
 
 def test_sidecar_writes_stars_and_pick_flags(tmp_path: Path) -> None:
     photo = tmp_path / "IMG_0004.CR2"

@@ -148,6 +148,51 @@ def test_download_error_removes_the_partial_file(tmp_path: Path, monkeypatch: py
     assert not (tmp_path / f"{option.filename}.part").exists()
 
 
+def test_detect_many_reads_a_batch_on_one_call() -> None:
+    import numpy as np
+
+    from outburst.subject import YoloSubjectDetector
+
+    class Boxes:
+        xyxy = [[1, 2, 11, 14], [0, 0, 3, 3]]
+        conf = [0.95, 0.4]
+        cls = [14, 14]
+
+        def __len__(self) -> int:
+            return len(self.cls)
+
+    class Result:
+        boxes = Boxes()
+        names = {14: "bird"}
+
+    class Model:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def predict(self, images, verbose, device, imgsz):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            self.batch = len(images)
+            assert verbose is False
+            assert device == "cpu"
+            assert imgsz == 640
+            return [Result() for _image in images]
+
+    model = Model()
+    detector = YoloSubjectDetector(model, "cpu")
+    blank = np.zeros((12, 12, 3), dtype=np.uint8)
+    found = detector.detect_many([blank, blank])
+    assert model.calls == 1
+    assert model.batch == 2
+    assert found[0] is not None and found[0].label == "bird"
+    assert found[0].box == (1, 2, 10, 12)
+    assert found[0].confidence == 0.95
+    assert found[1] is not None and found[1].label == "bird"
+    assert found[1].box == (1, 2, 10, 12)
+    single = detector.detect(blank)
+    assert single is not None and single.label == "bird"
+    assert model.calls == 2
+
+
 def test_unknown_model_id() -> None:
     assert option_by_id("missing") is None
     assert option_by_id("yolo11n") is not None
