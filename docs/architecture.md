@@ -33,17 +33,20 @@ Measurements:
 
 - **Sharpness** is the variance of a Laplacian on the grayscale preview. Higher means more fine detail.
 - **Center sharpness** uses the middle 60% of width and height.
+- **Critical sharpness** is the sharpest patch inside that center crop. Nine windows cover the crop. The value is 85% of the sharpest window plus 15% of the next, so one speck does not own the score.
 - **Tenengrad** (mean squared Sobel gradient) is stored and shown as edge energy. It does not affect the rank.
 - **Exposure** is 0 to 1. Pixels at or above 250 count as clipped highlights. Pixels at or below 5 count as crushed shadows. Highlights are penalized more heavily. A frame far from a mid tone is penalized a little.
-- **Subject sharpness**, when a box exists, is the Laplacian of that box expanded by 12%.
+- **Subject sharpness**, when a box exists, is the sharpest patch inside that box expanded by 12%.
 
 The sharpness that enters the score is:
 
 ```text
-center_mix * center_sharpness + (1 - center_mix) * sharpness
+center_mix * critical_sharpness + (1 - center_mix) * sharpness
 ```
 
-If subject scoring is on and a subject was found, that subject Laplacian replaces the blend.
+Older cached rows have no critical sharpness. Those rows use center sharpness in that same blend until a rescan. `SCORE_VERSION` is 2, so a new scan rebuilds them.
+
+If subject scoring is on and a subject was found, the subject patch replaces the blend.
 
 It is then mapped to 0..1 with a fixed scale so one frame does not depend on the rest of the burst:
 
@@ -78,7 +81,7 @@ Photograph files are opened for reading. Export uses `shutil.copy2` or `os.link`
 
 ## Window
 
-`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides bursts shorter than **Minimum frames** (2 by default). When a library is shown, each burst that has no keeper yet gets its recommended frame marked keep, stored as `auto`. Changing the burst gap deletes those automatic keeps, leaves `user` keeps, and marks the best frame of each regrouped burst as `auto` unless that frame is rejected or already a user keep. **Save keepers** writes marked frames from the bursts that are showing and skips the hidden shorter ones. The preview has **Mark as keeper** and **Reject** buttons besides the A and X keys. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
+`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides bursts shorter than **Minimum frames** (2 by default). When a library is shown, each burst that has no keeper yet gets its recommended frame marked keep, stored as `auto`. Changing the burst gap deletes those automatic keeps, leaves `user` keeps, and marks the best frame of each regrouped burst as `auto` unless that frame is rejected or already a user keep. **Save keepers** writes marked frames from the bursts that are showing and skips the hidden shorter ones. The preview has **Mark as keeper** and **Reject** buttons besides the A and X keys. **C** compares the current frame with the best other frame in the burst (the next sharpest when the current frame is already the best). **Z** shows the cached preview at 1:1 and drag pans it. **F** paints the strongest edges. **G** rejects frames that trail the best score by 0.18 or more, or whose highlight clip is at least 8% or shadow clip at least 25%. It skips the recommended frame and any keeper. Pressing **G** again clears the rejects that press just made. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
 
 ## Subject detection
 

@@ -4,57 +4,162 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QRect, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
+import cv2
+import numpy as np
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+
+from outburst.scoring import focus_peak_bgr
 
 
 class PreviewLabel(QLabel):
+    clicked = Signal()
+
     def __init__(self) -> None:
         super().__init__()
         self._source = QPixmap()
+        self._peaked = QPixmap()
         self._badge = ""
         self._badge_color = "#146b45"
+        self._box: tuple[int, int, int, int] | None = None
+        self._focus: tuple[int, int] | None = None
+        self._identity = ""
+        self._zoom = False
+        self._peak = False
+        self._origin_x = 0
+        self._origin_y = 0
+        self._pressed: QPoint | None = None
+        self._moved = False
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(280, 220)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setWordWrap(True)
 
-    def set_source(self, pixmap: QPixmap) -> None:
+    def set_source(
+        self,
+        pixmap: QPixmap,
+        *,
+        box: tuple[int, int, int, int] | None = None,
+        focus: tuple[int, int] | None = None,
+        identity: str = "",
+    ) -> None:
+        changed = identity != self._identity or (not identity and pixmap.cacheKey() != self._source.cacheKey())
+        self._identity = identity
         self._source = pixmap
+        self._box = box
+        self._focus = focus
+        if changed:
+            self._peaked = QPixmap()
         if pixmap.isNull():
             self.setPixmap(QPixmap())
-        else:
-            self.setText("")
-            self._rescale()
+            return
+        self.setText("")
+        if changed and self._zoom:
+            self._center_origin()
+        self._rescale()
 
     def set_badge(self, text: str, color: str) -> None:
         self._badge = text
         self._badge_color = color
 
+    def set_view(self, *, zoom: bool, peak: bool) -> None:
+        turned_on = zoom and not self._zoom
+        self._zoom = zoom
+        if not peak:
+            self._peaked = QPixmap()
+        self._peak = peak
+        if turned_on:
+            self._center_origin()
+        self.setCursor(
+            Qt.CursorShape.OpenHandCursor if zoom and not self._source.isNull() else Qt.CursorShape.ArrowCursor
+        )
+        self._rescale()
+
     def resizeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         super().resizeEvent(event)
         self._rescale()
 
-    def _rescale(self) -> None:
-        if self._source.isNull():
+    def mousePressEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = QPoint(int(event.position().x()), int(event.position().y()))
+            self._moved = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        if self._pressed is not None and self._zoom and event.buttons() & Qt.MouseButton.LeftButton:
+            delta_x = int(event.position().x()) - self._pressed.x()
+            delta_y = int(event.position().y()) - self._pressed.y()
+            if abs(delta_x) + abs(delta_y) > 3:
+                self._moved = True
+            self._origin_x -= delta_x
+            self._origin_y -= delta_y
+            self._pressed = QPoint(int(event.position().x()), int(event.position().y()))
+            self._clamp_origin(self._display_source())
+            self._rescale()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        if event.button() == Qt.MouseButton.LeftButton and self._pressed is not None and not self._moved:
+            self.clicked.emit()
+        self._pressed = None
+        super().mouseReleaseEvent(event)
+
+    def _center_origin(self) -> None:
+        source = self._display_source()
+        if source.isNull():
             return
+        focus = self._focus
+        if focus is None and self._box is not None:
+            x, y, width, height = self._box
+            focus = (x + width // 2, y + height // 2)
+        if focus is None:
+            focus = (source.width() // 2, source.height() // 2)
+        self._origin_x = int(focus[0] - self.width() / 2)
+        self._origin_y = int(focus[1] - self.height() / 2)
+        self._clamp_origin(source)
+
+    def _clamp_origin(self, source: QPixmap) -> None:
+        if source.isNull():
+            return
+        self._origin_x = min(max(0, self._origin_x), max(0, source.width() - self.width()))
+        self._origin_y = min(max(0, self._origin_y), max(0, source.height() - self.height()))
+
+    def _display_source(self) -> QPixmap:
+        if self._source.isNull() or not self._peak:
+            return self._source
+        if self._peaked.isNull():
+            self._peaked = _peak_pixmap(self._source)
+        return self._peaked
+
+    def _rescale(self) -> None:
+        source = self._display_source()
+        if source.isNull():
+            return
+        if self._box is not None:
+            source = _draw_box(source, self._box)
         target = self.size()
         if target.width() < 2 or target.height() < 2:
             return
-        scaled = self._source.scaled(
-            target,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        if self._zoom:
+            self._clamp_origin(source)
+            cropped = source.copy(QRect(self._origin_x, self._origin_y, target.width(), target.height()))
+            shown = cropped
+        else:
+            shown = source.scaled(
+                target,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
         if self._badge:
-            scaled = _draw_badge(scaled, self._badge, self._badge_color)
-        self.setPixmap(scaled)
+            shown = _draw_badge(shown, self._badge, self._badge_color)
+        self.setPixmap(shown)
 
 
 class ImageViewer(QFrame):
     keeper_clicked = Signal()
     reject_clicked = Signal()
+    partner_clicked = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -63,6 +168,24 @@ class ImageViewer(QFrame):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
         self.preview = PreviewLabel()
+        self.partner = PreviewLabel()
+        self.partner.clicked.connect(self.partner_clicked.emit)
+        self.partner_caption = QLabel("Best in the burst")
+        self.partner_caption.setObjectName("partnerCaption")
+        self.partner_box = QWidget()
+        partner_layout = QVBoxLayout(self.partner_box)
+        partner_layout.setContentsMargins(0, 0, 0, 0)
+        partner_layout.setSpacing(4)
+        partner_layout.addWidget(self.partner_caption)
+        partner_layout.addWidget(self.partner, 1)
+        self.partner_box.hide()
+        panes = QHBoxLayout()
+        panes.setSpacing(8)
+        panes.addWidget(self.preview, 1)
+        panes.addWidget(self.partner_box, 1)
+        self.hint = QLabel()
+        self.hint.setObjectName("viewerHint")
+        self.hint.hide()
         self.keeper_button = QPushButton("Mark as keeper")
         self.keeper_button.setObjectName("keeperButton")
         self.keeper_button.setCheckable(True)
@@ -84,7 +207,8 @@ class ImageViewer(QFrame):
         self.info.setWordWrap(True)
         self.info.setTextFormat(Qt.TextFormat.RichText)
         self.info.setMinimumHeight(108)
-        layout.addWidget(self.preview, 1)
+        layout.addLayout(panes, 1)
+        layout.addWidget(self.hint)
         layout.addLayout(marks)
         layout.addWidget(self.info)
         self.set_placeholder(
@@ -98,9 +222,56 @@ class ImageViewer(QFrame):
         self.preview.set_badge("", "#146b45")
         self.preview.set_source(QPixmap())
         self.preview.setText(text)
+        self.partner_box.hide()
+        self.hint.hide()
         self.info.setText("")
         self.set_border("#2a2a2a")
         self._apply_marks(False, False, enabled=False)
+
+    def set_view_mode(self, *, zoom: bool, peak: bool) -> None:
+        self.preview.set_view(zoom=zoom, peak=peak)
+        self.partner.set_view(zoom=zoom, peak=peak)
+        notes: list[str] = []
+        if zoom:
+            notes.append("1:1 preview · drag to look around")
+        if peak:
+            notes.append("Green marks the strongest edges")
+        self.hint.setText("  ·  ".join(notes))
+        self.hint.setVisible(bool(notes))
+
+    def set_compare(self, visible: bool) -> None:
+        self.partner_box.setVisible(visible)
+
+    def set_partner(
+        self,
+        preview: Path | None,
+        box: tuple[int, int, int, int] | None,
+        caption: str,
+        *,
+        keeper: bool = False,
+        rejected: bool = False,
+    ) -> None:
+        self.partner_caption.setText(caption)
+        pixmap = QPixmap(str(preview)) if preview is not None else QPixmap()
+        if rejected:
+            self.partner.set_badge("REJECTED", "#8a3a3a")
+        elif keeper:
+            self.partner.set_badge("KEEPER", "#146b45")
+        else:
+            self.partner.set_badge("", "#146b45")
+        focus = _box_center(box)
+        identity = "" if preview is None else str(preview)
+        if pixmap.isNull():
+            self.partner.set_source(QPixmap(), identity=identity)
+            self.partner.setText("No preview for this frame")
+        else:
+            self.partner.set_source(pixmap, box=box, focus=focus, identity=identity)
+
+    def set_partner_message(self, caption: str, message: str) -> None:
+        self.partner_caption.setText(caption)
+        self.partner.set_badge("", "#146b45")
+        self.partner.set_source(QPixmap())
+        self.partner.setText(message)
 
     def set_frame(
         self,
@@ -119,13 +290,13 @@ class ImageViewer(QFrame):
             self.preview.set_badge("KEEPER", "#146b45")
         else:
             self.preview.set_badge("", "#146b45")
+        focus = _box_center(box)
+        identity = "" if preview is None else str(preview)
         if pixmap.isNull():
-            self.preview.set_source(QPixmap())
+            self.preview.set_source(QPixmap(), identity=identity)
             self.preview.setText("No preview for this frame")
         else:
-            if box is not None:
-                pixmap = _draw_box(pixmap, box)
-            self.preview.set_source(pixmap)
+            self.preview.set_source(pixmap, box=box, focus=focus, identity=identity)
         self.info.setText(html)
         self.set_border(border)
         self._apply_marks(keeper, rejected, enabled=True)
@@ -137,6 +308,7 @@ class ImageViewer(QFrame):
             "}"
             "QFrame#viewerFrame QLabel { color: #f2f2f2; background: transparent; }"
             "QLabel#infoPanel { background: #1b1b1b; }"
+            "QLabel#partnerCaption, QLabel#viewerHint { color: #c8c8c8; }"
             "QPushButton#keeperButton, QPushButton#rejectButton {"
             "min-height: 36px; font-size: 14px; font-weight: 600; padding: 8px 16px;"
             "}"
@@ -159,6 +331,13 @@ class ImageViewer(QFrame):
         self.reject_button.setEnabled(enabled)
         self.keeper_button.blockSignals(False)
         self.reject_button.blockSignals(False)
+
+
+def _box_center(box: tuple[int, int, int, int] | None) -> tuple[int, int] | None:
+    if box is None:
+        return None
+    x, y, width, height = box
+    return (x + width // 2, y + height // 2)
 
 
 def _draw_box(pixmap: QPixmap, box: tuple[int, int, int, int]) -> QPixmap:
@@ -202,3 +381,30 @@ def _draw_badge(pixmap: QPixmap, text: str, color: str) -> QPixmap:
     finally:
         painter.end()
     return painted
+
+
+def _peak_pixmap(pixmap: QPixmap) -> QPixmap:
+    image = _pixmap_to_bgr(pixmap)
+    if image is None:
+        return pixmap
+    return _bgr_to_pixmap(focus_peak_bgr(image))
+
+
+def _pixmap_to_bgr(pixmap: QPixmap) -> np.ndarray | None:
+    if pixmap.isNull():
+        return None
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
+    width = image.width()
+    height = image.height()
+    if width < 1 or height < 1:
+        return None
+    stride = image.bytesPerLine()
+    raw = np.frombuffer(image.constBits(), dtype=np.uint8, count=stride * height)
+    rgb = np.ascontiguousarray(raw.reshape((height, stride))[:, : width * 3].reshape((height, width, 3)))
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def _bgr_to_pixmap(image: np.ndarray) -> QPixmap:
+    rgb = np.ascontiguousarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    qimage = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.shape[1] * 3, QImage.Format.Format_RGB888)
+    return QPixmap.fromImage(qimage.copy())

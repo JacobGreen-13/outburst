@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS frame_metrics (
     camera TEXT,
     sharpness REAL,
     center_sharpness REAL,
+    critical_sharpness REAL,
     tenengrad REAL,
     exposure REAL,
     highlight_clip REAL,
@@ -97,6 +98,7 @@ class Cache:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._ensure_decision_origin()
+        self._ensure_critical_sharpness()
         self._conn.commit()
 
     def close(self) -> None:
@@ -135,6 +137,7 @@ class Cache:
             exposure=row["exposure"],
             highlight_clip=row["highlight_clip"],
             shadow_clip=row["shadow_clip"],
+            critical_sharpness=row["critical_sharpness"],
             subject_sharpness=row["subject_sharpness"],
             subject_box=_parse_box(row["subject_box"]),
             subject_label=row["subject_label"],
@@ -169,10 +172,10 @@ class Cache:
             INSERT OR REPLACE INTO frame_metrics (
                 path, mtime_ns, size, score_version, subject_key,
                 captured_at, timestamp_source, camera,
-                sharpness, center_sharpness, tenengrad, exposure,
+                sharpness, center_sharpness, critical_sharpness, tenengrad, exposure,
                 highlight_clip, shadow_clip, subject_sharpness, subject_confidence,
                 subject_label, subject_box, preview_rel, thumb_rel, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(path),
@@ -185,6 +188,7 @@ class Cache:
                 camera,
                 metrics.sharpness,
                 metrics.center_sharpness,
+                metrics.critical_sharpness,
                 metrics.tenengrad,
                 metrics.exposure,
                 metrics.highlight_clip,
@@ -269,6 +273,12 @@ class Cache:
         self._conn.execute(
             "ALTER TABLE decisions ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'"
         )
+
+    def _ensure_critical_sharpness(self) -> None:
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(frame_metrics)")}
+        if "critical_sharpness" in columns:
+            return
+        self._conn.execute("ALTER TABLE frame_metrics ADD COLUMN critical_sharpness REAL")
 
     def forget_folder(self, folder: Path) -> int:
         """Drop cached measurements and preview files for photographs inside ``folder``.

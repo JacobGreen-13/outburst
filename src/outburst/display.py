@@ -10,8 +10,15 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from outburst.models import Burst, FrameAnalysis, Metrics, Weights
+from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
 from outburst.scoring import effective_sharpness, recommended_offset, score_percent
+
+# A frame this far below the best score is called soft in the filmstrip.
+SOFT_SCORE_GAP = 0.15
+# Larger gaps and heavy clipping are the misses G can reject.
+OBVIOUS_SCORE_GAP = 0.18
+OBVIOUS_HIGHLIGHT_CLIP = 0.08
+OBVIOUS_SHADOW_CLIP = 0.25
 
 
 def visible_bursts(bursts: Sequence[Burst], *, minimum_frames: int) -> tuple[Burst, ...]:
@@ -51,6 +58,63 @@ def burst_list_text(
     suffix = f"  ·  {state}" if state else ""
     noun = "frame" if burst.count == 1 else "frames"
     return f"{human_burst_name(burst.id)}  ·  {burst.count} {noun}\n{when}  ·  best {score}{suffix}"
+
+
+def score_caption(
+    composite: float | None,
+    metrics: Metrics | None,
+    *,
+    best_composite: float | None,
+) -> str:
+    """Score for a filmstrip card, with CLIP or SOFT when the frame needs a look."""
+
+    text = score_percent(composite)
+    notes: list[str] = []
+    if metrics is not None and (metrics.highlight_clip >= 0.02 or metrics.shadow_clip >= 0.05):
+        notes.append("CLIP")
+    if (
+        best_composite is not None
+        and composite is not None
+        and best_composite - composite >= SOFT_SCORE_GAP
+    ):
+        notes.append("SOFT")
+    if not notes:
+        return text
+    return f"{text}  {' '.join(notes)}"
+
+
+def obvious_misses(
+    frames: Sequence[Frame],
+    by_path: dict[Path, FrameAnalysis],
+    decisions: dict[Path, str],
+) -> tuple[Path, ...]:
+    """Frames a photographer can drop without touching the best one or a keeper.
+
+    A miss is much softer than the recommended frame, or heavily clipped.
+    The recommended frame stays, and so does any frame already marked keep.
+    """
+
+    if len(frames) < 2:
+        return ()
+    best_index = recommended_offset(frames, by_path)
+    best = by_path.get(frames[best_index].path)
+    best_composite = None if best is None else best.composite
+    misses: list[Path] = []
+    for index, frame in enumerate(frames):
+        if index == best_index or decisions.get(frame.path) in {"keep", "reject"}:
+            continue
+        analysis = by_path.get(frame.path)
+        if analysis is None or analysis.metrics is None or analysis.composite is None:
+            continue
+        metrics = analysis.metrics
+        clipped = (
+            metrics.highlight_clip >= OBVIOUS_HIGHLIGHT_CLIP
+            or metrics.shadow_clip >= OBVIOUS_SHADOW_CLIP
+        )
+        soft = best_composite is not None and best_composite - analysis.composite >= OBVIOUS_SCORE_GAP
+        if clipped or soft:
+            misses.append(frame.path)
+    return tuple(misses)
 
 
 def thumb_badge(best: bool, decision: str | None) -> str:
@@ -151,8 +215,10 @@ def frame_info_html(
         extra = (
             f'<div style="color:#9a9a9a; margin-top:4px;">Full-frame sharpness {metrics.sharpness:.0f}'
             f" &nbsp;·&nbsp; Center {metrics.center_sharpness:.0f}"
-            f" &nbsp;·&nbsp; Edge energy {metrics.tenengrad:.0f}</div>"
         )
+        if metrics.critical_sharpness is not None:
+            extra += f" &nbsp;·&nbsp; Sharpest patch {metrics.critical_sharpness:.0f}"
+        extra += f" &nbsp;·&nbsp; Edge energy {metrics.tenengrad:.0f}</div>"
         if subject_active:
             if metrics.subject_sharpness is not None:
                 label = metrics.subject_label or "subject"
@@ -161,7 +227,7 @@ def frame_info_html(
                     confidence = f" {metrics.subject_confidence:.0%}"
                 extra += (
                     f'<div style="color:#8fd9b5; margin-top:4px;">Subject {escape(label)}{escape(confidence)}'
-                    f" &nbsp;·&nbsp; sharpness {metrics.subject_sharpness:.0f}</div>"
+                    f" &nbsp;·&nbsp; sharpest patch {metrics.subject_sharpness:.0f}</div>"
                 )
             else:
                 extra += (
