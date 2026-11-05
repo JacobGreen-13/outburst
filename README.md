@@ -185,13 +185,13 @@ Choose a model in the dropdown, or check **Subject-aware sharpness**, then press
 
 When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched when you choose it or when you rescan with subject scoring on. Photos are still never uploaded.
 
-On Apple Silicon the detector uses MPS when PyTorch provides it. On NVIDIA it uses CUDA. Otherwise it uses the CPU. The rest of Outburst does not need a GPU.
+On Apple Silicon the subject detector uses MPS when PyTorch provides it. On NVIDIA it uses CUDA. Otherwise it uses the CPU. Bird eye detection stays on the CPU so the eye point is not shifted by the MPS pose path. The rest of Outburst does not need a GPU.
 
 ## Bird eye detection
 
 This is optional and stays off until you check **Bird eye detection** on the scoring panel. The first time you turn it on, Outburst downloads `eye_pose_v0.pt` (about 6 MB) into the models folder. That file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. It finds a bird and the left and right eye. The same `outburst[subject]` install that provides Ultralytics is required. The weights are AGPL-3.0, separate from Outburst. Photos are not uploaded.
 
-The model is birds only. It was trained on studio and Flickr-style bird photos, so a distant or unusual field frame may have no eye. A keypoint below 0.35 confidence is ignored. An eye is rated only when the disk drawn around it is at least 16 pixels across on the analysis preview. A smaller eye is noted and left out of the ranking. If the model finds nothing, the frame says no bird eye was found.
+The model is birds only. It was trained on studio and Flickr-style bird photos, so a distant or unusual field frame may have no eye. Outburst hands it the analysis preview as OpenCV BGR. Ultralytics converts that to RGB. The whole preview is checked first. When that finds no eye, overlapping 512 pixel windows are checked and the strongest eye is mapped back onto the preview, so a bird that is clear but does not fill the frame can still be marked. A keypoint below 0.35 confidence is ignored. An eye is rated only when the disk drawn around it is at least 16 pixels across on the analysis preview. A smaller eye is noted and left out of the ranking. If the model finds nothing, the frame says no bird eye was found. A scan from before this reading is scored again the next time bird eye detection is on.
 
 When a burst has two or more frames with a rated eye, the sharpest of those eyes is the best frame and Outburst marks it as a keeper. A reject on that frame stays rejected. A keeper you already set stays yours. Other automatic keepers in that burst are cleared. A burst with fewer than two rated eyes uses the usual sharpness rank, and Outburst marks a keeper only when the burst does not already have one.
 
