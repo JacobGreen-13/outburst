@@ -48,6 +48,7 @@ def analyze_folder(
     cache_dir: Path | None = None,
     subject_model: Path | None = None,
     detector: SubjectDetector | None = None,
+    eye_scoring: bool = False,
     progress: ProgressCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> Library:
@@ -70,12 +71,23 @@ def analyze_folder(
             warnings.append(f"Subject detection stayed off: {exc}")
             detector = None
             subject_key = ""
+    if eye_scoring:
+        subject_key = f"{subject_key}|eye" if subject_key else "eye"
 
     files = scan_folder(folder, recursive=recursive)
     log.info("Found %d file(s) in %s", len(files), folder)
     if not files:
         _report(progress, 0, 0, "No photographs found")
-        return Library(folder, (), (), ("No RAW or JPEG files were found in that folder.",), threshold, weights, False)
+        return Library(
+            folder,
+            (),
+            (),
+            ("No RAW or JPEG files were found in that folder.",),
+            threshold,
+            weights,
+            False,
+            eye_scoring,
+        )
 
     reader_note = timestamp_reader_warning(item.path.suffix for item in files if item.kind == "raw")
     if reader_note:
@@ -96,6 +108,7 @@ def analyze_folder(
             weights=weights,
             detector=detector,
             subject_key=subject_key,
+            eye_scoring=eye_scoring,
             progress=progress,
             should_cancel=should_cancel,
         )
@@ -131,6 +144,7 @@ def analyze_folder(
         threshold=threshold,
         weights=weights,
         subject_active=subject_active,
+        eye_active=eye_scoring,
     )
 
 
@@ -156,6 +170,7 @@ def _score_all(
     weights: Weights,
     detector: SubjectDetector | None,
     subject_key: str,
+    eye_scoring: bool,
     progress: ProgressCallback | None,
     should_cancel: Callable[[], bool] | None,
 ) -> tuple[list[FrameAnalysis], int]:
@@ -196,6 +211,7 @@ def _score_all(
             weights=weights,
             detector=detector,
             subject_key=subject_key,
+            eye_scoring=eye_scoring,
         )
         detection_failures += failed
         analyses.append(analysis)
@@ -213,6 +229,7 @@ def _score_file(
     weights: Weights,
     detector: SubjectDetector | None,
     subject_key: str,
+    eye_scoring: bool,
 ) -> tuple[FrameAnalysis, int]:
     from datetime import datetime
 
@@ -243,6 +260,17 @@ def _score_file(
             subject_label=None if detection is None else detection.label,
             subject_confidence=None if detection is None else detection.confidence,
         )
+        if eye_scoring:
+            from outburst.eyes import locate_eye
+
+            eye = locate_eye(image, None if detection is None else detection.box)
+            if eye is not None:
+                metrics = replace(
+                    metrics,
+                    eye_sharpness=eye.sharpness,
+                    eye_center=(eye.x, eye.y),
+                    eye_radius=eye.radius,
+                )
         preview_path, thumb_path = _write_previews(cache, scanned, subject_key, image)
         if cache is not None and preview_path is not None and thumb_path is not None:
             cache.put(

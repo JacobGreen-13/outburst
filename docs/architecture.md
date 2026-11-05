@@ -11,6 +11,7 @@ Outburst is a desktop app. The scoring pipeline does not import Qt, so it can be
 | `grouping.py` | Sorts by capture time and groups consecutive frames whose gap is strictly below the threshold. Frames with no capture time stay alone. |
 | `preview.py` | Loads a preview. Paired JPEGs win. Otherwise rawpy's embedded thumbnail is used. A byte scan for an embedded JPEG is the fallback. Full demosaic is never requested. |
 | `scoring.py` | Laplacian variance, optional Tenengrad, exposure penalties, and the weighted composite. Pure functions. |
+| `eyes.py` | Optional classical eye finder. A dark round spot is an eye. It is rated only when the disk is at least 16 px across on the analysis preview. |
 | `subject.py` | Optional YOLO detector and the model catalog. Device order is Apple Silicon MPS, then NVIDIA CUDA, then CPU. `ensure_model` downloads a missing weights file into the models folder. `load_yolo_detector` only opens a file that is already there. |
 | `cache.py` | SQLite plus JPEG previews in the user cache directory. |
 | `pipeline.py` | Ties the steps together and rebuilds scores or groups when weights or the gap change. |
@@ -23,9 +24,10 @@ Outburst is a desktop app. The scoring pipeline does not import Qt, so it can be
 2. Reuse a cache row when the path, size, modification time, score version, and subject-model key match and the preview files are still on disk.
 3. For cache misses, read capture time, decode a preview, and shrink the long edge to 1024 px before measuring. A 360 px thumbnail is stored for the filmstrip.
 4. If a subject detector is active, it runs on that same 1024 px image. The box is stored in those coordinates and drawn on the preview.
-5. Group the frames and hand a `Library` to the window.
+5. If eye scoring is on, the same preview is searched for a dark round eye, inside the subject box when one exists. The center, radius, and sharpness (only when the eye is large enough) are stored on the metrics. The cache key gains `|eye`, so an eye scan does not reuse a row from a scan without it.
+6. Group the frames and hand a `Library` to the window.
 
-Changing the sharpness, exposure, or center sliders recomputes the composite from cached measurements. Changing the burst gap only regroups. Neither step rereads the RAW files. Turning subject detection on starts a new scan, because that measurement is not in the plain cache row.
+Changing the sharpness, exposure, or center sliders recomputes the composite from cached measurements. Changing the burst gap only regroups. Neither step rereads the RAW files. Turning subject detection or eye scoring on starts a new scan, because that measurement is not in the plain cache row. Turning eye scoring off does the same, and clears automatic keepers first.
 
 ## Scoring
 
@@ -58,6 +60,8 @@ composite  = (sharpness_weight * normalized + exposure_weight * exposure)
 
 The window shows `composite * 100` as a whole number. The recommended frame is the highest composite. Ties prefer a higher full-frame Laplacian, then the earlier filename.
 
+When two or more frames in a burst have `eye_sharpness`, the recommended frame is the highest eye sharpness instead. An earlier filename breaks that tie. One rated eye, or none, leaves the composite rank in place. Eye sharpness is the Laplacian variance inside the eye circle. A detected eye smaller than 16 px is stored without a sharpness value.
+
 `SCORE_VERSION` in `scoring.py` is part of the cache key. Bump it when the measurement formula changes.
 
 ## Cache and decisions
@@ -81,7 +85,7 @@ Photograph files are opened for reading. Export uses `shutil.copy2` or `os.link`
 
 ## Window
 
-`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides bursts shorter than **Minimum frames** (2 by default). When a library is shown, each burst that has no keeper yet gets its recommended frame marked keep, stored as `auto`. Changing the burst gap deletes those automatic keeps, leaves `user` keeps, and marks the best frame of each regrouped burst as `auto` unless that frame is rejected or already a user keep. **Save keepers** writes marked frames from the bursts that are showing and skips the hidden shorter ones. The preview has **Mark as keeper** and **Reject** buttons besides the A and X keys. **C** compares the current frame with the best other frame in the burst (the next sharpest when the current frame is already the best). **Z** shows the cached preview at 1:1 and drag pans it. **F** paints the strongest edges. **G** rejects frames that trail the best score by 0.18 or more, or whose highlight clip is at least 8% or shadow clip at least 25%. It skips the recommended frame and any keeper. Pressing **G** again clears the rejects that press just made. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
+`AnalyzeWorker` is a `QThread`. It emits progress and a finished `Library`. The window ignores results from a scan that was cancelled or replaced, using a scan id. `ModelFetchWorker` is a separate thread for the weights download. The burst list hides bursts shorter than **Minimum frames** (2 by default). When a library is shown, each burst that has no keeper yet gets its recommended frame marked keep, stored as `auto`. If the burst has two or more rated eyes, that mark follows the sharpest eye: other automatic keepers in the burst are cleared, a reject is left rejected, and a keeper the photographer set keeps its origin. Changing the burst gap deletes automatic keeps, leaves `user` keeps, and marks the best frame of each regrouped burst as `auto` unless that frame is rejected or already a user keep. The **Eye sharpness** checkbox does the same clear, then rescans. **Save keepers** writes marked frames from the bursts that are showing and skips the hidden shorter ones. The preview has **Mark as keeper** and **Reject** buttons besides the A and X keys. **C** compares the current frame with the best other frame in the burst (the next sharpest when the current frame is already the best). **Z** shows the cached preview at 1:1 and drag pans it. **F** paints the strongest edges. **G** rejects frames that trail the best score by 0.18 or more, or whose highlight clip is at least 8% or shadow clip at least 25%. It skips the recommended frame and any keeper. Pressing **G** again clears the rejects that press just made. Arrow keys are handled in an application event filter so they still work when the burst list has focus, and they are left alone when a slider, the burst-gap box, or the model dropdown has focus.
 
 ## Subject detection
 

@@ -11,7 +11,7 @@ from html import escape
 from pathlib import Path
 
 from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
-from outburst.scoring import effective_sharpness, recommended_offset, score_percent
+from outburst.scoring import effective_sharpness, eye_chooses_best, recommended_offset, score_percent
 
 # A frame this far below the best score is called soft in the filmstrip.
 SOFT_SCORE_GAP = 0.15
@@ -56,8 +56,9 @@ def burst_list_text(
     score = score_percent(None if best is None else best.composite)
     state = burst_state(burst, decisions)
     suffix = f"  ·  {state}" if state else ""
+    eye = "  ·  eye" if eye_chooses_best(burst.frames, by_path) else ""
     noun = "frame" if burst.count == 1 else "frames"
-    return f"{human_burst_name(burst.id)}  ·  {burst.count} {noun}\n{when}  ·  best {score}{suffix}"
+    return f"{human_burst_name(burst.id)}  ·  {burst.count} {noun}\n{when}  ·  best {score}{eye}{suffix}"
 
 
 def star_glyphs(stars: int | None) -> str:
@@ -147,6 +148,16 @@ def burst_state(burst: Burst, decisions: dict[Path, str]) -> str:
     return ""
 
 
+def _eye_line(metrics: Metrics) -> str:
+    if metrics.eye_radius is None or metrics.eye_center is None:
+        return '<div style="color:#9a9a9a; margin-top:4px;">No eye found</div>'
+    if metrics.eye_sharpness is None:
+        return '<div style="color:#9a9a9a; margin-top:4px;">Eye is too small to rate</div>'
+    return (
+        f'<div style="color:#e6c15a; margin-top:4px;">Eye sharpness {metrics.eye_sharpness:.0f}</div>'
+    )
+
+
 def clip_status(metrics: Metrics) -> tuple[str, bool]:
     """A short exposure sentence and whether it should be shown as a warning."""
 
@@ -175,6 +186,7 @@ def frame_info_html(
     decision: str | None,
     subject_active: bool,
     stars: int | None = None,
+    eye_active: bool = False,
 ) -> str:
     """Rich text for the preview panel. Filenames are escaped."""
 
@@ -266,6 +278,8 @@ def frame_info_html(
                     "No animal detected in this preview. Using frame sharpness."
                     "</div>"
                 )
+        if eye_active:
+            extra += _eye_line(metrics)
     return (
         title
         + f'<div style="color:#e8e8e8; margin-top:6px;">{detail}</div>'

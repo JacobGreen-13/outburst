@@ -23,6 +23,7 @@ class PreviewLabel(QLabel):
         self._badge = ""
         self._badge_color = "#146b45"
         self._box: tuple[int, int, int, int] | None = None
+        self._circle: tuple[int, int, int] | None = None
         self._focus: tuple[int, int] | None = None
         self._identity = ""
         self._zoom = False
@@ -41,6 +42,7 @@ class PreviewLabel(QLabel):
         pixmap: QPixmap,
         *,
         box: tuple[int, int, int, int] | None = None,
+        circle: tuple[int, int, int] | None = None,
         focus: tuple[int, int] | None = None,
         identity: str = "",
     ) -> None:
@@ -48,6 +50,7 @@ class PreviewLabel(QLabel):
         self._identity = identity
         self._source = pixmap
         self._box = box
+        self._circle = circle
         self._focus = focus
         if changed:
             self._peaked = QPixmap()
@@ -138,6 +141,8 @@ class PreviewLabel(QLabel):
             return
         if self._box is not None:
             source = _draw_box(source, self._box)
+        if self._circle is not None:
+            source = _draw_circle(source, self._circle)
         target = self.size()
         if target.width() < 2 or target.height() < 2:
             return
@@ -261,6 +266,7 @@ class ImageViewer(QFrame):
         box: tuple[int, int, int, int] | None,
         caption: str,
         *,
+        circle: tuple[int, int, int] | None = None,
         keeper: bool = False,
         rejected: bool = False,
     ) -> None:
@@ -272,13 +278,13 @@ class ImageViewer(QFrame):
             self.partner.set_badge("KEEPER", "#146b45")
         else:
             self.partner.set_badge("", "#146b45")
-        focus = _box_center(box)
+        focus = (circle[0], circle[1]) if circle is not None else _box_center(box)
         identity = "" if preview is None else str(preview)
         if pixmap.isNull():
             self.partner.set_source(QPixmap(), identity=identity)
             self.partner.setText("No preview for this frame")
         else:
-            self.partner.set_source(pixmap, box=box, focus=focus, identity=identity)
+            self.partner.set_source(pixmap, box=box, circle=circle, focus=focus, identity=identity)
 
     def set_partner_message(self, caption: str, message: str) -> None:
         self.partner_caption.setText(caption)
@@ -296,6 +302,7 @@ class ImageViewer(QFrame):
         keeper: bool = False,
         rejected: bool = False,
         stars: int | None = None,
+        circle: tuple[int, int, int] | None = None,
     ) -> None:
         pixmap = QPixmap(str(preview)) if preview is not None else QPixmap()
         if rejected:
@@ -304,13 +311,13 @@ class ImageViewer(QFrame):
             self.preview.set_badge("KEEPER", "#146b45")
         else:
             self.preview.set_badge("", "#146b45")
-        focus = _box_center(box)
+        focus = (circle[0], circle[1]) if circle is not None else _box_center(box)
         identity = "" if preview is None else str(preview)
         if pixmap.isNull():
             self.preview.set_source(QPixmap(), identity=identity)
             self.preview.setText("No preview for this frame")
         else:
-            self.preview.set_source(pixmap, box=box, focus=focus, identity=identity)
+            self.preview.set_source(pixmap, box=box, circle=circle, focus=focus, identity=identity)
         self.info.setText(html)
         self.set_border(border)
         self._apply_marks(keeper, rejected, stars, enabled=True)
@@ -363,6 +370,21 @@ def _box_center(box: tuple[int, int, int, int] | None) -> tuple[int, int] | None
         return None
     x, y, width, height = box
     return (x + width // 2, y + height // 2)
+
+
+def _draw_circle(pixmap: QPixmap, circle: tuple[int, int, int]) -> QPixmap:
+    painted = pixmap.copy()
+    painter = QPainter(painted)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#e6c15a"))
+        pen.setWidth(max(2, painted.width() // 280))
+        painter.setPen(pen)
+        x, y, radius = circle
+        painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
+    finally:
+        painter.end()
+    return painted
 
 
 def _draw_box(pixmap: QPixmap, box: tuple[int, int, int, int]) -> QPixmap:
