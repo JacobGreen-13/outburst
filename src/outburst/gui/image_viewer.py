@@ -13,8 +13,26 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePol
 from outburst.scoring import focus_peak_bgr
 
 
+_ZOOM_STEPS = (1.0, 2.0, 4.0)
+
+
+def next_zoom(scale: float | None, steps: int) -> float | None:
+    """Move `steps` along fit, 1:1, 2:1, and 4:1. A negative step from 1:1 returns to fit."""
+
+    if steps == 0:
+        return scale
+    if scale is None:
+        return _ZOOM_STEPS[0] if steps > 0 else None
+    nearest = min(range(len(_ZOOM_STEPS)), key=lambda index: abs(_ZOOM_STEPS[index] - scale))
+    if steps < 0 and nearest == 0:
+        return None
+    chosen = max(0, min(len(_ZOOM_STEPS) - 1, nearest + steps))
+    return _ZOOM_STEPS[chosen]
+
+
 class PreviewLabel(QLabel):
     clicked = Signal()
+    zoom_stepped = Signal(int, QPoint)
 
     def __init__(self) -> None:
         super().__init__()
@@ -23,12 +41,13 @@ class PreviewLabel(QLabel):
         self._badge = ""
         self._badge_color = "#146b45"
         self._box: tuple[int, int, int, int] | None = None
+        self._circle: tuple[int, int, int] | None = None
         self._focus: tuple[int, int] | None = None
         self._identity = ""
-        self._zoom = False
+        self._scale: float | None = None
         self._peak = False
-        self._origin_x = 0
-        self._origin_y = 0
+        self._origin_x = 0.0
+        self._origin_y = 0.0
         self._pressed: QPoint | None = None
         self._moved = False
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -41,6 +60,7 @@ class PreviewLabel(QLabel):
         pixmap: QPixmap,
         *,
         box: tuple[int, int, int, int] | None = None,
+        circle: tuple[int, int, int] | None = None,
         focus: tuple[int, int] | None = None,
         identity: str = "",
     ) -> None:
@@ -48,6 +68,7 @@ class PreviewLabel(QLabel):
         self._identity = identity
         self._source = pixmap
         self._box = box
+        self._circle = circle
         self._focus = focus
         if changed:
             self._peaked = QPixmap()
@@ -55,26 +76,72 @@ class PreviewLabel(QLabel):
             self.setPixmap(QPixmap())
             return
         self.setText("")
-        if changed and self._zoom:
+        if changed and self._scale is not None:
             self._center_origin()
         self._rescale()
+
+    def scale(self) -> float | None:
+        return self._scale
+
+    def peak_enabled(self) -> bool:
+        return self._peak
 
     def set_badge(self, text: str, color: str) -> None:
         self._badge = text
         self._badge_color = color
 
-    def set_view(self, *, zoom: bool, peak: bool) -> None:
-        turned_on = zoom and not self._zoom
-        self._zoom = zoom
+    def set_peak(self, peak: bool) -> None:
         if not peak:
             self._peaked = QPixmap()
+        if peak == self._peak:
+            return
         self._peak = peak
-        if turned_on:
-            self._center_origin()
-        self.setCursor(
-            Qt.CursorShape.OpenHandCursor if zoom and not self._source.isNull() else Qt.CursorShape.ArrowCursor
-        )
         self._rescale()
+
+    def set_scale(self, scale: float | None, *, anchor: QPoint | None = None) -> None:
+        if scale == self._scale and anchor is None:
+            return
+        source = self._display_source()
+        if scale is None or source.isNull():
+            self._scale = None
+            self._apply_cursor()
+            self._rescale()
+            return
+        entering = self._scale is None
+        if entering and anchor is not None:
+            fit = self._fit_scale(source)
+            shown_width = source.width() * fit
+            shown_height = source.height() * fit
+            left = (self.width() - shown_width) / 2
+            top = (self.height() - shown_height) / 2
+            source_x = (anchor.x() - left) / fit if fit else source.width() / 2
+            source_y = (anchor.y() - top) / fit if fit else source.height() / 2
+            self._scale = scale
+            self._origin_x = source_x - anchor.x() / scale
+            self._origin_y = source_y - anchor.y() / scale
+        elif entering:
+            self._scale = scale
+            self._center_origin()
+        elif anchor is not None and self._scale and self._scale > 0:
+            source_x = self._origin_x + anchor.x() / self._scale
+            source_y = self._origin_y + anchor.y() / self._scale
+            self._scale = scale
+            self._origin_x = source_x - anchor.x() / scale
+            self._origin_y = source_y - anchor.y() / scale
+        elif self._scale and self.width() > 1:
+            center_x = self._origin_x + (self.width() / 2) / self._scale
+            center_y = self._origin_y + (self.height() / 2) / self._scale
+            self._scale = scale
+            self._origin_x = center_x - (self.width() / 2) / scale
+            self._origin_y = center_y - (self.height() / 2) / scale
+        else:
+            self._scale = scale
+        self._apply_cursor()
+        self._rescale()
+
+    def _apply_cursor(self) -> None:
+        zoomed = self._scale is not None and not self._source.isNull()
+        self.setCursor(Qt.CursorShape.OpenHandCursor if zoomed else Qt.CursorShape.ArrowCursor)
 
     def resizeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         super().resizeEvent(event)
@@ -87,13 +154,13 @@ class PreviewLabel(QLabel):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        if self._pressed is not None and self._zoom and event.buttons() & Qt.MouseButton.LeftButton:
+        if self._pressed is not None and self._scale and event.buttons() & Qt.MouseButton.LeftButton:
             delta_x = int(event.position().x()) - self._pressed.x()
             delta_y = int(event.position().y()) - self._pressed.y()
             if abs(delta_x) + abs(delta_y) > 3:
                 self._moved = True
-            self._origin_x -= delta_x
-            self._origin_y -= delta_y
+            self._origin_x -= delta_x / self._scale
+            self._origin_y -= delta_y / self._scale
             self._pressed = QPoint(int(event.position().x()), int(event.position().y()))
             self._clamp_origin(self._display_source())
             self._rescale()
@@ -105,6 +172,16 @@ class PreviewLabel(QLabel):
         self._pressed = None
         super().mouseReleaseEvent(event)
 
+    def wheelEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        delta = event.angleDelta().y()
+        if delta == 0 or self._source.isNull():
+            super().wheelEvent(event)
+            return
+        step = 1 if delta > 0 else -1
+        anchor = QPoint(int(event.position().x()), int(event.position().y()))
+        self.zoom_stepped.emit(step, anchor)
+        event.accept()
+
     def _center_origin(self) -> None:
         source = self._display_source()
         if source.isNull():
@@ -115,15 +192,24 @@ class PreviewLabel(QLabel):
             focus = (x + width // 2, y + height // 2)
         if focus is None:
             focus = (source.width() // 2, source.height() // 2)
-        self._origin_x = int(focus[0] - self.width() / 2)
-        self._origin_y = int(focus[1] - self.height() / 2)
+        scale = self._scale or 1.0
+        self._origin_x = focus[0] - (self.width() / 2) / scale
+        self._origin_y = focus[1] - (self.height() / 2) / scale
         self._clamp_origin(source)
 
-    def _clamp_origin(self, source: QPixmap) -> None:
+    def _fit_scale(self, source: QPixmap) -> float:
+        if source.width() < 1 or source.height() < 1 or self.width() < 1 or self.height() < 1:
+            return 1.0
+        return min(self.width() / source.width(), self.height() / source.height())
+
+    def _clamp_origin(self, source: QPixmap, crop_width: int | None = None, crop_height: int | None = None) -> None:
         if source.isNull():
             return
-        self._origin_x = min(max(0, self._origin_x), max(0, source.width() - self.width()))
-        self._origin_y = min(max(0, self._origin_y), max(0, source.height() - self.height()))
+        scale = self._scale or 1.0
+        width = crop_width if crop_width is not None else max(1, int(round(self.width() / scale)))
+        height = crop_height if crop_height is not None else max(1, int(round(self.height() / scale)))
+        self._origin_x = min(max(0.0, self._origin_x), max(0.0, float(source.width() - width)))
+        self._origin_y = min(max(0.0, self._origin_y), max(0.0, float(source.height() - height)))
 
     def _display_source(self) -> QPixmap:
         if self._source.isNull() or not self._peak:
@@ -138,13 +224,21 @@ class PreviewLabel(QLabel):
             return
         if self._box is not None:
             source = _draw_box(source, self._box)
+        if self._circle is not None:
+            source = _draw_circle(source, self._circle)
         target = self.size()
         if target.width() < 2 or target.height() < 2:
             return
-        if self._zoom:
-            self._clamp_origin(source)
-            cropped = source.copy(QRect(self._origin_x, self._origin_y, target.width(), target.height()))
-            shown = cropped
+        if self._scale is not None:
+            crop_width = max(1, int(round(target.width() / self._scale)))
+            crop_height = max(1, int(round(target.height() / self._scale)))
+            self._clamp_origin(source, crop_width, crop_height)
+            cropped = source.copy(QRect(int(self._origin_x), int(self._origin_y), crop_width, crop_height))
+            shown = cropped.scaled(
+                target,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
         else:
             shown = source.scaled(
                 target,
@@ -160,6 +254,8 @@ class ImageViewer(QFrame):
     keeper_clicked = Signal()
     reject_clicked = Signal()
     partner_clicked = Signal()
+    star_clicked = Signal(int)
+    zoom_changed = Signal(float)
 
     def __init__(self) -> None:
         super().__init__()
@@ -170,6 +266,8 @@ class ImageViewer(QFrame):
         self.preview = PreviewLabel()
         self.partner = PreviewLabel()
         self.partner.clicked.connect(self.partner_clicked.emit)
+        self.preview.zoom_stepped.connect(lambda step, anchor: self._zoom_from(self.preview, step, anchor))
+        self.partner.zoom_stepped.connect(lambda step, anchor: self._zoom_from(self.partner, step, anchor))
         self.partner_caption = QLabel("Best in the burst")
         self.partner_caption.setObjectName("partnerCaption")
         self.partner_box = QWidget()
@@ -186,20 +284,32 @@ class ImageViewer(QFrame):
         self.hint = QLabel()
         self.hint.setObjectName("viewerHint")
         self.hint.hide()
+        self.star_buttons: list[QPushButton] = []
+        for number in range(1, 6):
+            button = QPushButton("★")
+            button.setObjectName("starButton")
+            button.setToolTip(f"Set {number} star{'s' if number != 1 else ''}. Press again to clear. Keyboard: {number}")
+            button.clicked.connect(lambda _checked=False, value=number: self.star_clicked.emit(value))
+            self.star_buttons.append(button)
         self.keeper_button = QPushButton("Mark as keeper")
         self.keeper_button.setObjectName("keeperButton")
         self.keeper_button.setCheckable(True)
         self.keeper_button.setToolTip(
-            "Save this frame when you press Save keepers. Press again to clear it. Keyboard: A"
+            "Flag this frame as a pick. Save keepers copies picked frames, and the XMP sidecar "
+            "records the pick. Press again to clear it. Keyboard: A"
         )
         self.keeper_button.clicked.connect(lambda _checked=False: self.keeper_clicked.emit())
         self.reject_button = QPushButton("Reject")
         self.reject_button.setObjectName("rejectButton")
         self.reject_button.setCheckable(True)
-        self.reject_button.setToolTip("Set this frame aside. It will not be saved. Keyboard: X")
+        self.reject_button.setToolTip(
+            "Flag this frame as a reject. The XMP sidecar records the reject. Keyboard: X"
+        )
         self.reject_button.clicked.connect(lambda _checked=False: self.reject_clicked.emit())
         marks = QHBoxLayout()
         marks.setSpacing(8)
+        for button in self.star_buttons:
+            marks.addWidget(button)
         marks.addWidget(self.keeper_button, 1)
         marks.addWidget(self.reject_button, 1)
         self.info = QLabel()
@@ -226,14 +336,32 @@ class ImageViewer(QFrame):
         self.hint.hide()
         self.info.setText("")
         self.set_border("#2a2a2a")
-        self._apply_marks(False, False, enabled=False)
+        self._apply_marks(False, False, None, enabled=False)
 
-    def set_view_mode(self, *, zoom: bool, peak: bool) -> None:
-        self.preview.set_view(zoom=zoom, peak=peak)
-        self.partner.set_view(zoom=zoom, peak=peak)
+    def set_view_mode(self, *, scale: float | None, peak: bool) -> None:
+        self.preview.set_peak(peak)
+        self.partner.set_peak(peak)
+        self.preview.set_scale(scale)
+        self.partner.set_scale(scale)
+        self._show_hint(scale, peak)
+
+    def _zoom_from(self, source: PreviewLabel, step: int, anchor: QPoint) -> None:
+        scale = next_zoom(self.preview.scale(), step)
+        if source is self.preview:
+            self.preview.set_scale(scale, anchor=anchor)
+            self.partner.set_scale(scale)
+        else:
+            self.partner.set_scale(scale, anchor=anchor)
+            self.preview.set_scale(scale)
+        self._show_hint(scale, self.preview.peak_enabled())
+        self.zoom_changed.emit(0.0 if scale is None else scale)
+
+    def _show_hint(self, scale: float | None, peak: bool) -> None:
         notes: list[str] = []
-        if zoom:
+        if scale == 1:
             notes.append("1:1 preview · drag to look around")
+        elif scale is not None:
+            notes.append(f"{int(scale)}:1 preview · drag to look around")
         if peak:
             notes.append("Green marks the strongest edges")
         self.hint.setText("  ·  ".join(notes))
@@ -248,6 +376,7 @@ class ImageViewer(QFrame):
         box: tuple[int, int, int, int] | None,
         caption: str,
         *,
+        circle: tuple[int, int, int] | None = None,
         keeper: bool = False,
         rejected: bool = False,
     ) -> None:
@@ -259,13 +388,13 @@ class ImageViewer(QFrame):
             self.partner.set_badge("KEEPER", "#146b45")
         else:
             self.partner.set_badge("", "#146b45")
-        focus = _box_center(box)
+        focus = (circle[0], circle[1]) if circle is not None else _box_center(box)
         identity = "" if preview is None else str(preview)
         if pixmap.isNull():
             self.partner.set_source(QPixmap(), identity=identity)
             self.partner.setText("No preview for this frame")
         else:
-            self.partner.set_source(pixmap, box=box, focus=focus, identity=identity)
+            self.partner.set_source(pixmap, box=box, circle=circle, focus=focus, identity=identity)
 
     def set_partner_message(self, caption: str, message: str) -> None:
         self.partner_caption.setText(caption)
@@ -282,6 +411,8 @@ class ImageViewer(QFrame):
         *,
         keeper: bool = False,
         rejected: bool = False,
+        stars: int | None = None,
+        circle: tuple[int, int, int] | None = None,
     ) -> None:
         pixmap = QPixmap(str(preview)) if preview is not None else QPixmap()
         if rejected:
@@ -290,16 +421,16 @@ class ImageViewer(QFrame):
             self.preview.set_badge("KEEPER", "#146b45")
         else:
             self.preview.set_badge("", "#146b45")
-        focus = _box_center(box)
+        focus = (circle[0], circle[1]) if circle is not None else _box_center(box)
         identity = "" if preview is None else str(preview)
         if pixmap.isNull():
             self.preview.set_source(QPixmap(), identity=identity)
             self.preview.setText("No preview for this frame")
         else:
-            self.preview.set_source(pixmap, box=box, focus=focus, identity=identity)
+            self.preview.set_source(pixmap, box=box, circle=circle, focus=focus, identity=identity)
         self.info.setText(html)
         self.set_border(border)
-        self._apply_marks(keeper, rejected, enabled=True)
+        self._apply_marks(keeper, rejected, stars, enabled=True)
 
     def set_border(self, color: str) -> None:
         self.setStyleSheet(
@@ -312,6 +443,10 @@ class ImageViewer(QFrame):
             "QPushButton#keeperButton, QPushButton#rejectButton {"
             "min-height: 36px; font-size: 14px; font-weight: 600; padding: 8px 16px;"
             "}"
+            "QPushButton#starButton {"
+            "min-height: 36px; min-width: 36px; max-width: 42px; font-size: 18px; color: #6a6a6a; padding: 0;"
+            "}"
+            "QPushButton#starButton[filled=\"true\"] { color: #e6c15a; border: 1px solid #e6c15a; }"
             "QPushButton#keeperButton:checked {"
             "background: #1f6b45; color: #f4fff8; border: 1px solid #7dffc3;"
             "}"
@@ -320,7 +455,7 @@ class ImageViewer(QFrame):
             "}"
         )
 
-    def _apply_marks(self, keeper: bool, rejected: bool, *, enabled: bool) -> None:
+    def _apply_marks(self, keeper: bool, rejected: bool, stars: int | None, *, enabled: bool) -> None:
         self.keeper_button.blockSignals(True)
         self.reject_button.blockSignals(True)
         self.keeper_button.setChecked(keeper)
@@ -329,6 +464,13 @@ class ImageViewer(QFrame):
         self.reject_button.setText("Rejected" if rejected else "Reject")
         self.keeper_button.setEnabled(enabled)
         self.reject_button.setEnabled(enabled)
+        filled = 0 if stars is None else stars
+        for index, button in enumerate(self.star_buttons, start=1):
+            button.setEnabled(enabled)
+            button.setProperty("filled", "true" if index <= filled else "false")
+            style = button.style()
+            style.unpolish(button)
+            style.polish(button)
         self.keeper_button.blockSignals(False)
         self.reject_button.blockSignals(False)
 
@@ -338,6 +480,21 @@ def _box_center(box: tuple[int, int, int, int] | None) -> tuple[int, int] | None
         return None
     x, y, width, height = box
     return (x + width // 2, y + height // 2)
+
+
+def _draw_circle(pixmap: QPixmap, circle: tuple[int, int, int]) -> QPixmap:
+    painted = pixmap.copy()
+    painter = QPainter(painted)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#e6c15a"))
+        pen.setWidth(max(2, painted.width() // 280))
+        painter.setPen(pen)
+        x, y, radius = circle
+        painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
+    finally:
+        painter.end()
+    return painted
 
 
 def _draw_box(pixmap: QPixmap, box: tuple[int, int, int, int]) -> QPixmap:

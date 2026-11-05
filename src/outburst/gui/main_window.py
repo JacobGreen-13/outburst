@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QUrl
+from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QThread, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractSlider,
@@ -43,13 +43,13 @@ from outburst.display import (
 from outburst.gui.burst_view import Filmstrip, Thumb
 from outburst.gui.controls import ControlPanel
 from outburst.gui.dialogs import ExportKeepersDialog, ask, notify, show_shortcuts, show_warnings
-from outburst.gui.image_viewer import ImageViewer
+from outburst.gui.image_viewer import ImageViewer, next_zoom
 from outburst.gui.styles import build_app_icon
-from outburst.gui.worker import AnalyzeWorker, ModelFetchWorker
+from outburst.gui.worker import AnalyzeWorker, ExportWorker, ModelFetchWorker, SidecarWorker
 from outburst.models import Burst, FrameAnalysis, Library
-from outburst.output import choose_keepers, export_keepers, write_library_sidecars, write_reports
+from outburst.output import choose_keepers, write_reports
 from outburst.pipeline import with_threshold, with_weights
-from outburst.scoring import compare_partner_offset, recommended_offset
+from outburst.scoring import compare_partner_offset, eye_chooses_best, recommended_offset
 from outburst.subject import (
     DEFAULT_MODEL_ID,
     MODEL_OPTIONS,
@@ -89,8 +89,11 @@ class MainWindow(QMainWindow):
         self._by_path: dict[Path, FrameAnalysis] = {}
         self._decisions: dict[Path, str] = {}
         self._origins: dict[Path, str] = {}
+        self._stars: dict[Path, int] = {}
         self._compare = False
+        self._compare_index: int | None = None
         self._loupe = False
+        self._zoom_scale: float | None = None
         self._peaking = False
         self._obvious_burst_id: str | None = None
         self._obvious_rejects: list[Path] = []
@@ -108,9 +111,13 @@ class MainWindow(QMainWindow):
         self._worker: AnalyzeWorker | None = None
         self._scan_id = 0
         self._scanning = False
+        self._save_worker: QThread | None = None
+        self._save_id = 0
+        self._saving = False
         self._build_ui()
         self.viewer.keeper_clicked.connect(lambda: self._toggle_decision("keep"))
         self.viewer.reject_clicked.connect(lambda: self._toggle_decision("reject"))
+        self.viewer.star_clicked.connect(self._set_stars)
         self._build_actions()
         self._load_settings()
         self._sync_actions()
@@ -205,6 +212,9 @@ class MainWindow(QMainWindow):
         if self._download_worker is not None and self._download_worker.isRunning():
             self._download_worker.abort()
             self._download_worker.wait(2000)
+        self._save_id += 1
+        if self._save_worker is not None and self._save_worker.isRunning():
+            self._save_worker.wait(3000)
         self._stop_worker()
         super().closeEvent(event)
 
@@ -226,6 +236,8 @@ class MainWindow(QMainWindow):
             self._select_frame(len(burst.frames) - 1)
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self._go_to_recommended()
+        elif Qt.Key.Key_0 <= key <= Qt.Key.Key_5:
+            self._set_stars(key - Qt.Key.Key_0)
         elif key == Qt.Key.Key_A:
             self._toggle_decision("keep")
         elif key == Qt.Key.Key_X:
@@ -234,6 +246,14 @@ class MainWindow(QMainWindow):
             self._reject_burst()
         elif key == Qt.Key.Key_C:
             self._set_checked(self.compare_action, not self._compare)
+        elif key == Qt.Key.Key_BracketLeft:
+            self._step_compare(-1)
+        elif key == Qt.Key.Key_BracketRight:
+            self._step_compare(1)
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self._step_zoom(1)
+        elif key == Qt.Key.Key_Minus:
+            self._step_zoom(-1)
         elif key == Qt.Key.Key_Z:
             self._set_checked(self.loupe_action, not self._loupe)
         elif key == Qt.Key.Key_F:
@@ -276,6 +296,7 @@ class MainWindow(QMainWindow):
         self.controls.threshold_changed.connect(self._apply_threshold)
         self.controls.weights_changed.connect(self._apply_weights)
         self.controls.subject_toggled.connect(self._on_subject_toggled)
+        self.controls.eye_toggled.connect(self._on_eye_toggled)
         self.controls.model_changed.connect(self._on_model_changed)
         self.controls.minimum_changed.connect(self._on_minimum_changed)
         left = QWidget()
@@ -289,8 +310,10 @@ class MainWindow(QMainWindow):
 
         self.viewer = ImageViewer()
         self.viewer.partner_clicked.connect(self._select_partner)
+        self.viewer.zoom_changed.connect(self._on_zoom_changed)
         self.filmstrip = Filmstrip()
         self.filmstrip.selected.connect(self._select_frame)
+        self.filmstrip.compare_chosen.connect(self._set_compare_frame)
 
         top = QSplitter(Qt.Orientation.Horizontal)
         top.addWidget(left)
@@ -367,12 +390,13 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(quit_action)
         self.compare_action = self._check_action(
-            "Compare with best",
-            "Show this frame beside the best other frame in the burst. Keyboard: C",
+            "Compare",
+            "Show two frames from this burst. Starts beside the best other frame. "
+            "[ and ] choose another frame. Shift-click a thumbnail to compare with it. Keyboard: C",
         )
         self.loupe_action = self._check_action(
-            "1:1 loupe",
-            "Show the embedded preview at full size and drag to look around. Keyboard: Z",
+            "Zoom",
+            "Z shows the preview at 1:1. Scroll, or + and -, to zoom to 2:1 and 4:1. Drag to look around.",
         )
         self.peak_action = self._check_action(
             "Focus peaking",
@@ -443,6 +467,7 @@ class MainWindow(QMainWindow):
             weights=self.controls.weights(),
             cache_dir=self._cache_dir,
             subject_model=subject_model,
+            eye_scoring=self.controls.eye_scoring(),
         )
         worker.progress.connect(self._on_progress)
         worker.succeeded.connect(lambda library, ident=scan_id: self._on_success(ident, library))
@@ -669,10 +694,14 @@ class MainWindow(QMainWindow):
         modes: list[str] = []
         if self._compare:
             modes.append("compare")
-        if self._loupe:
-            modes.append("1:1 loupe")
+        if self._zoom_scale == 1:
+            modes.append("1:1")
+        elif self._zoom_scale is not None:
+            modes.append(f"{int(self._zoom_scale)}:1")
         if self._peaking:
             modes.append("focus peaking")
+        if library.eye_active:
+            message += " · eye scoring"
         if modes:
             message += " · " + " · ".join(modes)
         return message
@@ -724,6 +753,7 @@ class MainWindow(QMainWindow):
             return
         self._burst_index = index
         burst = bursts[index]
+        self._compare_index = None
         frame_index = None
         if prefer_path is not None:
             frame_index = next((i for i, frame in enumerate(burst.frames) if frame.path == prefer_path), None)
@@ -738,6 +768,8 @@ class MainWindow(QMainWindow):
         if burst is None or not burst.frames:
             return
         self._frame_index = max(0, min(index, len(burst.frames) - 1))
+        if self._compare_index == self._frame_index:
+            self._compare_index = self._adjacent_frame(self._frame_index, 1)
         self.filmstrip.mark_selected(self._frame_index)
         self._update_viewer()
 
@@ -759,7 +791,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_decision(self, kind: str) -> None:
         analysis = self._current_analysis()
-        if analysis is None or self._scanning:
+        if analysis is None or self._review_locked():
             return
         path = analysis.frame.path
         updated = None if self._decisions.get(path) == kind else kind
@@ -770,7 +802,7 @@ class MainWindow(QMainWindow):
 
     def _reject_burst(self) -> None:
         burst = self._current_burst()
-        if burst is None or self._scanning:
+        if burst is None or self._review_locked():
             return
         clear = all(self._decisions.get(frame.path) == "reject" for frame in burst.frames)
         for frame in burst.frames:
@@ -785,13 +817,31 @@ class MainWindow(QMainWindow):
         self._show_mode_status()
 
     def _on_loupe_toggled(self, checked: bool) -> None:
+        self._zoom_scale = 1.0 if checked else None
         self._loupe = checked
-        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self._show_mode_status()
 
     def _on_peak_toggled(self, checked: bool) -> None:
         self._peaking = checked
-        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
+        self._show_mode_status()
+
+    def _on_zoom_changed(self, scale: float) -> None:
+        self._zoom_scale = None if scale <= 0 else scale
+        self._loupe = self._zoom_scale is not None
+        self.loupe_action.blockSignals(True)
+        self.loupe_action.setChecked(self._loupe)
+        self.loupe_action.blockSignals(False)
+        self._show_mode_status()
+
+    def _step_zoom(self, steps: int) -> None:
+        self._zoom_scale = next_zoom(self._zoom_scale, steps)
+        self._loupe = self._zoom_scale is not None
+        self.loupe_action.blockSignals(True)
+        self.loupe_action.setChecked(self._loupe)
+        self.loupe_action.blockSignals(False)
+        self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self._show_mode_status()
 
     def _show_mode_status(self) -> None:
@@ -802,16 +852,59 @@ class MainWindow(QMainWindow):
         burst = self._current_burst()
         if burst is None:
             return
-        partner = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        partner = self._compare_index
+        if partner is None or partner == self._frame_index:
+            partner = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
         if partner is None:
             return
+        previous = self._frame_index
+        self._compare_index = previous if previous != partner else self._adjacent_frame(partner, 1)
         self._select_frame(partner)
+
+    def _set_compare_frame(self, index: int) -> None:
+        burst = self._current_burst()
+        if burst is None or not burst.frames or len(burst.frames) < 2:
+            return
+        if index == self._frame_index or not 0 <= index < len(burst.frames):
+            self.statusBar().showMessage("Choose a different frame to compare.")
+            return
+        self._compare_index = index
+        if not self._compare:
+            self._set_checked(self.compare_action, True)
+            return
+        self._update_viewer()
+        self._show_mode_status()
+
+    def _step_compare(self, delta: int) -> None:
+        burst = self._current_burst()
+        if burst is None or len(burst.frames) < 2:
+            return
+        start = self._compare_index
+        if start is None or not self._compare or start == self._frame_index:
+            start = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        if start is None:
+            return
+        chosen = self._adjacent_frame(start, delta)
+        if chosen is None:
+            return
+        self._set_compare_frame(chosen)
+
+    def _adjacent_frame(self, start: int, delta: int) -> int | None:
+        burst = self._current_burst()
+        if burst is None or len(burst.frames) < 2 or delta == 0:
+            return None
+        count = len(burst.frames)
+        for step in range(1, count):
+            candidate = (start + delta * step) % count
+            if candidate != self._frame_index:
+                return candidate
+        return None
 
     def _reject_obvious(self) -> None:
         """Reject soft or badly clipped frames, leaving the best frame and your keepers."""
 
         burst = self._current_burst()
-        if burst is None or self._scanning or self._library is None:
+        if burst is None or self._review_locked() or self._library is None:
             return
         paths = {frame.path for frame in burst.frames}
         remembered = [path for path in self._obvious_rejects if path in paths]
@@ -871,6 +964,8 @@ class MainWindow(QMainWindow):
             recommended=recommended,
             decision=decision,
             subject_active=show_subject,
+            stars=self._stars.get(frame.path),
+            eye_active=self._library.eye_active,
         )
         keeper = decision == "keep"
         rejected = decision == "reject"
@@ -889,12 +984,18 @@ class MainWindow(QMainWindow):
             border,
             keeper=keeper,
             rejected=rejected,
+            stars=self._stars.get(frame.path),
+            circle=self._eye_circle(analysis),
         )
-        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self.viewer.set_compare(self._compare)
         if not self._compare:
+            self.filmstrip.mark_compared(None)
             return
-        partner_index = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        partner_index = self._compare_index
+        if partner_index is None or partner_index == self._frame_index or not 0 <= partner_index < len(burst.frames):
+            partner_index = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        self.filmstrip.mark_compared(partner_index)
         if partner_index is None:
             self.viewer.set_partner_message("Compare", "This burst has one frame.")
             return
@@ -908,7 +1009,12 @@ class MainWindow(QMainWindow):
             and partner.metrics is not None
         ):
             partner_box = partner.metrics.subject_box
-        role = "Best in the burst" if partner_index == recommended_index else "Next sharpest"
+        if partner_index == recommended_index:
+            role = "Best in the burst"
+        elif self._compare_index is None:
+            role = "Next sharpest"
+        else:
+            role = f"Frame {partner_index + 1} of {burst.count}"
         score = score_caption(
             None if partner is None else partner.composite,
             None if partner is None else partner.metrics,
@@ -918,6 +1024,7 @@ class MainWindow(QMainWindow):
             None if partner is None else partner.preview_path,
             partner_box,
             f"{role}  ·  {score}  ·  {partner_frame.path.name}",
+            circle=None if partner is None else self._eye_circle(partner),
             keeper=partner_decision == "keep",
             rejected=partner_decision == "reject",
         )
@@ -942,10 +1049,12 @@ class MainWindow(QMainWindow):
                         None if analysis is None else analysis.composite,
                         None if analysis is None else analysis.metrics,
                         best_composite=None if index == best else best_composite,
+                        stars=self._stars.get(frame.path),
                     ),
                     badge=thumb_badge(index == best, decision),
                     thumb_path=None if analysis is None else analysis.thumb_path,
                     selected=index == self._frame_index,
+                    compared=self._compare and index == self._compare_index,
                     best=index == best,
                     decision=decision,
                     tooltip=name,
@@ -973,16 +1082,10 @@ class MainWindow(QMainWindow):
                 "info",
             )
             return
-        try:
-            results = export_keepers([choice.path for choice in choices], request.folder, request.mode)
-        except OSError as exc:
-            self._notify("Save failed", str(exc), "warning")
-            return
-        notes = [result.note for result in results if result.note]
-        message = f"Saved {len(results)} keeper(s) to {request.folder}"
-        if notes:
-            message += " " + notes[0]
-        self.statusBar().showMessage(message)
+        self._start_save(
+            ExportWorker([choice.path for choice in choices], request.folder, request.mode),
+            f"Saving {len(choices)} keeper(s)…",
+        )
 
     def _export_report(self) -> None:
         if self._library is None or os.environ.get("OUTBURST_HEADLESS") == "1":
@@ -999,6 +1102,7 @@ class MainWindow(QMainWindow):
                 self._library,
                 self._decisions,
                 Path(chosen),
+                stars=self._stars,
                 minimum_frames=self.controls.minimum_frames(),
             )
         except OSError as exc:
@@ -1013,21 +1117,20 @@ class MainWindow(QMainWindow):
         if not ask(
             self,
             "Write XMP sidecars",
-            f"Write sidecars next to {count} files?\n\nOriginal RAW and JPEG files stay unchanged.",
+            f"Write sidecars next to {count} files?\n\n"
+            "Each sidecar stores the star rating and the pick or reject flag for Lightroom, "
+            "Capture One, Darktable, and digiKam. Original RAW and JPEG files stay unchanged.",
         ):
             return
-        written, warnings = write_library_sidecars(
-            self._library,
-            self._decisions,
-            minimum_frames=self.controls.minimum_frames(),
+        self._start_save(
+            SidecarWorker(
+                self._library,
+                dict(self._decisions),
+                dict(self._stars),
+                self.controls.minimum_frames(),
+            ),
+            f"Writing sidecars for {count} files…",
         )
-        message = f"Wrote {len(written)} sidecar(s)."
-        if warnings:
-            message += " " + warnings[0]
-        self.statusBar().showMessage(message)
-        if warnings:
-            self._warnings = tuple(warnings)
-            self._sync_actions()
 
     def _show_warnings(self) -> None:
         show_warnings(self, self._warnings)
@@ -1036,8 +1139,8 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._cache_dir)))
 
     def _clear_cache(self) -> None:
-        if self._scanning or self._downloading:
-            self._notify("Scan in progress", "Cancel the scan before clearing the cache.", "warning")
+        if self._scanning or self._downloading or self._saving:
+            self._notify("Still working", "Wait until the current save or scan finishes before clearing the cache.", "warning")
             return
         if not ask(
             self,
@@ -1070,19 +1173,56 @@ class MainWindow(QMainWindow):
             return 0
 
     def _mark_recommended_keepers(self) -> None:
-        """Mark the recommended frame when a burst does not already have a keeper."""
+        """Mark the recommended frame when a burst does not already have a keeper.
+
+        When two or more frames have a rated eye, the sharpest eye is the
+        frame Outburst marks. Earlier automatic keepers in that burst are
+        cleared. A reject stays rejected, and a keeper the photographer set
+        keeps its origin.
+        """
 
         if self._library is None:
             return
         for burst in self._library.bursts:
             if not burst.frames:
                 continue
-            if any(self._decisions.get(frame.path) == "keep" for frame in burst.frames):
+            offset = recommended_offset(burst.frames, self._by_path)
+            frame = burst.frames[offset]
+            if eye_chooses_best(burst.frames, self._by_path):
+                for other in burst.frames:
+                    if other.path == frame.path:
+                        continue
+                    if (
+                        self._decisions.get(other.path) == "keep"
+                        and self._origins.get(other.path) == "auto"
+                    ):
+                        self._apply_decision(other.path, None)
+                if self._decisions.get(frame.path) == "reject":
+                    continue
+                if self._decisions.get(frame.path) == "keep":
+                    continue
+                self._apply_decision(frame.path, "keep", origin="auto")
                 continue
-            frame = burst.frames[recommended_offset(burst.frames, self._by_path)]
+            if any(self._decisions.get(item.path) == "keep" for item in burst.frames):
+                continue
             if self._decisions.get(frame.path) == "reject":
                 continue
             self._apply_decision(frame.path, "keep", origin="auto")
+
+    def _on_eye_toggled(self, enabled: bool) -> None:
+        del enabled
+        self._clear_automatic_keepers()
+        if self._folder is not None:
+            self.rescan()
+
+    def _eye_circle(self, analysis: FrameAnalysis) -> tuple[int, int, int] | None:
+        if self._library is None or not self._library.eye_active:
+            return None
+        metrics = analysis.metrics
+        if metrics is None or metrics.eye_center is None or metrics.eye_radius is None:
+            return None
+        x, y = metrics.eye_center
+        return (int(x), int(y), int(metrics.eye_radius))
 
     def _clear_automatic_keepers(self) -> None:
         """Drop keepers Outburst chose. Marks the photographer set stay."""
@@ -1161,16 +1301,19 @@ class MainWindow(QMainWindow):
         if self._library is None:
             self._decisions = {}
             self._origins = {}
+            self._stars = {}
             return
         paths = [item.frame.path for item in self._library.analyses]
         try:
             with Cache(self._cache_dir) as cache:
                 self._decisions = cache.decisions_for(paths)
                 self._origins = cache.decision_origins(paths)
+                self._stars = cache.stars_for(paths)
         except OSError as exc:
             log.warning("Could not read saved decisions: %s", exc)
             self._decisions = {}
             self._origins = {}
+            self._stars = {}
 
     def _apply_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
         if decision is None:
@@ -1182,6 +1325,29 @@ class MainWindow(QMainWindow):
             self._decisions[path] = decision
             self._origins[path] = stored_origin
         self._save_decision(path, decision, origin=stored_origin)
+
+    def _set_stars(self, stars: int) -> None:
+        analysis = self._current_analysis()
+        if analysis is None or self._review_locked():
+            return
+        path = analysis.frame.path
+        if stars == 0 or self._stars.get(path) == stars:
+            updated = None
+            self._stars.pop(path, None)
+        else:
+            updated = stars
+            self._stars[path] = stars
+        self._save_stars(path, updated)
+        self._refresh_burst_labels()
+        self.filmstrip.refresh_flags(self._thumbs())
+        self._update_viewer()
+
+    def _save_stars(self, path: Path, stars: int | None) -> None:
+        try:
+            with Cache(self._cache_dir) as cache:
+                cache.set_stars(path, stars)
+        except OSError as exc:
+            self._notify("Could not save that rating", str(exc), "warning")
 
     def _save_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
         try:
@@ -1198,15 +1364,66 @@ class MainWindow(QMainWindow):
         self.folder_label.setText(str(self._folder))
         self.folder_label.setToolTip(str(self._folder))
 
+    def _review_locked(self) -> bool:
+        return self._scanning or self._saving
+
+    def _start_save(self, worker: QThread, message: str) -> None:
+        if self._saving:
+            return
+        self._save_id += 1
+        save_id = self._save_id
+        self._save_worker = worker
+        self._saving = True
+        worker.progress.connect(self._on_progress)  # type: ignore[attr-defined]
+        worker.succeeded.connect(lambda payload, ident=save_id: self._on_save_finished(ident, payload))  # type: ignore[attr-defined]
+        worker.failed.connect(lambda message, ident=save_id: self._on_save_failed(ident, str(message)))  # type: ignore[attr-defined]
+        self._sync_actions()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.statusBar().showMessage(message)
+        worker.start()
+
+    def _on_save_finished(self, save_id: int, payload: object) -> None:
+        if save_id != self._save_id:
+            return
+        self._saving = False
+        self._save_worker = None
+        if isinstance(payload, tuple):
+            written, warnings = payload
+            message = f"Wrote {len(written)} sidecar(s)."
+            if warnings:
+                message += " " + str(warnings[0])
+                self._warnings = tuple(str(item) for item in warnings)
+        else:
+            results = payload if isinstance(payload, list) else []
+            notes = [getattr(result, "note", "") for result in results if getattr(result, "note", "")]
+            folder = results[0].destination.parent if results else ""
+            message = f"Saved {len(results)} keeper(s)"
+            if folder:
+                message += f" to {folder}"
+            if notes:
+                message += " " + str(notes[0])
+        self._sync_actions()
+        self.statusBar().showMessage(message)
+
+    def _on_save_failed(self, save_id: int, message: str) -> None:
+        if save_id != self._save_id:
+            return
+        self._saving = False
+        self._save_worker = None
+        self._sync_actions()
+        self._notify("Save failed", message, "warning")
+
     def _sync_actions(self) -> None:
-        busy = self._scanning or self._downloading
-        ready = self._library is not None and not self._scanning
+        busy = self._scanning or self._downloading or self._saving
+        ready = self._library is not None and not self._scanning and not self._saving
         self.export_action.setEnabled(ready)
         self.report_action.setEnabled(ready)
         self.xmp_action.setEnabled(ready)
+        self.open_action.setEnabled(not self._saving)
         self.rescan_action.setEnabled(self._folder is not None and not busy)
-        self.cancel_action.setEnabled(busy)
-        self.cancel_action.setVisible(busy)
+        self.cancel_action.setEnabled(self._scanning or self._downloading)
+        self.cancel_action.setVisible(self._scanning or self._downloading)
         self.cancel_action.setText("Cancel download" if self._downloading else "Cancel scan")
         self.warnings_action.setEnabled(bool(self._warnings))
         self.progress.setVisible(busy)
@@ -1222,6 +1439,7 @@ class MainWindow(QMainWindow):
         self.controls.set_recursive(_as_bool(settings.value("recursive"), False))
         self.controls.set_minimum_frames(_saved_minimum_frames(settings))
         self.controls.set_subject_checked(_as_bool(settings.value("prefer_subject"), False))
+        self.controls.set_eye_scoring(_as_bool(settings.value("eye_scoring"), False))
         folder = settings.value("last_folder", "")
         if folder:
             self._dialog_start = Path(str(folder))
@@ -1236,6 +1454,7 @@ class MainWindow(QMainWindow):
         settings.setValue("recursive", self.controls.recursive())
         settings.setValue("minimum_frames", self.controls.minimum_frames())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
+        settings.setValue("eye_scoring", self.controls.eye_scoring())
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:
             settings.setValue("last_folder", str(self._folder))

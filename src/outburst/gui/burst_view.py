@@ -27,10 +27,11 @@ class Thumb:
     best: bool
     decision: str | None
     tooltip: str
+    compared: bool = False
 
 
 class ThumbCard(QFrame):
-    clicked = Signal(int)
+    clicked = Signal(int, bool)
 
     def __init__(self, index: int, thumb: Thumb) -> None:
         super().__init__()
@@ -38,6 +39,7 @@ class ThumbCard(QFrame):
         self._best = thumb.best
         self._decision = thumb.decision
         self._selected = thumb.selected
+        self._compared = thumb.compared
         self.setObjectName("thumbCard")
         self.setFixedWidth(176)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -73,11 +75,16 @@ class ThumbCard(QFrame):
 
     def mousePressEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.index)
+            shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            self.clicked.emit(self.index, shift)
         super().mousePressEvent(event)
 
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
+        self._apply_style()
+
+    def set_compared(self, compared: bool) -> None:
+        self._compared = compared
         self._apply_style()
 
     def set_flags(self, *, best: bool, decision: str | None, badge: str, score_text: str) -> None:
@@ -92,6 +99,8 @@ class ThumbCard(QFrame):
             color = "#7dffc3"
         elif self._selected:
             color = "#79b8ff"
+        elif self._compared:
+            color = "#e6c15a"
         elif self._decision == "reject":
             color = "#8a3a3a"
         elif self._decision == "keep" or self._best:
@@ -114,6 +123,7 @@ class Filmstrip(QScrollArea):
     """Contact-sheet row for the frames inside one burst."""
 
     selected = Signal(int)
+    compare_chosen = Signal(int)
 
     def __init__(self) -> None:
         super().__init__()
@@ -134,7 +144,7 @@ class Filmstrip(QScrollArea):
         self._clear()
         for index, thumb in enumerate(cards):
             card = ThumbCard(index, thumb)
-            card.clicked.connect(self.selected.emit)
+            card.clicked.connect(self._on_card)
             self._layout.insertWidget(self._layout.count() - 1, card)
             self._cards.append(card)
         selected = next((index for index, thumb in enumerate(cards) if thumb.selected), None)
@@ -146,6 +156,16 @@ class Filmstrip(QScrollArea):
             card.set_selected(card_index == index)
         if 0 <= index < len(self._cards):
             self.ensureWidgetVisible(self._cards[index], 24, 0)
+
+    def mark_compared(self, index: int | None) -> None:
+        for card_index, card in enumerate(self._cards):
+            card.set_compared(index is not None and card_index == index)
+
+    def _on_card(self, index: int, shift: bool) -> None:
+        if shift:
+            self.compare_chosen.emit(index)
+            return
+        self.selected.emit(index)
 
     def refresh_flags(self, cards: list[Thumb]) -> None:
         if len(cards) != len(self._cards):
@@ -159,6 +179,7 @@ class Filmstrip(QScrollArea):
                 score_text=thumb.score_text,
             )
             card.set_selected(thumb.selected)
+            card.set_compared(thumb.compared)
 
     def wheelEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         delta = event.angleDelta().y() or event.angleDelta().x()

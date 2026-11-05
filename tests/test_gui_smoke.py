@@ -384,6 +384,18 @@ def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monke
     window.close()
 
 
+def test_zoom_steps() -> None:
+    from outburst.gui.image_viewer import next_zoom
+
+    assert next_zoom(None, 1) == 1.0
+    assert next_zoom(1.0, 1) == 2.0
+    assert next_zoom(2.0, 1) == 4.0
+    assert next_zoom(4.0, 1) == 4.0
+    assert next_zoom(4.0, -1) == 2.0
+    assert next_zoom(1.0, -1) is None
+    assert next_zoom(None, -1) is None
+
+
 def test_compare_loupe_and_obvious_misses(qt_app, tmp_path: Path) -> None:
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
@@ -424,6 +436,35 @@ def test_compare_loupe_and_obvious_misses(qt_app, tmp_path: Path) -> None:
     assert "1:1" in window.viewer.hint.text()
     assert "Green" in window.viewer.hint.text()
 
+    QTest.keyClick(window, Qt.Key.Key_Plus)
+    qt_app.processEvents()
+    assert window.viewer.preview.scale() == 2
+    assert "2:1" in window.viewer.hint.text()
+    QTest.keyClick(window, Qt.Key.Key_Minus)
+    qt_app.processEvents()
+    assert window.viewer.preview.scale() == 1
+
+    QTest.keyClick(window, Qt.Key.Key_BracketRight)
+    qt_app.processEvents()
+    caption = window.viewer.partner_caption.text()
+    assert caption.startswith("Frame ")
+    assert "Best in the burst" not in caption
+    burst = window._current_burst()
+    assert burst is not None and burst.count >= 3
+    target = next(
+        index
+        for index in range(burst.count)
+        if index != window.current_frame_index and index != window._compare_index
+    )
+    QTest.mouseClick(
+        window.filmstrip._cards[target],
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ShiftModifier,
+    )
+    qt_app.processEvents()
+    assert window._compare_index == target
+    assert window.viewer.partner_box.isVisible()
+
     window._select_frame(0)
     qt_app.processEvents()
     burst = window._current_burst()
@@ -441,6 +482,164 @@ def test_compare_loupe_and_obvious_misses(qt_app, tmp_path: Path) -> None:
     for path in misses:
         assert path not in window._decisions
     assert window._decisions[written["sharp"]] == "keep"
+    window.close()
+    qt_app.processEvents()
+
+
+def test_star_keys_are_saved_apart_from_the_pick_flag(qt_app, tmp_path: Path) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from outburst.cache import Cache
+    from outburst.gui.main_window import MainWindow
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    written = write_burst_folder(tmp_path / "photos")
+    cache_dir = tmp_path / "cache"
+    library = analyze_folder(written["folder"], cache_dir=cache_dir, threshold=1.0)
+    window = MainWindow(cache_dir=cache_dir)
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+
+    assert window._decisions[written["sharp"]] == "keep"
+    QTest.keyClick(window, Qt.Key.Key_4)
+    qt_app.processEvents()
+    assert window._stars[written["sharp"]] == 4
+    assert window._decisions[written["sharp"]] == "keep"
+    assert "★★★★☆" in window.viewer.info.text()
+    assert window.viewer.star_buttons[3].property("filled") == "true"
+    assert window.viewer.star_buttons[4].property("filled") == "false"
+    QTest.keyClick(window, Qt.Key.Key_4)
+    qt_app.processEvents()
+    assert written["sharp"] not in window._stars
+    with Cache(cache_dir) as cache:
+        cache.set_stars(written["blur"], 2)
+    window.present(library)
+    qt_app.processEvents()
+    assert window._stars[written["blur"]] == 2
+    window.close()
+    qt_app.processEvents()
+
+
+def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import datetime, timedelta
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
+    from outburst.pipeline import analyze_folder
+    from tests.helpers import write_jpeg
+    from tests.test_eyes import _portrait
+
+    _isolate_settings(tmp_path / "settings")
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    moment = datetime(2024, 7, 2, 9, 0, 0)
+    sharp = folder / "sharp.jpg"
+    soft = folder / "soft.jpg"
+    write_jpeg(sharp, _portrait(36), moment)
+    write_jpeg(soft, _portrait(36, blur=21), moment + timedelta(milliseconds=200))
+    library = analyze_folder(folder, cache_dir=tmp_path / "cache", threshold=1.0, eye_scoring=True)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    assert window.controls.eye_scoring() is False
+    window.present(library)
+    qt_app.processEvents()
+
+    assert window._decisions[sharp] == "keep"
+    assert window._origins[sharp] == "auto"
+    assert soft not in window._decisions
+    assert "Eye sharpness" in window.viewer.info.text()
+    assert "eye" in window.burst_list.item(0).text()
+    assert "eye scoring" in window.statusBar().currentMessage()
+    assert window.viewer.keeper_button.isChecked()
+
+    window._apply_decision(soft, "keep", origin="user")
+    window._mark_recommended_keepers()
+    assert window._decisions[sharp] == "keep"
+    assert window._origins[sharp] == "auto"
+    assert window._decisions[soft] == "keep"
+    assert window._origins[soft] == "user"
+
+    window._apply_decision(sharp, "reject", origin="user")
+    window._apply_decision(soft, "keep", origin="auto")
+    window._mark_recommended_keepers()
+    assert window._decisions[sharp] == "reject"
+    assert soft not in window._decisions
+
+    started: list[bool] = []
+
+    def spy_start(self: AnalyzeWorker) -> None:
+        started.append(self._eye_scoring)
+
+    monkeypatch.setattr(AnalyzeWorker, "start", spy_start)
+    window._apply_decision(soft, "keep", origin="user")
+    window._apply_decision(sharp, "keep", origin="auto")
+    window.controls._eye.setChecked(True)
+    qt_app.processEvents()
+    assert started == [True]
+    assert sharp not in window._decisions
+    assert window._decisions[soft] == "keep"
+    assert window._origins[soft] == "user"
+    window._scanning = False
+    window.close()
+    qt_app.processEvents()
+
+
+def test_save_keepers_disables_save_until_the_copy_finishes(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    from outburst.gui.dialogs import ExportRequest
+    from outburst.gui.main_window import MainWindow
+    from outburst.output import export_keepers
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+    destination = tmp_path / "keepers"
+    monkeypatch.setattr(
+        "outburst.gui.main_window.ExportKeepersDialog.ask",
+        lambda *_args, **_kwargs: ExportRequest(destination, "copy"),
+    )
+    started = threading.Event()
+    release = threading.Event()
+
+    def wrapped(*args, **kwargs):  # type: ignore[no-untyped-def]
+        started.set()
+        assert release.wait(5)
+        return export_keepers(*args, **kwargs)
+
+    monkeypatch.setattr("outburst.gui.worker.export_keepers", wrapped)
+    window._export_keepers()
+    assert started.wait(3)
+    qt_app.processEvents()
+    assert window.export_action.isEnabled() is False
+    assert window.xmp_action.isEnabled() is False
+    assert window.progress.isVisible()
+    release.set()
+    for _ in range(100):
+        qt_app.processEvents()
+        if not window._saving:
+            break
+        time.sleep(0.02)
+    assert window._saving is False
+    assert window.export_action.isEnabled() is True
+    assert (destination / written["sharp"].name).is_file()
+    assert (destination / written["second_sharp"].name).is_file()
     window.close()
     qt_app.processEvents()
 

@@ -96,17 +96,19 @@ A normal desktop already has what PySide6 needs. If the window fails to open bec
 
 A JPEG that sits next to a RAW file with the same name is used as the preview. It is not counted as a second frame.
 
-While the scan runs, the status bar shows progress. The first visit reads each file. The next visit is much faster, because measurements and thumbnails are cached on this computer. **Rescan** throws away the cached measurements for the open folder and reads it again. Keeper marks stay. **Clear cache** in the View menu does that for every folder.
+While the scan runs, the status bar shows progress. The first visit reads each file, with a few frames measured at the same time. The next visit is much faster, because measurements and thumbnails are cached on this computer. **Rescan** throws away the cached measurements for the open folder and reads it again. Keeper marks stay. **Clear cache** in the View menu does that for every folder. **Save keepers** and **Write XMP sidecars** also run in the background, two files at a time, so the window stays usable.
 
-The left column lists bursts. The large frame is the one you are reviewing. Under it, **Mark as keeper** and **Reject** show the choice for that frame. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
+The left column lists bursts. The large frame is the one you are reviewing. Under it, five stars set the rating, and **Mark as keeper** and **Reject** set the pick and reject flags. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
 
-**C** puts the frame you are on beside the best other frame in the burst. When you are already on the best frame, the other side is the next sharpest. Click that side to review it. **Z** shows the embedded preview at 1:1 so you can drag across the detail. **F** paints the strongest edges green. These use the same preview Outburst scored. They do not demosaic the RAW file.
+**C** puts the frame you are on beside another frame in the burst. It starts with the best other frame, or the next sharpest when you are already on the best. **[** and **]** move that other frame, and Shift-click a thumbnail compares with that frame. Click the other side to review it. **Z** shows the embedded preview at 1:1. **+** and **−**, or the scroll wheel over the preview, zoom through fit, 1:1, 2:1, and 4:1. Drag to look around. **F** paints the strongest edges green. These use the same preview Outburst scored. They do not demosaic the RAW file.
 
 **Burst gap** is how close two frames must be to stay in one burst. The default is 1.0 second. A gap of exactly 1.0 second starts a new burst. Moving the control regroups immediately. Keepers you marked stay. Outburst clears the keeper it had chosen and marks the best frame of each burst.
 
 **Sharpness** and **Center weight** change the ranking immediately, without reading the files again. Sharpness is three quarters of the score by default. The center of the frame counts a bit more than the corners, which suits a bird that is near the middle.
 
 **Subject-aware sharpness** is off unless you turn it on. See below.
+
+**Eye sharpness** is off unless you turn it on. It looks for a dark, round eye in the preview and rates it only when the eye is large enough to measure. In a burst with two or more rated eyes, the sharpest eye becomes the best frame and is marked a keeper. A burst with no rated eye, or only one, keeps the usual sharpness ranking. Turning the checkbox on or off clears the keeper Outburst chose and scans the folder again. Keepers you marked stay.
 
 ### Keyboard
 
@@ -118,10 +120,15 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 | Down / Up | Next or previous burst |
 | Home / End | First or last frame in the burst |
 | Enter | Jump to the recommended frame |
-| C | Compare this frame with the best other frame in the burst |
-| Z | 1:1 loupe. Drag to look around. Press again to fit the frame |
+| C | Compare two frames. Starts beside the best other frame in the burst |
+| [ / ] | Previous or next frame on the other side of compare |
+| Shift-click | Compare with that thumbnail |
+| Z | Zoom to 1:1. Press again to fit the frame |
+| + / − | Zoom in or out: fit, 1:1, 2:1, 4:1. Scroll does the same over the preview |
 | F | Focus peaking. Green marks the strongest edges |
-| A | Mark this frame as a keeper. Press again to clear it. Same as **Mark as keeper**. |
+| 1–5 | Set that star rating. Press the same number again to clear it |
+| 0 | Clear the star rating |
+| A | Flag this frame as a pick. Press again to clear it. Same as **Mark as keeper**. |
 | X | Reject this frame. Press again to clear it. Same as **Reject**. |
 | R | Reject the whole burst. Press again to clear it. |
 | G | Reject obvious misses in this burst. Press again to restore them. |
@@ -156,7 +163,13 @@ Delete that folder if you want Outburst to measure everything again. A log file,
 
 **Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. **G** rejects the other frames that are much softer than that best frame, or heavily clipped, and leaves anything you marked as a keeper. Press **G** again to bring those frames back. Changing **Burst gap** keeps the frames you marked, drops the automatic mark, and marks the best frame of each new burst. A burst with no keeper is skipped. A burst shorter than **Minimum frames** is hidden and is not saved, even if you marked a frame in it. Lower the minimum to review and save those bursts. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
 
-**XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom-style rating is 5 for a keeper, -1 for a reject, and 0 otherwise. A burst shorter than the minimum is not saved, so a mark on one of those frames stays at 0 unless you rejected it. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it.
+**XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom, Capture One, Darktable, and digiKam can read it.
+
+- Stars are `xmp:Rating` from 0 to 5, and `MicrosoftPhoto:Rating` as the matching percent. Keys **1** through **5** set them. **0**, or the same number again, clears them.
+- A pick (the keeper mark, key **A**) is `xmpDM:pick="1"` and `xmpDM:good="true"`. digiKam reads that as PickLabel 3. A pick with no star rating of its own is also written as 5 stars, which is what older catalogs expect.
+- A reject (key **X**) is `xmpDM:pick="-1"` and `xmpDM:good="false"`. digiKam reads that as PickLabel 1. With no stars of its own, `xmp:Rating` is -1 so a catalog that only reads the rating still sees the reject. Stars you set stay in `xmp:Rating` beside that flag.
+
+A burst shorter than the minimum is not saved, so a pick on one of those frames is not written as a pick. A reject on it still is. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it. In Lightroom, choose Metadata → Read Metadata from Files. In Capture One, choose Load Metadata.
 
 **Report** writes `outburst-report.json` and `outburst-report.csv`. `examples/sample_output` shows the shape of both, plus a sample sidecar. Reports you export use full file paths.
 
@@ -173,6 +186,14 @@ Choose a model in the dropdown, or check **Subject-aware sharpness**, then press
 When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched when you choose it or when you rescan with subject scoring on. Photos are still never uploaded.
 
 On Apple Silicon the detector uses MPS when PyTorch provides it. On NVIDIA it uses CUDA. Otherwise it uses the CPU. The rest of Outburst does not need a GPU.
+
+## Eye sharpness
+
+This is optional and stays off until you check **Eye sharpness** on the scoring panel. Outburst looks for a dark round spot in the preview. With subject scoring on, that search stays inside the animal. An eye is rated only when it is large enough on the preview (about 16 pixels across on the 1024 px analysis image). A smaller eye is noted as too small and left out of the ranking. If nothing round and dark is found, the frame says no eye was found.
+
+When a burst has two or more frames with a rated eye, the sharpest of those eyes is the best frame and Outburst marks it as a keeper. A reject on that frame stays rejected. A keeper you already set stays yours. Other automatic keepers in that burst are cleared. A burst with fewer than two rated eyes uses the usual sharpness rank, and Outburst marks a keeper only when the burst does not already have one.
+
+The eye is drawn as an amber circle on the preview. Turning the checkbox off scans the folder again with the usual sharpness ranking. Eye scoring stays on this computer and does not download a model.
 
 ## Apple Silicon
 
@@ -198,7 +219,7 @@ The one-click launcher is the supported way to install and open Outburst.
 
 ## Roadmap
 
-This version includes the review window, timestamp grouping, preview scoring, a disk cache, adjustable weights, keyboard culling, side-by-side compare, a 1:1 loupe, focus peaking, XMP, keeper export, and reports. Subject detection is optional. The model dropdown downloads a missing weights file into the models folder.
+This version includes the review window, timestamp grouping, preview scoring, a disk cache, adjustable weights, keyboard culling, side-by-side compare of any two frames, preview zoom, focus peaking, XMP, keeper export, and reports. Subject detection is optional. The model dropdown downloads a missing weights file into the models folder.
 
 Later versions can add a bundled small detector and signed installers for macOS and Windows.
 

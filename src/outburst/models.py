@@ -54,6 +54,9 @@ class Metrics:
     subject_box: tuple[int, int, int, int] | None = None
     subject_label: str | None = None
     subject_confidence: float | None = None
+    eye_sharpness: float | None = None
+    eye_center: tuple[int, int] | None = None
+    eye_radius: int | None = None
 
 
 @dataclass(frozen=True)
@@ -97,3 +100,4 @@ class Library:
     threshold: float
     weights: Weights
     subject_active: bool = False
+    eye_active: bool = False

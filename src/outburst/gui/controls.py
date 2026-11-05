@@ -30,6 +30,7 @@ class ControlPanel(QGroupBox):
     threshold_changed = Signal(float)
     weights_changed = Signal()
     subject_toggled = Signal(bool)
+    eye_toggled = Signal(bool)
     model_changed = Signal(str)
     minimum_changed = Signal(int)
 
@@ -69,6 +70,14 @@ class ControlPanel(QGroupBox):
             "Choosing a model turns this on. Rescan downloads that model if it is not in the models folder."
         )
         self._subject.toggled.connect(self.subject_toggled.emit)
+        self._eye = QCheckBox("Eye sharpness")
+        self._eye.setToolTip(
+            "Rate a dark, round eye when it is large enough in the preview. "
+            "In a burst with two or more rated eyes, the sharpest eye becomes the best frame "
+            "and is marked a keeper. A smaller eye is noted and left out of the ranking. "
+            "With subject scoring on, the search stays inside the animal. Turning this on or off rescans."
+        )
+        self._eye.toggled.connect(self.eye_toggled.emit)
         self._model = QComboBox()
         self._model.setToolTip(
             "Subject model. Choosing one turns subject scoring on. "
@@ -92,6 +101,7 @@ class ControlPanel(QGroupBox):
         layout.addWidget(self._minimum)
         layout.addWidget(self._recursive)
         layout.addWidget(self._subject)
+        layout.addWidget(self._eye)
         layout.addWidget(self._model)
         layout.addWidget(self._model_label)
         hint = QLabel("Sharpness and exposure update the ranking immediately.")
@@ -123,6 +133,9 @@ class ControlPanel(QGroupBox):
 
     def prefer_subject(self) -> bool:
         return self._subject.isChecked()
+
+    def eye_scoring(self) -> bool:
+        return self._eye.isChecked()
 
     def weights(self) -> Weights:
         sharpness = self._sharpness.value() / 100.0
@@ -157,6 +170,11 @@ class ControlPanel(QGroupBox):
         self._subject.blockSignals(True)
         self._subject.setChecked(checked)
         self._subject.blockSignals(False)
+
+    def set_eye_scoring(self, checked: bool) -> None:
+        self._eye.blockSignals(True)
+        self._eye.setChecked(checked)
+        self._eye.blockSignals(False)
 
     def model_id(self) -> str:
         value = self._model.currentData()

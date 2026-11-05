@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS frame_metrics (
     subject_confidence REAL,
     subject_label TEXT,
     subject_box TEXT,
+    eye_sharpness REAL,
+    eye_x INTEGER,
+    eye_y INTEGER,
+    eye_radius INTEGER,
     preview_rel TEXT,
     thumb_rel TEXT,
     updated_at TEXT NOT NULL,
@@ -53,6 +57,12 @@ CREATE TABLE IF NOT EXISTS decisions (
     decision TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     origin TEXT NOT NULL DEFAULT 'user'
+);
+
+CREATE TABLE IF NOT EXISTS ratings (
+    path TEXT PRIMARY KEY,
+    stars INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
 );
 """
 
@@ -99,6 +109,7 @@ class Cache:
         self._conn.executescript(_SCHEMA)
         self._ensure_decision_origin()
         self._ensure_critical_sharpness()
+        self._ensure_eye_columns()
         self._conn.commit()
 
     def close(self) -> None:
@@ -142,6 +153,9 @@ class Cache:
             subject_box=_parse_box(row["subject_box"]),
             subject_label=row["subject_label"],
             subject_confidence=row["subject_confidence"],
+            eye_sharpness=None if row["eye_sharpness"] is None else float(row["eye_sharpness"]),
+            eye_center=_parse_center(row["eye_x"], row["eye_y"]),
+            eye_radius=None if row["eye_radius"] is None else int(row["eye_radius"]),
         )
         captured = row["captured_at"]
         return CacheRecord(
@@ -174,8 +188,9 @@ class Cache:
                 captured_at, timestamp_source, camera,
                 sharpness, center_sharpness, critical_sharpness, tenengrad, exposure,
                 highlight_clip, shadow_clip, subject_sharpness, subject_confidence,
-                subject_label, subject_box, preview_rel, thumb_rel, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                subject_label, subject_box, eye_sharpness, eye_x, eye_y, eye_radius,
+                preview_rel, thumb_rel, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(path),
@@ -197,6 +212,10 @@ class Cache:
                 metrics.subject_confidence,
                 metrics.subject_label,
                 _format_box(metrics.subject_box),
+                metrics.eye_sharpness,
+                None if metrics.eye_center is None else metrics.eye_center[0],
+                None if metrics.eye_center is None else metrics.eye_center[1],
+                metrics.eye_radius,
                 self._rel(preview_path),
                 self._rel(thumb_path),
                 datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -266,6 +285,42 @@ class Cache:
             )
         self._conn.commit()
 
+    def stars_for(self, paths: list[Path]) -> dict[Path, int]:
+        """Star ratings the photographer set. Missing paths have no rating yet."""
+
+        found: dict[Path, int] = {}
+        if not paths:
+            return found
+        for start in range(0, len(paths), 400):
+            chunk = paths[start : start + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._conn.execute(
+                f"SELECT path, stars FROM ratings WHERE path IN ({placeholders})",
+                [str(path) for path in chunk],
+            )
+            by_text = {str(path): path for path in chunk}
+            for row in rows:
+                path = by_text.get(row["path"])
+                stars = row["stars"]
+                if path is not None and isinstance(stars, int) and 0 <= stars <= 5:
+                    found[path] = stars
+        return found
+
+    def set_stars(self, path: Path, stars: int | None) -> None:
+        if stars is not None and stars not in range(6):
+            raise ValueError(f"Star rating must be 0 through 5, not {stars}")
+        if stars is None:
+            self._conn.execute("DELETE FROM ratings WHERE path = ?", (str(path),))
+        else:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO ratings (path, stars, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (str(path), stars, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+            )
+        self._conn.commit()
+
     def _ensure_decision_origin(self) -> None:
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(decisions)")}
         if "origin" in columns:
@@ -279,6 +334,18 @@ class Cache:
         if "critical_sharpness" in columns:
             return
         self._conn.execute("ALTER TABLE frame_metrics ADD COLUMN critical_sharpness REAL")
+
+    def _ensure_eye_columns(self) -> None:
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(frame_metrics)")}
+        additions = (
+            ("eye_sharpness", "REAL"),
+            ("eye_x", "INTEGER"),
+            ("eye_y", "INTEGER"),
+            ("eye_radius", "INTEGER"),
+        )
+        for name, kind in additions:
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE frame_metrics ADD COLUMN {name} {kind}")
 
     def forget_folder(self, folder: Path) -> int:
         """Drop cached measurements and preview files for photographs inside ``folder``.
@@ -387,3 +454,9 @@ def _parse_box(value: str | None) -> tuple[int, int, int, int] | None:
     except ValueError:
         return None
     return (x, y, width, height)
+
+
+def _parse_center(x: object, y: object) -> tuple[int, int] | None:
+    if x is None or y is None:
+        return None
+    return (int(x), int(y))

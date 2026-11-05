@@ -90,6 +90,53 @@ def test_crop_box_clips_to_the_image() -> None:
     assert cropped.size > 0
 
 
+def test_two_rated_eyes_outrank_a_sharper_frame() -> None:
+    from outburst.scoring import eye_chooses_best
+
+    soft_eye = Metrics(80, 80, 80, 80, 0, 0, eye_sharpness=4.0, eye_center=(20, 20), eye_radius=12)
+    sharp_eye = Metrics(8, 8, 8, 8, 0, 0, eye_sharpness=40.0, eye_center=(20, 20), eye_radius=12)
+    texture = Metrics(200, 200, 200, 200, 0, 0)
+
+    class Row:
+        def __init__(self, metrics: Metrics) -> None:
+            self.composite = metrics.sharpness
+            self.metrics = metrics
+
+    frames = [
+        Frame(Path("soft.jpg"), "jpeg", None, "missing", None, 1, 1),
+        Frame(Path("texture.jpg"), "jpeg", None, "missing", None, 1, 1),
+        Frame(Path("sharp.jpg"), "jpeg", None, "missing", None, 1, 1),
+    ]
+    by_path = {
+        frames[0].path: Row(soft_eye),
+        frames[1].path: Row(texture),
+        frames[2].path: Row(sharp_eye),
+    }
+    assert eye_chooses_best(frames, by_path)
+    assert recommended_offset(frames, by_path) == 2
+    assert compare_partner_offset(frames, by_path, 2) == 0
+
+
+def test_one_rated_eye_does_not_change_the_rank() -> None:
+    from outburst.scoring import eye_chooses_best
+
+    eyed = Metrics(5, 5, 5, 5, 0, 0, eye_sharpness=90.0, eye_center=(20, 20), eye_radius=12)
+    texture = Metrics(200, 200, 200, 200, 0, 0)
+
+    class Row:
+        def __init__(self, metrics: Metrics) -> None:
+            self.composite = metrics.sharpness
+            self.metrics = metrics
+
+    frames = [
+        Frame(Path("eye.jpg"), "jpeg", None, "missing", None, 1, 1),
+        Frame(Path("texture.jpg"), "jpeg", None, "missing", None, 1, 1),
+    ]
+    by_path = {frames[0].path: Row(eyed), frames[1].path: Row(texture)}
+    assert eye_chooses_best(frames, by_path) is False
+    assert recommended_offset(frames, by_path) == 1
+
+
 def test_recommended_frame_breaks_ties_by_filename() -> None:
     moment_metrics = Metrics(1, 1, 1, 1, 0, 0)
 

@@ -7,7 +7,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
-from outburst.models import Weights
+from outburst.models import Library, Weights
+from outburst.output import export_keepers, write_library_sidecars
 from outburst.pipeline import CancelledError, analyze_folder
 from outburst.subject import ModelCancelled, ensure_model, option_by_id
 
@@ -29,6 +30,7 @@ class AnalyzeWorker(QThread):
         weights: Weights,
         cache_dir: Path,
         subject_model: Path | None,
+        eye_scoring: bool = False,
     ) -> None:
         super().__init__()
         self._folder = folder
@@ -37,6 +39,7 @@ class AnalyzeWorker(QThread):
         self._weights = weights
         self._cache_dir = cache_dir
         self._subject_model = subject_model
+        self._eye_scoring = eye_scoring
         self._abort = False
 
     def abort(self) -> None:
@@ -51,6 +54,7 @@ class AnalyzeWorker(QThread):
                 weights=self._weights,
                 cache_dir=self._cache_dir,
                 subject_model=self._subject_model,
+                eye_scoring=self._eye_scoring,
                 progress=self._on_progress,
                 should_cancel=lambda: self._abort,
             )
@@ -110,3 +114,67 @@ class ModelFetchWorker(QThread):
             self.cancelled.emit()
             return
         self.succeeded.emit(str(path))
+
+
+class ExportWorker(QThread):
+    """Copy or link keepers without blocking the window. Two files at a time."""
+
+    progress = Signal(int, int, str)
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, sources: list[Path], folder: Path, mode: str) -> None:
+        super().__init__()
+        self._sources = sources
+        self._folder = folder
+        self._mode = mode
+
+    def run(self) -> None:
+        try:
+            results = export_keepers(
+                self._sources,
+                self._folder,
+                self._mode,
+                progress=lambda done, total, message: self.progress.emit(done, total, message),
+            )
+        except Exception as exc:
+            log.exception("Saving keepers failed")
+            self.failed.emit(str(exc))
+            return
+        self.succeeded.emit(results)
+
+
+class SidecarWorker(QThread):
+    """Write XMP sidecars without blocking the window. Two files at a time."""
+
+    progress = Signal(int, int, str)
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        library: Library,
+        decisions: dict[Path, str],
+        stars: dict[Path, int],
+        minimum_frames: int,
+    ) -> None:
+        super().__init__()
+        self._library = library
+        self._decisions = decisions
+        self._stars = stars
+        self._minimum_frames = minimum_frames
+
+    def run(self) -> None:
+        try:
+            written, warnings = write_library_sidecars(
+                self._library,
+                self._decisions,
+                stars=self._stars,
+                minimum_frames=self._minimum_frames,
+                progress=lambda done, total, message: self.progress.emit(done, total, message),
+            )
+        except Exception as exc:
+            log.exception("Writing sidecars failed")
+            self.failed.emit(str(exc))
+            return
+        self.succeeded.emit((written, warnings))

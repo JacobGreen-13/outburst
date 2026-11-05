@@ -60,7 +60,13 @@ def test_metrics_and_decisions_round_trip(tmp_path: Path) -> None:
     assert cache.get(photo, 10, 20, "other-model") is None
 
     cache.set_decision(photo, "keep")
+    cache.set_stars(photo, 4)
     assert cache.decisions_for([photo])[photo] == "keep"
+    assert cache.stars_for([photo])[photo] == 4
+    cache.set_stars(photo, None)
+    assert photo not in cache.stars_for([photo])
+    with pytest.raises(ValueError):
+        cache.set_stars(photo, 6)
     assert cache.decision_origins([photo])[photo] == "user"
     cache.set_decision(photo, "keep", origin="auto")
     assert cache.decision_origins([photo])[photo] == "auto"
@@ -141,6 +147,83 @@ def test_forget_folder_drops_measurements_and_keeps_decisions(tmp_path: Path) ->
     assert not outside_preview.exists()
     assert not orphan.exists()
     assert cache.decisions_for([inside])[inside] == "keep"
+    cache.close()
+
+
+def test_eye_measurements_round_trip_and_migrate(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "previews").mkdir()
+    (legacy / "thumbs").mkdir()
+    connection = sqlite3.connect(legacy / "outburst.sqlite")
+    connection.executescript(
+        """
+        CREATE TABLE frame_metrics (
+            path TEXT NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            size INTEGER NOT NULL,
+            score_version INTEGER NOT NULL,
+            subject_key TEXT NOT NULL,
+            captured_at TEXT,
+            timestamp_source TEXT,
+            camera TEXT,
+            sharpness REAL,
+            center_sharpness REAL,
+            critical_sharpness REAL,
+            tenengrad REAL,
+            exposure REAL,
+            highlight_clip REAL,
+            shadow_clip REAL,
+            subject_sharpness REAL,
+            subject_confidence REAL,
+            subject_label TEXT,
+            subject_box TEXT,
+            preview_rel TEXT,
+            thumb_rel TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (path, mtime_ns, size, score_version, subject_key)
+        );
+        CREATE TABLE decisions (
+            path TEXT PRIMARY KEY,
+            decision TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            origin TEXT NOT NULL DEFAULT 'user'
+        );
+        CREATE TABLE ratings (
+            path TEXT PRIMARY KEY,
+            stars INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    cache = Cache(legacy)
+    photo = tmp_path / "eye.jpg"
+    preview = legacy / "previews" / "eye.jpg"
+    thumb = legacy / "thumbs" / "eye.jpg"
+    preview.write_bytes(b"preview")
+    thumb.write_bytes(b"thumb")
+    cache.put(
+        photo,
+        10,
+        20,
+        "eye",
+        captured_at=None,
+        timestamp_source="missing",
+        camera=None,
+        metrics=replace(_metrics(), eye_sharpness=18.5, eye_center=(40, 50), eye_radius=11),
+        preview_path=preview,
+        thumb_path=thumb,
+    )
+    record = cache.get(photo, 10, 20, "eye")
+    assert record is not None
+    assert record.metrics.eye_sharpness == 18.5
+    assert record.metrics.eye_center == (40, 50)
+    assert record.metrics.eye_radius == 11
     cache.close()
 
 
