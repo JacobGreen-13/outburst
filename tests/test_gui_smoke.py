@@ -988,12 +988,15 @@ def test_minimum_score_hides_weaker_frames_and_keeps_marks(qt_app, tmp_path: Pat
     qt_app.processEvents()
 
 
-def test_subject_box_and_eye_circle_can_be_hidden(qt_app, tmp_path: Path) -> None:
+def test_subject_box_and_eye_circle_can_be_hidden(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from datetime import datetime
 
     from PySide6.QtGui import QColor, QImage
 
     from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
     from outburst.models import Burst, Frame, FrameAnalysis, Library, Metrics, Weights
 
     _isolate_settings(tmp_path / "settings")
@@ -1035,25 +1038,33 @@ def test_subject_box_and_eye_circle_can_be_hidden(qt_app, tmp_path: Path) -> Non
     window = MainWindow(cache_dir=tmp_path / "cache")
     window.resize(1100, 760)
     window.show()
+    scans: list[str] = []
+    monkeypatch.setattr(AnalyzeWorker, "start", lambda *_args, **_kwargs: scans.append("scan"))
     window.present(library)
     qt_app.processEvents()
-    assert window.subject_box_action.isChecked() is True
-    assert window.eye_circle_action.isChecked() is True
+    subject_on = window.controls.prefer_subject()
+    eye_on = window.controls.eye_scoring()
+    assert window.controls.show_subject_box() is True
+    assert window.controls.show_eye_circle() is True
     assert window.viewer.preview._box == (40, 30, 80, 60)
     assert window.viewer.preview._circle == (70, 55, 12)
     assert "Bird eye detected" in window.viewer.info.text()
 
-    window.subject_box_action.setChecked(False)
+    window.controls._show_box.setChecked(False)
     qt_app.processEvents()
+    assert window.controls.prefer_subject() is subject_on
     assert window.viewer.preview._box is None
     assert window.viewer.preview._circle == (70, 55, 12)
     assert window.viewer.preview._focus == (70, 55)
+    assert scans == []
 
-    window.eye_circle_action.setChecked(False)
+    window.controls._show_eye.setChecked(False)
     qt_app.processEvents()
+    assert window.controls.eye_scoring() is eye_on
     assert window.viewer.preview._circle is None
     assert window.viewer.preview._focus == (70, 55)
     assert "Bird eye detected" in window.viewer.info.text()
+    assert scans == []
 
     window.compare_action.setChecked(True)
     qt_app.processEvents()
@@ -1061,19 +1072,22 @@ def test_subject_box_and_eye_circle_can_be_hidden(qt_app, tmp_path: Path) -> Non
     assert window.viewer.partner._circle is None
     assert window.viewer.partner._focus == (70, 55)
 
-    window.subject_box_action.setChecked(True)
-    window.eye_circle_action.setChecked(True)
+    window.controls._show_box.setChecked(True)
+    window.controls._show_eye.setChecked(True)
     qt_app.processEvents()
     assert window.viewer.partner._box == (40, 30, 80, 60)
     assert window.viewer.partner._circle == (70, 55, 12)
+    assert scans == []
 
-    window.subject_box_action.setChecked(False)
+    window.controls._show_box.setChecked(False)
     window._save_settings()
     window.close()
     qt_app.processEvents()
     restored = MainWindow(cache_dir=tmp_path / "cache")
-    assert restored.subject_box_action.isChecked() is False
-    assert restored.eye_circle_action.isChecked() is True
+    assert restored.controls.show_subject_box() is False
+    assert restored.controls.show_eye_circle() is True
+    assert restored.controls.prefer_subject() is False
+    assert restored.controls.eye_scoring() is False
     restored.close()
     qt_app.processEvents()
 
