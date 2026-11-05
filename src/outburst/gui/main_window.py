@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QAbstractSlider,
     QAbstractSpinBox,
     QApplication,
+    QButtonGroup,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QPushButton,
     QSizePolicy,
     QSplitter,
     QStyle,
@@ -34,6 +36,7 @@ from outburst import __version__
 from outburst.cache import Cache, default_cache_dir
 from outburst.display import (
     burst_list_text,
+    filmstrip_order,
     frame_info_html,
     obvious_misses,
     score_caption,
@@ -107,6 +110,7 @@ class MainWindow(QMainWindow):
         self._replace_download = False
         self._burst_index = 0
         self._frame_index = 0
+        self._filmstrip_sort = "time"
         self._warnings: tuple[str, ...] = ()
         self._worker: AnalyzeWorker | None = None
         self._scan_id = 0
@@ -228,12 +232,15 @@ class MainWindow(QMainWindow):
         elif key == Qt.Key.Key_Up:
             self._step_burst(-1)
         elif key == Qt.Key.Key_Home:
-            self._select_frame(0)
-        elif key == Qt.Key.Key_End:
-            burst = self._current_burst()
-            if burst is None or not burst.frames:
+            order = self._filmstrip_indexes()
+            if not order:
                 return False
-            self._select_frame(len(burst.frames) - 1)
+            self._select_frame(order[0])
+        elif key == Qt.Key.Key_End:
+            order = self._filmstrip_indexes()
+            if not order:
+                return False
+            self._select_frame(order[-1])
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self._go_to_recommended()
         elif Qt.Key.Key_0 <= key <= Qt.Key.Key_5:
@@ -314,6 +321,39 @@ class MainWindow(QMainWindow):
         self.filmstrip = Filmstrip()
         self.filmstrip.selected.connect(self._select_frame)
         self.filmstrip.compare_chosen.connect(self._set_compare_frame)
+        self.sort_time = QPushButton("Time")
+        self.sort_score = QPushButton("Score")
+        self._sort_group = QButtonGroup(self)
+        self._sort_group.setExclusive(True)
+        for button, mode, tip in (
+            (self.sort_time, "time", "Show the burst in the order the frames were shot."),
+            (
+                self.sort_score,
+                "score",
+                "Show the highest score first. Equal scores stay in the order they were shot.",
+            ),
+        ):
+            button.setCheckable(True)
+            button.setObjectName("filmstripSort")
+            button.setToolTip(tip)
+            button.toggled.connect(lambda checked, chosen=mode: self._on_filmstrip_sort(chosen, checked))
+            self._sort_group.addButton(button)
+        self.sort_time.setChecked(True)
+        order_label = QLabel("Order")
+        order_label.setObjectName("subtitle")
+        strip_header = QHBoxLayout()
+        strip_header.setContentsMargins(8, 0, 8, 0)
+        strip_header.setSpacing(8)
+        strip_header.addWidget(order_label)
+        strip_header.addWidget(self.sort_time)
+        strip_header.addWidget(self.sort_score)
+        strip_header.addStretch(1)
+        strip_box = QWidget()
+        strip_layout = QVBoxLayout(strip_box)
+        strip_layout.setContentsMargins(0, 0, 0, 0)
+        strip_layout.setSpacing(4)
+        strip_layout.addLayout(strip_header)
+        strip_layout.addWidget(self.filmstrip, 1)
 
         top = QSplitter(Qt.Orientation.Horizontal)
         top.addWidget(left)
@@ -323,7 +363,7 @@ class MainWindow(QMainWindow):
         top.setSizes([320, 900])
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(top)
-        splitter.addWidget(self.filmstrip)
+        splitter.addWidget(strip_box)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         root.addWidget(splitter, 1)
@@ -774,7 +814,34 @@ class MainWindow(QMainWindow):
         self._update_viewer()
 
     def _step_frame(self, delta: int) -> None:
-        self._select_frame(self._frame_index + delta)
+        order = self._filmstrip_indexes()
+        if not order:
+            return
+        try:
+            position = order.index(self._frame_index)
+        except ValueError:
+            position = 0
+        position = max(0, min(position + delta, len(order) - 1))
+        self._select_frame(order[position])
+
+    def _on_filmstrip_sort(self, mode: str, checked: bool) -> None:
+        if not checked or mode == self._filmstrip_sort:
+            return
+        self._filmstrip_sort = mode
+        if self._current_burst() is None:
+            return
+        self.filmstrip.set_cards(self._thumbs())
+        self._update_viewer()
+
+    def _filmstrip_indexes(self) -> list[int]:
+        burst = self._current_burst()
+        if burst is None:
+            return []
+        scores: list[float | None] = []
+        for frame in burst.frames:
+            analysis = self._by_path.get(frame.path)
+            scores.append(None if analysis is None else analysis.composite)
+        return filmstrip_order(scores, self._filmstrip_sort)
 
     def _step_burst(self, delta: int) -> None:
         count = len(self._visible_bursts())
@@ -890,12 +957,16 @@ class MainWindow(QMainWindow):
         self._set_compare_frame(chosen)
 
     def _adjacent_frame(self, start: int, delta: int) -> int | None:
-        burst = self._current_burst()
-        if burst is None or len(burst.frames) < 2 or delta == 0:
+        order = self._filmstrip_indexes()
+        if len(order) < 2 or delta == 0:
             return None
-        count = len(burst.frames)
-        for step in range(1, count):
-            candidate = (start + delta * step) % count
+        try:
+            position = order.index(start)
+        except ValueError:
+            position = 0
+        step = 1 if delta > 0 else -1
+        for offset in range(1, len(order)):
+            candidate = order[(position + step * offset) % len(order)]
             if candidate != self._frame_index:
                 return candidate
         return None
@@ -1036,31 +1107,30 @@ class MainWindow(QMainWindow):
         best = recommended_offset(burst.frames, self._by_path) if burst.frames else 0
         best_analysis = self._by_path.get(burst.frames[best].path) if burst.frames else None
         best_composite = None if best_analysis is None else best_analysis.composite
-        cards: list[Thumb] = []
+        cards: dict[int, Thumb] = {}
         for index, frame in enumerate(burst.frames):
             analysis = self._by_path.get(frame.path)
             decision = self._decisions.get(frame.path)
             name = frame.path.name
             title = name if len(name) <= 22 else f"{name[:9]}…{name[-10:]}"
-            cards.append(
-                Thumb(
-                    title=title,
-                    score_text=score_caption(
-                        None if analysis is None else analysis.composite,
-                        None if analysis is None else analysis.metrics,
-                        best_composite=None if index == best else best_composite,
-                        stars=self._stars.get(frame.path),
-                    ),
-                    badge=thumb_badge(index == best, decision),
-                    thumb_path=None if analysis is None else analysis.thumb_path,
-                    selected=index == self._frame_index,
-                    compared=self._compare and index == self._compare_index,
-                    best=index == best,
-                    decision=decision,
-                    tooltip=name,
-                )
+            cards[index] = Thumb(
+                title=title,
+                score_text=score_caption(
+                    None if analysis is None else analysis.composite,
+                    None if analysis is None else analysis.metrics,
+                    best_composite=None if index == best else best_composite,
+                    stars=self._stars.get(frame.path),
+                ),
+                badge=thumb_badge(index == best, decision),
+                thumb_path=None if analysis is None else analysis.thumb_path,
+                selected=index == self._frame_index,
+                compared=self._compare and index == self._compare_index,
+                best=index == best,
+                decision=decision,
+                tooltip=name,
+                frame_index=index,
             )
-        return cards
+        return [cards[index] for index in self._filmstrip_indexes()]
 
     def _export_keepers(self) -> None:
         if self._library is None:
@@ -1444,6 +1514,16 @@ class MainWindow(QMainWindow):
         self.warnings_action.setEnabled(bool(self._warnings))
         self.progress.setVisible(busy)
 
+    def _set_filmstrip_sort(self, mode: str) -> None:
+        chosen = "score" if mode == "score" else "time"
+        self._filmstrip_sort = chosen
+        button = self.sort_score if chosen == "score" else self.sort_time
+        for item in (self.sort_time, self.sort_score):
+            item.blockSignals(True)
+        button.setChecked(True)
+        for item in (self.sort_time, self.sort_score):
+            item.blockSignals(False)
+
     def _notify(self, title: str, text: str, level: str) -> None:
         notify(self, title, text, level)
 
@@ -1456,6 +1536,7 @@ class MainWindow(QMainWindow):
         self.controls.set_minimum_frames(_saved_minimum_frames(settings))
         self.controls.set_subject_checked(_as_bool(settings.value("prefer_subject"), False))
         self.controls.set_eye_scoring(_as_bool(settings.value("eye_scoring"), False))
+        self._set_filmstrip_sort(str(settings.value("filmstrip_sort", "time") or "time"))
         folder = settings.value("last_folder", "")
         if folder:
             self._dialog_start = Path(str(folder))
@@ -1471,6 +1552,7 @@ class MainWindow(QMainWindow):
         settings.setValue("minimum_frames", self.controls.minimum_frames())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
         settings.setValue("eye_scoring", self.controls.eye_scoring())
+        settings.setValue("filmstrip_sort", self._filmstrip_sort)
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:
             settings.setValue("last_folder", str(self._folder))
