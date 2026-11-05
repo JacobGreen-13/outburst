@@ -23,7 +23,7 @@ SHORTCUTS: tuple[tuple[str, str], ...] = (
     ("F5", "Clear cached measurements for this folder and scan it again"),
     ("Ctrl+E", "Save the frames marked as keepers"),
     ("Ctrl+Shift+E", "Export a JSON and CSV report"),
-    ("Ctrl+Shift+X", "Write XMP sidecars"),
+    ("Ctrl+Shift+X", "Write XMP sidecars for keepers and star-rated frames"),
     ("Esc", "Cancel the scan in progress"),
 )
 
