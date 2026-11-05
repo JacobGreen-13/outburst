@@ -98,7 +98,9 @@ A JPEG that sits next to a RAW file with the same name is used as the preview. I
 
 While the scan runs, the status bar shows progress. The first visit reads each file. The next visit is much faster, because measurements and thumbnails are cached on this computer. **Rescan** throws away the cached measurements for the open folder and reads it again. Keeper marks stay. **Clear cache** in the View menu does that for every folder.
 
-The left column lists bursts. The large frame is the one you are reviewing. Under it, **Mark as keeper** and **Reject** show the choice for that frame. The strip along the bottom is every frame in the current burst, with a score from 0 to 100.
+The left column lists bursts. The large frame is the one you are reviewing. Under it, **Mark as keeper** and **Reject** show the choice for that frame. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
+
+**C** puts the frame you are on beside the best other frame in the burst. When you are already on the best frame, the other side is the next sharpest. Click that side to review it. **Z** shows the embedded preview at 1:1 so you can drag across the detail. **F** paints the strongest edges green. These use the same preview Outburst scored. They do not demosaic the RAW file.
 
 **Burst gap** is how close two frames must be to stay in one burst. The default is 1.0 second. A gap of exactly 1.0 second starts a new burst. Moving the control regroups immediately. Keepers you marked stay. Outburst clears the keeper it had chosen and marks the best frame of each burst.
 
@@ -116,9 +118,13 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 | Down / Up | Next or previous burst |
 | Home / End | First or last frame in the burst |
 | Enter | Jump to the recommended frame |
+| C | Compare this frame with the best other frame in the burst |
+| Z | 1:1 loupe. Drag to look around. Press again to fit the frame |
+| F | Focus peaking. Green marks the strongest edges |
 | A | Mark this frame as a keeper. Press again to clear it. Same as **Mark as keeper**. |
 | X | Reject this frame. Press again to clear it. Same as **Reject**. |
 | R | Reject the whole burst. Press again to clear it. |
+| G | Reject obvious misses in this burst. Press again to restore them. |
 | Ctrl+O | Open a folder |
 | F5 | Clear cached measurements for this folder and scan it again |
 | Ctrl+E | Save the frames marked as keepers |
@@ -130,7 +136,7 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 
 Outburst does not demosaic the RAW file. It scores the embedded JPEG preview (or the paired JPEG), scaled so the long side is at most 1024 pixels.
 
-Sharpness is the variance of a Laplacian on that preview. Higher means more fine detail. A second edge measurement, Tenengrad, is shown as edge energy and is not used for the rank.
+Sharpness is the variance of a Laplacian on that preview. Higher means more fine detail. The rank follows the sharpest patch in the middle of the frame, mixed with the full frame by **Center weight**. Grass and branches in the corners count less than a crisp patch where the animal usually sits. With subject detection on, that patch is measured inside the animal. A second edge measurement, Tenengrad, is shown as edge energy and is not used for the rank.
 
 Exposure looks at the preview histogram. Large areas of clipped highlights are penalized more than crushed shadows. A little specular highlight is tolerated.
 
@@ -148,7 +154,7 @@ Scanning only writes into Outburst's cache:
 
 Delete that folder if you want Outburst to measure everything again. A log file, `outburst.log`, is kept there too.
 
-**Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. Changing **Burst gap** keeps the frames you marked, drops the automatic mark, and marks the best frame of each new burst. A burst with no keeper is skipped. A burst shorter than **Minimum frames** is hidden and is not saved, even if you marked a frame in it. Lower the minimum to review and save those bursts. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
+**Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. **G** rejects the other frames that are much softer than that best frame, or heavily clipped, and leaves anything you marked as a keeper. Press **G** again to bring those frames back. Changing **Burst gap** keeps the frames you marked, drops the automatic mark, and marks the best frame of each new burst. A burst with no keeper is skipped. A burst shorter than **Minimum frames** is hidden and is not saved, even if you marked a frame in it. Lower the minimum to review and save those bursts. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
 
 **XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom-style rating is 5 for a keeper, -1 for a reject, and 0 otherwise. A burst shorter than the minimum is not saved, so a mark on one of those frames stays at 0 unless you rejected it. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it.
 
@@ -162,7 +168,7 @@ This part is optional and stays off until you turn it on. The scoring panel has 
 pip install "outburst[subject]"
 ```
 
-Choose a model in the dropdown, or check **Subject-aware sharpness**, then press **Rescan**. That turns subject scoring on, downloads the weights into the models folder when the file is not there yet, and scores the open folder with that model. Progress shows in the status bar. Cancel with Esc. When a bird or animal is found, sharpness is measured inside that box (with a small margin) and the box is drawn on the preview. If nothing is found, or the model cannot be loaded, Outburst keeps the normal full-frame score and tells you.
+Choose a model in the dropdown, or check **Subject-aware sharpness**, then press **Rescan**. That turns subject scoring on, downloads the weights into the models folder when the file is not there yet, and scores the open folder with that model. Progress shows in the status bar. Cancel with Esc. When a bird or animal is found, the sharpest patch inside that box (with a small margin) becomes the score, and the box is drawn on the preview. If nothing is found, or the model cannot be loaded, Outburst keeps the center-patch score and tells you.
 
 When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched when you choose it or when you rescan with subject scoring on. Photos are still never uploaded.
 
@@ -192,9 +198,9 @@ The one-click launcher is the supported way to install and open Outburst.
 
 ## Roadmap
 
-This version includes the review window, timestamp grouping, preview scoring, a disk cache, adjustable weights, keyboard culling, XMP, keeper export, and reports. Subject detection is optional. The model dropdown downloads a missing weights file into the models folder.
+This version includes the review window, timestamp grouping, preview scoring, a disk cache, adjustable weights, keyboard culling, side-by-side compare, a 1:1 loupe, focus peaking, XMP, keeper export, and reports. Subject detection is optional. The model dropdown downloads a missing weights file into the models folder.
 
-Later versions can add a bundled small detector, a side-by-side compare view, and signed installers for macOS and Windows.
+Later versions can add a bundled small detector and signed installers for macOS and Windows.
 
 ## License
 

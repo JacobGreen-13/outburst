@@ -32,7 +32,14 @@ from PySide6.QtWidgets import (
 
 from outburst import __version__
 from outburst.cache import Cache, default_cache_dir
-from outburst.display import burst_list_text, frame_info_html, thumb_badge, visible_bursts
+from outburst.display import (
+    burst_list_text,
+    frame_info_html,
+    obvious_misses,
+    score_caption,
+    thumb_badge,
+    visible_bursts,
+)
 from outburst.gui.burst_view import Filmstrip, Thumb
 from outburst.gui.controls import ControlPanel
 from outburst.gui.dialogs import ExportKeepersDialog, ask, notify, show_shortcuts, show_warnings
@@ -42,7 +49,7 @@ from outburst.gui.worker import AnalyzeWorker, ModelFetchWorker
 from outburst.models import Burst, FrameAnalysis, Library
 from outburst.output import choose_keepers, export_keepers, write_library_sidecars, write_reports
 from outburst.pipeline import with_threshold, with_weights
-from outburst.scoring import recommended_offset, score_percent
+from outburst.scoring import compare_partner_offset, recommended_offset
 from outburst.subject import (
     DEFAULT_MODEL_ID,
     MODEL_OPTIONS,
@@ -82,6 +89,11 @@ class MainWindow(QMainWindow):
         self._by_path: dict[Path, FrameAnalysis] = {}
         self._decisions: dict[Path, str] = {}
         self._origins: dict[Path, str] = {}
+        self._compare = False
+        self._loupe = False
+        self._peaking = False
+        self._obvious_burst_id: str | None = None
+        self._obvious_rejects: list[Path] = []
         self._folder: Path | None = None
         self._dialog_start = Path.home()
         self._model_path: Path | None = None
@@ -220,6 +232,14 @@ class MainWindow(QMainWindow):
             self._toggle_decision("reject")
         elif key == Qt.Key.Key_R:
             self._reject_burst()
+        elif key == Qt.Key.Key_C:
+            self._set_checked(self.compare_action, not self._compare)
+        elif key == Qt.Key.Key_Z:
+            self._set_checked(self.loupe_action, not self._loupe)
+        elif key == Qt.Key.Key_F:
+            self._set_checked(self.peak_action, not self._peaking)
+        elif key == Qt.Key.Key_G:
+            self._reject_obvious()
         elif key == Qt.Key.Key_Escape and (self._scanning or self._downloading):
             self._cancel_scan()
         else:
@@ -268,6 +288,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.controls)
 
         self.viewer = ImageViewer()
+        self.viewer.partner_clicked.connect(self._select_partner)
         self.filmstrip = Filmstrip()
         self.filmstrip.selected.connect(self._select_frame)
 
@@ -345,6 +366,25 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.cancel_action)
         file_menu.addSeparator()
         file_menu.addAction(quit_action)
+        self.compare_action = self._check_action(
+            "Compare with best",
+            "Show this frame beside the best other frame in the burst. Keyboard: C",
+        )
+        self.loupe_action = self._check_action(
+            "1:1 loupe",
+            "Show the embedded preview at full size and drag to look around. Keyboard: Z",
+        )
+        self.peak_action = self._check_action(
+            "Focus peaking",
+            "Paint the strongest edges green. Keyboard: F",
+        )
+        self.compare_action.toggled.connect(self._on_compare_toggled)
+        self.loupe_action.toggled.connect(self._on_loupe_toggled)
+        self.peak_action.toggled.connect(self._on_peak_toggled)
+        view_menu.addAction(self.compare_action)
+        view_menu.addAction(self.loupe_action)
+        view_menu.addAction(self.peak_action)
+        view_menu.addSeparator()
         view_menu.addAction(self.warnings_action)
         view_menu.addAction(cache_action)
         view_menu.addAction(self.clear_cache_action)
@@ -366,6 +406,15 @@ class MainWindow(QMainWindow):
             action.setShortcut(QKeySequence(shortcut))
         action.triggered.connect(lambda _checked=False, callback=slot: callback())
         return action
+
+    def _check_action(self, text: str, tooltip: str) -> QAction:
+        action = QAction(text, self)
+        action.setCheckable(True)
+        action.setToolTip(tooltip)
+        return action
+
+    def _set_checked(self, action: QAction, checked: bool) -> None:
+        action.setChecked(checked)
 
     def _open_folder_dialog(self) -> None:
         if os.environ.get("OUTBURST_HEADLESS") == "1":
@@ -617,6 +666,15 @@ class MainWindow(QMainWindow):
             )
         if library.warnings:
             message += f" · {len(library.warnings)} notes"
+        modes: list[str] = []
+        if self._compare:
+            modes.append("compare")
+        if self._loupe:
+            modes.append("1:1 loupe")
+        if self._peaking:
+            modes.append("focus peaking")
+        if modes:
+            message += " · " + " · ".join(modes)
         return message
 
     def _on_burst_row(self, row: int) -> None:
@@ -721,6 +779,72 @@ class MainWindow(QMainWindow):
         self.filmstrip.refresh_flags(self._thumbs())
         self._update_viewer()
 
+    def _on_compare_toggled(self, checked: bool) -> None:
+        self._compare = checked
+        self._update_viewer()
+        self._show_mode_status()
+
+    def _on_loupe_toggled(self, checked: bool) -> None:
+        self._loupe = checked
+        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self._show_mode_status()
+
+    def _on_peak_toggled(self, checked: bool) -> None:
+        self._peaking = checked
+        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self._show_mode_status()
+
+    def _show_mode_status(self) -> None:
+        if self._library is not None:
+            self.statusBar().showMessage(self._status_summary())
+
+    def _select_partner(self) -> None:
+        burst = self._current_burst()
+        if burst is None:
+            return
+        partner = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        if partner is None:
+            return
+        self._select_frame(partner)
+
+    def _reject_obvious(self) -> None:
+        """Reject soft or badly clipped frames, leaving the best frame and your keepers."""
+
+        burst = self._current_burst()
+        if burst is None or self._scanning or self._library is None:
+            return
+        paths = {frame.path for frame in burst.frames}
+        remembered = [path for path in self._obvious_rejects if path in paths]
+        if (
+            self._obvious_burst_id == burst.id
+            and remembered
+            and all(self._decisions.get(path) == "reject" for path in remembered)
+        ):
+            for path in remembered:
+                self._apply_decision(path, None)
+            self._obvious_rejects = []
+            self._obvious_burst_id = None
+            self._refresh_burst_labels()
+            self.filmstrip.refresh_flags(self._thumbs())
+            self._update_viewer()
+            self.statusBar().showMessage("Restored the frames rejected as obvious misses")
+            return
+        misses = obvious_misses(burst.frames, self._by_path, self._decisions)
+        if not misses:
+            self.statusBar().showMessage("No obvious misses in this burst")
+            return
+        for path in misses:
+            self._apply_decision(path, "reject")
+        self._obvious_rejects = list(misses)
+        self._obvious_burst_id = burst.id
+        noun = "frame" if len(misses) == 1 else "frames"
+        self._refresh_burst_labels()
+        self.filmstrip.refresh_flags(self._thumbs())
+        self._update_viewer()
+        self.statusBar().showMessage(
+            f"Rejected {len(misses)} obvious {noun}. Press G again to restore them."
+        )
+
     def _update_viewer(self) -> None:
         analysis = self._current_analysis()
         burst = self._current_burst()
@@ -766,12 +890,45 @@ class MainWindow(QMainWindow):
             keeper=keeper,
             rejected=rejected,
         )
+        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self.viewer.set_compare(self._compare)
+        if not self._compare:
+            return
+        partner_index = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        if partner_index is None:
+            self.viewer.set_partner_message("Compare", "This burst has one frame.")
+            return
+        partner_frame = burst.frames[partner_index]
+        partner = self._by_path.get(partner_frame.path)
+        partner_decision = self._decisions.get(partner_frame.path)
+        partner_box = None
+        if (
+            show_subject
+            and partner is not None
+            and partner.metrics is not None
+        ):
+            partner_box = partner.metrics.subject_box
+        role = "Best in the burst" if partner_index == recommended_index else "Next sharpest"
+        score = score_caption(
+            None if partner is None else partner.composite,
+            None if partner is None else partner.metrics,
+            best_composite=None,
+        )
+        self.viewer.set_partner(
+            None if partner is None else partner.preview_path,
+            partner_box,
+            f"{role}  ·  {score}  ·  {partner_frame.path.name}",
+            keeper=partner_decision == "keep",
+            rejected=partner_decision == "reject",
+        )
 
     def _thumbs(self) -> list[Thumb]:
         burst = self._current_burst()
         if burst is None or self._library is None:
             return []
         best = recommended_offset(burst.frames, self._by_path) if burst.frames else 0
+        best_analysis = self._by_path.get(burst.frames[best].path) if burst.frames else None
+        best_composite = None if best_analysis is None else best_analysis.composite
         cards: list[Thumb] = []
         for index, frame in enumerate(burst.frames):
             analysis = self._by_path.get(frame.path)
@@ -781,7 +938,11 @@ class MainWindow(QMainWindow):
             cards.append(
                 Thumb(
                     title=title,
-                    score_text=score_percent(None if analysis is None else analysis.composite),
+                    score_text=score_caption(
+                        None if analysis is None else analysis.composite,
+                        None if analysis is None else analysis.metrics,
+                        best_composite=None if index == best else best_composite,
+                    ),
                     badge=thumb_badge(index == best, decision),
                     thumb_path=None if analysis is None else analysis.thumb_path,
                     selected=index == self._frame_index,

@@ -5,7 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from outburst.display import burst_list_text, frame_info_html, thumb_badge, visible_bursts
+from outburst.display import (
+    burst_list_text,
+    frame_info_html,
+    obvious_misses,
+    score_caption,
+    thumb_badge,
+    visible_bursts,
+)
 from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
 
 
@@ -62,6 +69,7 @@ def test_html_escapes_filenames_and_marks_the_recommendation() -> None:
     assert "KEEPER" in kept
     assert "Burst 4" in html
     assert "08:00:00.200" in html
+    assert "Sharpest patch" not in html
 
 
 def test_burst_label_and_badge() -> None:
@@ -75,3 +83,39 @@ def test_burst_label_and_badge() -> None:
     assert "best 50" in text
     assert thumb_badge(True, "keep") == "BEST · KEEP"
     assert thumb_badge(True, "reject") == "REJECT"
+    sharp_patch = frame_info_html(
+        filename=frame.path.name,
+        frame_number=1,
+        frame_count=1,
+        burst_id="burst-002",
+        captured_at=None,
+        camera=None,
+        analysis=FrameAnalysis(frame, Metrics(1, 1, 1, 1, 0, 0, critical_sharpness=40), 0.5, None, None, None),
+        weights=Weights(),
+        recommended=False,
+        decision=None,
+        subject_active=False,
+    )
+    assert "Sharpest patch 40" in sharp_patch
+
+
+def test_score_caption_and_obvious_misses() -> None:
+    assert score_caption(0.84, Metrics(1, 1, 1, 1, 0, 0), best_composite=0.9) == "84"
+    clipped = Metrics(1, 1, 1, 0.2, 0.1, 0)
+    assert score_caption(0.4, clipped, best_composite=0.9) == "40  CLIP SOFT"
+    best = Frame(Path("best.jpg"), "jpeg", None, "missing", None, 1, 1)
+    soft = Frame(Path("soft.jpg"), "jpeg", None, "missing", None, 1, 1)
+    kept = Frame(Path("kept.jpg"), "jpeg", None, "missing", None, 1, 1)
+    burst_frames = (best, soft, kept)
+
+    def row(path: Path, composite: float, metrics: Metrics) -> FrameAnalysis:
+        frame = next(item for item in burst_frames if item.path == path)
+        return FrameAnalysis(frame, metrics, composite, None, None, None)
+
+    by_path = {
+        best.path: row(best.path, 0.9, Metrics(1, 1, 1, 1, 0, 0)),
+        soft.path: row(soft.path, 0.4, Metrics(1, 1, 1, 0.2, 0.2, 0)),
+        kept.path: row(kept.path, 0.4, Metrics(1, 1, 1, 0.2, 0.2, 0)),
+    }
+    misses = obvious_misses(burst_frames, by_path, {kept.path: "keep"})
+    assert misses == (soft.path,)
