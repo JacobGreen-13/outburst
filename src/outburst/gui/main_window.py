@@ -138,6 +138,8 @@ class MainWindow(QMainWindow):
         self._loupe = False
         self._zoom_scale: float | None = None
         self._peaking = False
+        self._show_subject_box = True
+        self._show_eye_circle = True
         self._obvious_burst_id: str | None = None
         self._obvious_rejects: list[Path] = []
         self._folder: Path | None = None
@@ -596,12 +598,26 @@ class MainWindow(QMainWindow):
             "Focus peaking",
             "Paint the strongest edges green. Keyboard: F",
         )
+        self.subject_box_action = self._check_action(
+            "Subject box",
+            "Draw the detected animal box on the preview and the compare pane.",
+        )
+        self.eye_circle_action = self._check_action(
+            "Eye circle",
+            "Draw the bird eye ring on the preview and the compare pane.",
+        )
+        self.subject_box_action.setChecked(True)
+        self.eye_circle_action.setChecked(True)
         self.compare_action.toggled.connect(self._on_compare_toggled)
         self.loupe_action.toggled.connect(self._on_loupe_toggled)
         self.peak_action.toggled.connect(self._on_peak_toggled)
+        self.subject_box_action.toggled.connect(self._on_subject_box_toggled)
+        self.eye_circle_action.toggled.connect(self._on_eye_circle_toggled)
         view_menu.addAction(self.compare_action)
         view_menu.addAction(self.loupe_action)
         view_menu.addAction(self.peak_action)
+        view_menu.addAction(self.subject_box_action)
+        view_menu.addAction(self.eye_circle_action)
         view_menu.addSeparator()
         view_menu.addAction(self.warnings_action)
         view_menu.addAction(cache_action)
@@ -640,7 +656,7 @@ class MainWindow(QMainWindow):
 
         Inputs: text, the label; tooltip, the explanation.
         Output: an unchecked checkable action parented to the window.
-        Uses: Compare, Zoom, and Focus peaking.
+        Uses: Compare, Zoom, Focus peaking, Subject box, and Eye circle.
         Limitations: the action is not added to a menu here, and this method sets no shortcut.
         """
         action = QAction(text, self)
@@ -1715,6 +1731,30 @@ class MainWindow(QMainWindow):
         self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self._show_mode_status()
 
+    def _on_subject_box_toggled(self, checked: bool) -> None:
+        """
+        Show or hide the detected animal box.
+
+        Inputs: checked, whether the box is drawn.
+        Output: no return value. The preview and compare pane redraw.
+        Uses: the Subject box action in the View menu.
+        Limitations: hiding the box does not turn off subject scoring. A frame with no detected animal still has no box. Zoom still centers on the animal when the box is hidden and no eye is present.
+        """
+        self._show_subject_box = checked
+        self._update_viewer()
+
+    def _on_eye_circle_toggled(self, checked: bool) -> None:
+        """
+        Show or hide the bird eye ring.
+
+        Inputs: checked, whether the ring is drawn.
+        Output: no return value. The preview and compare pane redraw.
+        Uses: the Eye circle action in the View menu.
+        Limitations: hiding the ring does not turn off bird eye detection. The info line, filmstrip, and ranking still use the eye. Zoom still centers on the eye when the ring is hidden.
+        """
+        self._show_eye_circle = checked
+        self._update_viewer()
+
     def _on_zoom_changed(self, scale: float) -> None:
         """
         Remember a zoom change that came from the preview.
@@ -1900,7 +1940,7 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: no return value. The preview shows the frame, its info, border, badges, and stars. Compare shows the partner, or a one-frame message when there is no other frame.
         Uses: the large preview.
-        Limitations: zoom uses the embedded preview. With no current frame the welcome placeholder is shown. While a scan has cleared the review, the scanning message stays up. A rejected frame uses the red border ahead of the keeper and recommended colors. The subject box is drawn only when subject scoring is active and preferred.
+        Limitations: zoom uses the embedded preview. With no current frame the welcome placeholder is shown. While a scan has cleared the review, the scanning message stays up. A rejected frame uses the red border ahead of the keeper and recommended colors. The subject box is drawn only when subject scoring is active, a box was found, and Subject box is checked. The eye ring is drawn only when an eye was stored and Eye circle is checked. Hiding either mark leaves the zoom center on that point.
         """
         if self._review_suspended:
             self.viewer.set_placeholder(_SCANNING_PREVIEW)
@@ -1918,6 +1958,7 @@ class MainWindow(QMainWindow):
         box = None
         if show_subject and analysis.metrics is not None:
             box = analysis.metrics.subject_box
+        circle = self._eye_circle(analysis)
         html = frame_info_html(
             filename=frame.path.name,
             frame_number=self._frame_index + 1,
@@ -1945,13 +1986,14 @@ class MainWindow(QMainWindow):
             border = "#2e2e2e"
         self.viewer.set_frame(
             analysis.preview_path,
-            box,
+            box if self._show_subject_box else None,
             html,
             border,
             keeper=keeper,
             rejected=rejected,
             stars=self._stars.get(frame.path),
-            circle=self._eye_circle(analysis),
+            circle=circle if self._show_eye_circle else None,
+            focus=_overlay_focus(box, circle),
         )
         self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self.viewer.set_compare(self._compare)
@@ -1974,6 +2016,7 @@ class MainWindow(QMainWindow):
         partner = self._by_path.get(partner_frame.path)
         partner_decision = self._decisions.get(partner_frame.path)
         partner_box = None
+        partner_circle = None if partner is None else self._eye_circle(partner)
         if (
             show_subject
             and partner is not None
@@ -1993,9 +2036,10 @@ class MainWindow(QMainWindow):
         )
         self.viewer.set_partner(
             None if partner is None else partner.preview_path,
-            partner_box,
+            partner_box if self._show_subject_box else None,
             f"{role}  ·  {score}  ·  {partner_frame.path.name}",
-            circle=None if partner is None else self._eye_circle(partner),
+            circle=partner_circle if self._show_eye_circle else None,
+            focus=_overlay_focus(partner_box, partner_circle),
             keeper=partner_decision == "keep",
             rejected=partner_decision == "reject",
         )
@@ -2711,7 +2755,7 @@ class MainWindow(QMainWindow):
         Restore the controls and the last folder from saved settings.
 
         Inputs: none.
-        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, filmstrip order, and model id are applied. A saved folder becomes the next dialog start.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, filmstrip order, and model id are applied. A saved folder becomes the next dialog start.
         Uses: opening the review window.
         Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise.
         """
@@ -2725,6 +2769,10 @@ class MainWindow(QMainWindow):
         self.controls.set_minimum_score_enabled(_as_bool(settings.value("minimum_score_enabled"), False))
         self.controls.set_subject_checked(_as_bool(settings.value("prefer_subject"), False))
         self.controls.set_eye_scoring(_as_bool(settings.value("eye_scoring"), False))
+        self._show_subject_box = _as_bool(settings.value("show_subject_box"), True)
+        self._show_eye_circle = _as_bool(settings.value("show_eye_circle"), True)
+        self.subject_box_action.setChecked(self._show_subject_box)
+        self.eye_circle_action.setChecked(self._show_eye_circle)
         self._set_filmstrip_sort(str(settings.value("filmstrip_sort", "time") or "time"))
         folder = settings.value("last_folder", "")
         if folder:
@@ -2737,7 +2785,7 @@ class MainWindow(QMainWindow):
         Store the controls and the open folder for the next launch.
 
         Inputs: none.
-        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, filmstrip order, and model id are written.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, filmstrip order, and model id are written.
         Uses: closing the review window.
         Limitations: the folder is saved only when one is open. The resolved model path is saved only when one is stored.
         """
@@ -2751,12 +2799,34 @@ class MainWindow(QMainWindow):
         settings.setValue("minimum_score_enabled", self.controls.minimum_score_enabled())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
         settings.setValue("eye_scoring", self.controls.eye_scoring())
+        settings.setValue("show_subject_box", self._show_subject_box)
+        settings.setValue("show_eye_circle", self._show_eye_circle)
         settings.setValue("filmstrip_sort", self._filmstrip_sort)
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:
             settings.setValue("last_folder", str(self._folder))
         if self._model_path is not None:
             settings.setValue("subject_model", str(self._model_path))
+
+
+def _overlay_focus(
+    box: tuple[int, int, int, int] | None,
+    circle: tuple[int, int, int] | None,
+) -> tuple[int, int] | None:
+    """
+    Choose the zoom center for a frame's detected marks.
+
+    Inputs: box, the subject rectangle or None; circle, the eye center, radius, or None.
+    Output: the eye center when a circle is present, otherwise the center of the box, or None when both are missing.
+    Uses: the preview and compare pane so hiding a mark still leaves zoom on the animal or the eye.
+    Limitations: the box center uses integer division. A circle of any radius uses its center.
+    """
+    if circle is not None:
+        return (circle[0], circle[1])
+    if box is None:
+        return None
+    x, y, width, height = box
+    return (x + width // 2, y + height // 2)
 
 
 def _typing_target(widget: QWidget | None) -> bool:

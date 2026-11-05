@@ -1,6 +1,6 @@
 """The review window can load a folder and move between frames.
 
-``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, minimum score, automatic keepers, rescan, a blank preview while scoring, model download, installing Ultralytics before subject or bird eye detection, zoom, filmstrip order, compare, stars, bird eye detection, a hidden single-frame folder that still reports detected eyes, and a save that stays disabled until the copy finishes.
+``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, minimum score, automatic keepers, rescan, a blank preview while scoring, model download, installing Ultralytics before subject or bird eye detection, zoom, filmstrip order, compare, subject box and eye circle visibility, stars, bird eye detection, a hidden single-frame folder that still reports detected eyes, and a save that stays disabled until the copy finishes.
 """
 
 from __future__ import annotations
@@ -985,6 +985,96 @@ def test_minimum_score_hides_weaker_frames_and_keeps_marks(qt_app, tmp_path: Pat
     assert window.burst_list.count() == 2
     assert len(window.filmstrip._cards) == 3
     window.close()
+    qt_app.processEvents()
+
+
+def test_subject_box_and_eye_circle_can_be_hidden(qt_app, tmp_path: Path) -> None:
+    from datetime import datetime
+
+    from PySide6.QtGui import QColor, QImage
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.models import Burst, Frame, FrameAnalysis, Library, Metrics, Weights
+
+    _isolate_settings(tmp_path / "settings")
+    preview = tmp_path / "bird.jpg"
+    image = QImage(320, 240, QImage.Format.Format_RGB32)
+    image.fill(QColor("#336699"))
+    assert image.save(str(preview))
+    when = datetime(2024, 6, 1, 12, 0, 0)
+    metrics = Metrics(
+        10,
+        12,
+        3,
+        0.8,
+        0.0,
+        0.0,
+        subject_box=(40, 30, 80, 60),
+        eye_center=(70, 55),
+        eye_radius=12,
+    )
+
+    def frame(name: str) -> tuple[Frame, FrameAnalysis]:
+        path = tmp_path / name
+        path.write_bytes(preview.read_bytes())
+        item = Frame(path, "jpeg", when, "exif", None, 1, 1)
+        return item, FrameAnalysis(item, metrics, 0.8, path, path, None)
+
+    first, first_analysis = frame("one.jpg")
+    second, second_analysis = frame("two.jpg")
+    library = Library(
+        tmp_path,
+        (first_analysis, second_analysis),
+        (Burst("burst-001", (first, second)),),
+        (),
+        1.0,
+        Weights(prefer_subject=True),
+        subject_active=True,
+        eye_active=True,
+    )
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+    assert window.subject_box_action.isChecked() is True
+    assert window.eye_circle_action.isChecked() is True
+    assert window.viewer.preview._box == (40, 30, 80, 60)
+    assert window.viewer.preview._circle == (70, 55, 12)
+    assert "Bird eye detected" in window.viewer.info.text()
+
+    window.subject_box_action.setChecked(False)
+    qt_app.processEvents()
+    assert window.viewer.preview._box is None
+    assert window.viewer.preview._circle == (70, 55, 12)
+    assert window.viewer.preview._focus == (70, 55)
+
+    window.eye_circle_action.setChecked(False)
+    qt_app.processEvents()
+    assert window.viewer.preview._circle is None
+    assert window.viewer.preview._focus == (70, 55)
+    assert "Bird eye detected" in window.viewer.info.text()
+
+    window.compare_action.setChecked(True)
+    qt_app.processEvents()
+    assert window.viewer.partner._box is None
+    assert window.viewer.partner._circle is None
+    assert window.viewer.partner._focus == (70, 55)
+
+    window.subject_box_action.setChecked(True)
+    window.eye_circle_action.setChecked(True)
+    qt_app.processEvents()
+    assert window.viewer.partner._box == (40, 30, 80, 60)
+    assert window.viewer.partner._circle == (70, 55, 12)
+
+    window.subject_box_action.setChecked(False)
+    window._save_settings()
+    window.close()
+    qt_app.processEvents()
+    restored = MainWindow(cache_dir=tmp_path / "cache")
+    assert restored.subject_box_action.isChecked() is False
+    assert restored.eye_circle_action.isChecked() is True
+    restored.close()
     qt_app.processEvents()
 
 
