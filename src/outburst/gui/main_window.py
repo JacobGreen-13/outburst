@@ -43,7 +43,7 @@ from outburst.display import (
 from outburst.gui.burst_view import Filmstrip, Thumb
 from outburst.gui.controls import ControlPanel
 from outburst.gui.dialogs import ExportKeepersDialog, ask, notify, show_shortcuts, show_warnings
-from outburst.gui.image_viewer import ImageViewer
+from outburst.gui.image_viewer import ImageViewer, next_zoom
 from outburst.gui.styles import build_app_icon
 from outburst.gui.worker import AnalyzeWorker, ExportWorker, ModelFetchWorker, SidecarWorker
 from outburst.models import Burst, FrameAnalysis, Library
@@ -91,7 +91,9 @@ class MainWindow(QMainWindow):
         self._origins: dict[Path, str] = {}
         self._stars: dict[Path, int] = {}
         self._compare = False
+        self._compare_index: int | None = None
         self._loupe = False
+        self._zoom_scale: float | None = None
         self._peaking = False
         self._obvious_burst_id: str | None = None
         self._obvious_rejects: list[Path] = []
@@ -244,6 +246,14 @@ class MainWindow(QMainWindow):
             self._reject_burst()
         elif key == Qt.Key.Key_C:
             self._set_checked(self.compare_action, not self._compare)
+        elif key == Qt.Key.Key_BracketLeft:
+            self._step_compare(-1)
+        elif key == Qt.Key.Key_BracketRight:
+            self._step_compare(1)
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self._step_zoom(1)
+        elif key == Qt.Key.Key_Minus:
+            self._step_zoom(-1)
         elif key == Qt.Key.Key_Z:
             self._set_checked(self.loupe_action, not self._loupe)
         elif key == Qt.Key.Key_F:
@@ -300,8 +310,10 @@ class MainWindow(QMainWindow):
 
         self.viewer = ImageViewer()
         self.viewer.partner_clicked.connect(self._select_partner)
+        self.viewer.zoom_changed.connect(self._on_zoom_changed)
         self.filmstrip = Filmstrip()
         self.filmstrip.selected.connect(self._select_frame)
+        self.filmstrip.compare_chosen.connect(self._set_compare_frame)
 
         top = QSplitter(Qt.Orientation.Horizontal)
         top.addWidget(left)
@@ -378,12 +390,13 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(quit_action)
         self.compare_action = self._check_action(
-            "Compare with best",
-            "Show this frame beside the best other frame in the burst. Keyboard: C",
+            "Compare",
+            "Show two frames from this burst. Starts beside the best other frame. "
+            "[ and ] choose another frame. Shift-click a thumbnail to compare with it. Keyboard: C",
         )
         self.loupe_action = self._check_action(
-            "1:1 loupe",
-            "Show the embedded preview at full size and drag to look around. Keyboard: Z",
+            "Zoom",
+            "Z shows the preview at 1:1. Scroll, or + and -, to zoom to 2:1 and 4:1. Drag to look around.",
         )
         self.peak_action = self._check_action(
             "Focus peaking",
@@ -681,8 +694,10 @@ class MainWindow(QMainWindow):
         modes: list[str] = []
         if self._compare:
             modes.append("compare")
-        if self._loupe:
-            modes.append("1:1 loupe")
+        if self._zoom_scale == 1:
+            modes.append("1:1")
+        elif self._zoom_scale is not None:
+            modes.append(f"{int(self._zoom_scale)}:1")
         if self._peaking:
             modes.append("focus peaking")
         if library.eye_active:
@@ -738,6 +753,7 @@ class MainWindow(QMainWindow):
             return
         self._burst_index = index
         burst = bursts[index]
+        self._compare_index = None
         frame_index = None
         if prefer_path is not None:
             frame_index = next((i for i, frame in enumerate(burst.frames) if frame.path == prefer_path), None)
@@ -752,6 +768,8 @@ class MainWindow(QMainWindow):
         if burst is None or not burst.frames:
             return
         self._frame_index = max(0, min(index, len(burst.frames) - 1))
+        if self._compare_index == self._frame_index:
+            self._compare_index = self._adjacent_frame(self._frame_index, 1)
         self.filmstrip.mark_selected(self._frame_index)
         self._update_viewer()
 
@@ -799,13 +817,31 @@ class MainWindow(QMainWindow):
         self._show_mode_status()
 
     def _on_loupe_toggled(self, checked: bool) -> None:
+        self._zoom_scale = 1.0 if checked else None
         self._loupe = checked
-        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self._show_mode_status()
 
     def _on_peak_toggled(self, checked: bool) -> None:
         self._peaking = checked
-        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
+        self._show_mode_status()
+
+    def _on_zoom_changed(self, scale: float) -> None:
+        self._zoom_scale = None if scale <= 0 else scale
+        self._loupe = self._zoom_scale is not None
+        self.loupe_action.blockSignals(True)
+        self.loupe_action.setChecked(self._loupe)
+        self.loupe_action.blockSignals(False)
+        self._show_mode_status()
+
+    def _step_zoom(self, steps: int) -> None:
+        self._zoom_scale = next_zoom(self._zoom_scale, steps)
+        self._loupe = self._zoom_scale is not None
+        self.loupe_action.blockSignals(True)
+        self.loupe_action.setChecked(self._loupe)
+        self.loupe_action.blockSignals(False)
+        self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self._show_mode_status()
 
     def _show_mode_status(self) -> None:
@@ -816,10 +852,53 @@ class MainWindow(QMainWindow):
         burst = self._current_burst()
         if burst is None:
             return
-        partner = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        partner = self._compare_index
+        if partner is None or partner == self._frame_index:
+            partner = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
         if partner is None:
             return
+        previous = self._frame_index
+        self._compare_index = previous if previous != partner else self._adjacent_frame(partner, 1)
         self._select_frame(partner)
+
+    def _set_compare_frame(self, index: int) -> None:
+        burst = self._current_burst()
+        if burst is None or not burst.frames or len(burst.frames) < 2:
+            return
+        if index == self._frame_index or not 0 <= index < len(burst.frames):
+            self.statusBar().showMessage("Choose a different frame to compare.")
+            return
+        self._compare_index = index
+        if not self._compare:
+            self._set_checked(self.compare_action, True)
+            return
+        self._update_viewer()
+        self._show_mode_status()
+
+    def _step_compare(self, delta: int) -> None:
+        burst = self._current_burst()
+        if burst is None or len(burst.frames) < 2:
+            return
+        start = self._compare_index
+        if start is None or not self._compare or start == self._frame_index:
+            start = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        if start is None:
+            return
+        chosen = self._adjacent_frame(start, delta)
+        if chosen is None:
+            return
+        self._set_compare_frame(chosen)
+
+    def _adjacent_frame(self, start: int, delta: int) -> int | None:
+        burst = self._current_burst()
+        if burst is None or len(burst.frames) < 2 or delta == 0:
+            return None
+        count = len(burst.frames)
+        for step in range(1, count):
+            candidate = (start + delta * step) % count
+            if candidate != self._frame_index:
+                return candidate
+        return None
 
     def _reject_obvious(self) -> None:
         """Reject soft or badly clipped frames, leaving the best frame and your keepers."""
@@ -908,11 +987,15 @@ class MainWindow(QMainWindow):
             stars=self._stars.get(frame.path),
             circle=self._eye_circle(analysis),
         )
-        self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
+        self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self.viewer.set_compare(self._compare)
         if not self._compare:
+            self.filmstrip.mark_compared(None)
             return
-        partner_index = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        partner_index = self._compare_index
+        if partner_index is None or partner_index == self._frame_index or not 0 <= partner_index < len(burst.frames):
+            partner_index = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        self.filmstrip.mark_compared(partner_index)
         if partner_index is None:
             self.viewer.set_partner_message("Compare", "This burst has one frame.")
             return
@@ -926,7 +1009,12 @@ class MainWindow(QMainWindow):
             and partner.metrics is not None
         ):
             partner_box = partner.metrics.subject_box
-        role = "Best in the burst" if partner_index == recommended_index else "Next sharpest"
+        if partner_index == recommended_index:
+            role = "Best in the burst"
+        elif self._compare_index is None:
+            role = "Next sharpest"
+        else:
+            role = f"Frame {partner_index + 1} of {burst.count}"
         score = score_caption(
             None if partner is None else partner.composite,
             None if partner is None else partner.metrics,
@@ -966,6 +1054,7 @@ class MainWindow(QMainWindow):
                     badge=thumb_badge(index == best, decision),
                     thumb_path=None if analysis is None else analysis.thumb_path,
                     selected=index == self._frame_index,
+                    compared=self._compare and index == self._compare_index,
                     best=index == best,
                     decision=decision,
                     tooltip=name,

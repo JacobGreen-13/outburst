@@ -100,7 +100,7 @@ While the scan runs, the status bar shows progress. The first visit reads each f
 
 The left column lists bursts. The large frame is the one you are reviewing. Under it, five stars set the rating, and **Mark as keeper** and **Reject** set the pick and reject flags. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
 
-**C** puts the frame you are on beside the best other frame in the burst. When you are already on the best frame, the other side is the next sharpest. Click that side to review it. **Z** shows the embedded preview at 1:1 so you can drag across the detail. **F** paints the strongest edges green. These use the same preview Outburst scored. They do not demosaic the RAW file.
+**C** puts the frame you are on beside another frame in the burst. It starts with the best other frame, or the next sharpest when you are already on the best. **[** and **]** move that other frame, and Shift-click a thumbnail compares with that frame. Click the other side to review it. **Z** shows the embedded preview at 1:1. **+** and **−**, or the scroll wheel over the preview, zoom through fit, 1:1, 2:1, and 4:1. Drag to look around. **F** paints the strongest edges green. These use the same preview Outburst scored. They do not demosaic the RAW file.
 
 **Burst gap** is how close two frames must be to stay in one burst. The default is 1.0 second. A gap of exactly 1.0 second starts a new burst. Moving the control regroups immediately. Keepers you marked stay. Outburst clears the keeper it had chosen and marks the best frame of each burst.
 
@@ -120,8 +120,11 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 | Down / Up | Next or previous burst |
 | Home / End | First or last frame in the burst |
 | Enter | Jump to the recommended frame |
-| C | Compare this frame with the best other frame in the burst |
-| Z | 1:1 loupe. Drag to look around. Press again to fit the frame |
+| C | Compare two frames. Starts beside the best other frame in the burst |
+| [ / ] | Previous or next frame on the other side of compare |
+| Shift-click | Compare with that thumbnail |
+| Z | Zoom to 1:1. Press again to fit the frame |
+| + / − | Zoom in or out: fit, 1:1, 2:1, 4:1. Scroll does the same over the preview |
 | F | Focus peaking. Green marks the strongest edges |
 | 1–5 | Set that star rating. Press the same number again to clear it |
 | 0 | Clear the star rating |
@@ -216,7 +219,7 @@ The one-click launcher is the supported way to install and open Outburst.
 
 ## Roadmap
 
-This version includes the review window, timestamp grouping, preview scoring, a disk cache, adjustable weights, keyboard culling, side-by-side compare, a 1:1 loupe, focus peaking, XMP, keeper export, and reports. Subject detection is optional. The model dropdown downloads a missing weights file into the models folder.
+This version includes the review window, timestamp grouping, preview scoring, a disk cache, adjustable weights, keyboard culling, side-by-side compare of any two frames, preview zoom, focus peaking, XMP, keeper export, and reports. Subject detection is optional. The model dropdown downloads a missing weights file into the models folder.
 
 Later versions can add a bundled small detector and signed installers for macOS and Windows.
 
