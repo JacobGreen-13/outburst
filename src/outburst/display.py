@@ -21,6 +21,19 @@ OBVIOUS_HIGHLIGHT_CLIP = 0.08
 OBVIOUS_SHADOW_CLIP = 0.25
 
 
+def filmstrip_order(scores: Sequence[float | None], mode: str) -> list[int]:
+    """Indexes for the filmstrip. Time keeps shooting order. Score puts the highest first.
+
+    Equal scores stay in the order the frames were shot. A frame with no score
+    stays at the right.
+    """
+
+    order = list(range(len(scores)))
+    if mode != "score":
+        return order
+    return sorted(order, key=lambda index: (scores[index] is None, -(scores[index] or 0.0), index))
+
+
 def visible_bursts(bursts: Sequence[Burst], *, minimum_frames: int) -> tuple[Burst, ...]:
     """Bursts long enough to list. Shorter bursts stay hidden and are not saved."""
 

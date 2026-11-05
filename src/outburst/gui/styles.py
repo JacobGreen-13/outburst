@@ -98,6 +98,15 @@ QPushButton#rejectButton:checked {
     color: #fff5f5;
     border: 1px solid #e06c6c;
 }
+QPushButton#filmstripSort {
+    padding: 3px 12px;
+    min-height: 22px;
+}
+QPushButton#filmstripSort:checked {
+    background: #1f3d30;
+    color: #f4fff8;
+    border: 1px solid #7dffc3;
+}
 QSlider::groove:horizontal {
     height: 4px;
     background: #3a3a3a;

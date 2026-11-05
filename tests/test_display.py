@@ -7,6 +7,7 @@ from pathlib import Path
 
 from outburst.display import (
     burst_list_text,
+    filmstrip_order,
     frame_info_html,
     obvious_misses,
     score_caption,
@@ -14,6 +15,13 @@ from outburst.display import (
     visible_bursts,
 )
 from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
+
+
+def test_filmstrip_order_keeps_time_and_ranks_score() -> None:
+    scores = [0.2, 0.9, None, 0.9]
+    assert filmstrip_order(scores, "time") == [0, 1, 2, 3]
+    assert filmstrip_order(scores, "score") == [1, 3, 0, 2]
+    assert filmstrip_order(scores, "other") == [0, 1, 2, 3]
 
 
 def test_bursts_shorter_than_the_minimum_stay_hidden() -> None:

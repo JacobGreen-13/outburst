@@ -396,6 +396,55 @@ def test_zoom_steps() -> None:
     assert next_zoom(None, -1) is None
 
 
+def test_filmstrip_sort_follows_time_or_score(qt_app, tmp_path: Path) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from outburst.display import filmstrip_order
+    from outburst.gui.main_window import MainWindow
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+    window.burst_list.setCurrentRow(1)
+    qt_app.processEvents()
+
+    burst = window._current_burst()
+    assert burst is not None and burst.count == 2
+    assert [card.index for card in window.filmstrip._cards] == [0, 1]
+    held = window.current_frame_index
+    QTest.mouseClick(window.sort_score, Qt.MouseButton.LeftButton)
+    qt_app.processEvents()
+    scores = [
+        None if (analysis := window._by_path.get(frame.path)) is None else analysis.composite
+        for frame in burst.frames
+    ]
+    expected = filmstrip_order(scores, "score")
+    assert expected == [1, 0]
+    assert [card.index for card in window.filmstrip._cards] == expected
+    assert window.current_frame_index == held
+    QTest.keyClick(window, Qt.Key.Key_Home)
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    qt_app.processEvents()
+    assert window.current_frame_index == expected[1]
+    QTest.keyClick(window, Qt.Key.Key_End)
+    qt_app.processEvents()
+    assert window.current_frame_index == expected[-1]
+    window.close()
+    qt_app.processEvents()
+
+    restored = MainWindow(cache_dir=tmp_path / "cache")
+    assert restored.sort_score.isChecked()
+    restored.close()
+    qt_app.processEvents()
+
+
 def test_compare_loupe_and_obvious_misses(qt_app, tmp_path: Path) -> None:
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
