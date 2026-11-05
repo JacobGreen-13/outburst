@@ -1,4 +1,7 @@
-"""Eye finder: a large dark eye is rated, a small one is not, and blur lowers the score."""
+"""Eye finder: a large dark eye is rated, a small one is not, and blur lowers the score.
+
+``_portrait`` draws a synthetic eye. The tests check size, blur, a frame with no eye, a limited search box, and a burst whose sharpest rated eye becomes the keeper.
+"""
 
 from __future__ import annotations
 

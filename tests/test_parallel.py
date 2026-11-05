@@ -1,4 +1,7 @@
-"""Ordered thread pools keep result order and stay within the worker cap."""
+"""Ordered thread pools keep result order and stay within the worker cap.
+
+The tests check that later tasks can finish first without reordering results, that the preview pool stays between two and four workers, and that cancel runs on the caller.
+"""
 
 from __future__ import annotations
 

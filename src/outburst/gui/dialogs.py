@@ -1,4 +1,7 @@
-"""Small dialogs and message boxes for the review window."""
+"""Small dialogs and message boxes for the review window.
+
+``headless`` is true when ``OUTBURST_HEADLESS`` is 1. ``notify`` shows a message, and ``ask`` returns False in that mode. ``ExportKeepersDialog.ask`` collects a folder and copy or hard-link mode. ``show_shortcuts`` and ``show_warnings`` open the help and scan-note dialogs.
+"""
 
 from __future__ import annotations
 
@@ -29,10 +32,26 @@ log = logging.getLogger(__name__)
 
 
 def headless() -> bool:
+    """
+    Report whether dialogs should stay off the screen.
+
+    Inputs: none.
+    Output: True when the OUTBURST_HEADLESS environment variable is the string "1".
+    Uses: every review-window dialog that would otherwise open.
+    Limitations: any other value, including an unset variable, is treated as an interactive session.
+    """
     return os.environ.get("OUTBURST_HEADLESS") == "1"
 
 
 def notify(parent: QWidget | None, title: str, text: str, level: str = "info") -> None:
+    """
+    Log a notice and, when a window is available, show it in a message box.
+
+    Inputs: parent, the widget that owns the box; title and text, the message; level, "warning" or another level treated as information.
+    Output: no return value. The message is logged, stored on parent.last_notice when that attribute exists, and shown in a message box.
+    Uses: scan, save, and cache notices in the review window.
+    Limitations: a headless process, or a missing parent, logs the notice and does not open a message box.
+    """
     if level == "warning":
         log.warning("%s: %s", title, text)
     else:
@@ -49,6 +68,14 @@ def notify(parent: QWidget | None, title: str, text: str, level: str = "info") -
 
 
 def ask(parent: QWidget | None, title: str, text: str) -> bool:
+    """
+    Ask a yes-or-no question before a write or a cache clear.
+
+    Inputs: parent, the widget that owns the box; title and text, the question.
+    Output: True only when the photographer clicks Yes.
+    Uses: cache clearing and the XMP sidecar confirmation.
+    Limitations: headless ask() returns False.
+    """
     if headless():
         return False
     answer = QMessageBox.question(parent, title, text)
@@ -63,6 +90,14 @@ class ExportRequest:
 
 class ExportKeepersDialog(QDialog):
     def __init__(self, parent: QWidget | None, start: Path | None) -> None:
+        """
+        Build the save-keepers dialog with a folder field and copy or hard-link choices.
+
+        Inputs: parent, the owning widget; start, the folder shown in the field, or None for the home folder.
+        Output: no return value. The dialog is titled, filled, and sized.
+        Uses: the Save keepers dialog.
+        Limitations: copy is selected by default. The dialog does not create the folder, and the note says original files are not modified.
+        """
         super().__init__(parent)
         self.setWindowTitle("Save keepers")
         self._start = start or Path.home()
@@ -105,6 +140,14 @@ class ExportKeepersDialog(QDialog):
 
     @staticmethod
     def ask(parent: QWidget | None, start: Path | None) -> ExportRequest | None:
+        """
+        Open the save-keepers dialog and return the chosen folder and mode.
+
+        Inputs: parent, the owning widget; start, the folder initially shown.
+        Output: an ExportRequest with the folder and "hardlink" or "copy", or None when the dialog is cancelled or the folder text is empty.
+        Uses: the Save keepers action.
+        Limitations: a headless process returns None without showing the dialog. Original files are not modified.
+        """
         if headless():
             return None
         dialog = ExportKeepersDialog(parent, start)
@@ -117,12 +160,28 @@ class ExportKeepersDialog(QDialog):
         return ExportRequest(folder, mode)
 
     def _browse(self) -> None:
+        """
+        Let the photographer pick the keepers folder.
+
+        Inputs: none.
+        Output: no return value. A chosen directory replaces the folder field text.
+        Uses: the Browse button on the Save keepers dialog.
+        Limitations: cancelling the directory dialog leaves the field unchanged.
+        """
         chosen = QFileDialog.getExistingDirectory(self, "Keepers folder", self._folder.text() or str(self._start))
         if chosen:
             self._folder.setText(chosen)
 
 
 def show_shortcuts(parent: QWidget | None) -> None:
+    """
+    Show the keyboard-shortcut list in a dialog.
+
+    Inputs: parent, the widget that owns the dialog.
+    Output: no return value. The dialog stays open until it is closed.
+    Uses: the Help menu keyboard shortcuts action.
+    Limitations: a headless process returns without opening the dialog.
+    """
     if headless():
         return
     dialog = QDialog(parent)
@@ -141,6 +200,14 @@ def show_shortcuts(parent: QWidget | None) -> None:
 
 
 def show_warnings(parent: QWidget | None, warnings: tuple[str, ...]) -> None:
+    """
+    Show scan notes in a dialog.
+
+    Inputs: parent, the widget that owns the dialog; warnings, the note strings.
+    Output: no return value. Each note is listed as a bullet after HTML escaping.
+    Uses: the View menu Scan notes action.
+    Limitations: a headless process, or an empty warning tuple, returns without opening the dialog.
+    """
     if headless() or not warnings:
         return
     dialog = QDialog(parent)
@@ -159,4 +226,12 @@ def show_warnings(parent: QWidget | None, warnings: tuple[str, ...]) -> None:
 
 
 def _escape(text: str) -> str:
+    """
+    Escape the HTML characters used in scan notes.
+
+    Inputs: text, one warning string.
+    Output: the same text with ampersands, less-than signs, and greater-than signs replaced by entities.
+    Uses: the scan-notes dialog.
+    Limitations: quotes and other characters are left unchanged.
+    """
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

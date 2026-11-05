@@ -3,6 +3,8 @@
 Eye scoring is optional. A dark, round spot counts as an eye. It is rated only
 when the spot is large enough on the preview to measure. Smaller eyes are
 reported and left out of the rank.
+
+``locate_eye`` returns one eye, or none. ``Eye.rated`` is true only when the disk is at least 16 px across. ``_candidates``, ``_contrast``, and ``_masked_sharpness`` search contours and measure the disk. This is not a blink or catchlight test.
 """
 
 from __future__ import annotations
@@ -30,6 +32,14 @@ class Eye:
 
     @property
     def rated(self) -> bool:
+        """Whether this eye has a sharpness measurement.
+
+        Inputs: none beyond this eye.
+        Output: True when sharpness is set.
+        Uses: callers that skip an eye too small to rank.
+        Limitations: a detected eye with no sharpness is not rated.
+        """
+
         return self.sharpness is not None
 
 
@@ -42,6 +52,11 @@ def locate_eye(
     ``search_box`` limits the search to a subject box. Without one, the whole
     preview is searched. The sharpness value is omitted when the eye is smaller
     than ``MIN_RATED_DIAMETER``.
+
+    Inputs: a BGR preview and an optional subject box in preview pixels.
+    Output: one Eye, or None.
+    Uses: the scan pipeline when eye scoring is on.
+    Limitations: an image that is not a three-channel array returns None, and a small eye is reported without sharpness.
     """
 
     if image.ndim != 3 or image.shape[2] != 3 or image.size == 0:
@@ -84,6 +99,14 @@ def _clip_box(
     width: int,
     height: int,
 ) -> tuple[int, int, int, int]:
+    """Clamp a search box to the image, or use the whole image.
+
+    Inputs: a box or None, plus the image width and height.
+    Output: x, y, width, and height inside the image.
+    Uses: locate_eye before cropping the search region.
+    Limitations: a box that falls outside the image can come back with zero width or height.
+    """
+
     if box is None:
         return (0, 0, width, height)
     x, y, box_width, box_height = box
@@ -95,6 +118,14 @@ def _clip_box(
 
 
 def _candidates(crop: np.ndarray, kernel: int) -> list[tuple[int, int, int, float]]:
+    """Find dark round spots in one grayscale crop for one kernel size.
+
+    Inputs: a grayscale crop and an ellipse kernel size.
+    Output: local x, y, radius, and strength for each round dark spot.
+    Uses: locate_eye across several kernel sizes.
+    Limitations: a weak black-hat response returns an empty list, and this does not measure sharpness.
+    """
+
     element = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel, kernel))
     blackhat = cv2.morphologyEx(crop, cv2.MORPH_BLACKHAT, element)
     peak = float(blackhat.max())
@@ -126,10 +157,26 @@ def _candidates(crop: np.ndarray, kernel: int) -> list[tuple[int, int, int, floa
 
 
 def _inside(x: int, y: int, radius: int, width: int, height: int) -> bool:
+    """Tell whether a disk sits fully inside the image.
+
+    Inputs: a center, radius, and image width and height.
+    Output: True when the disk does not touch the border.
+    Uses: locate_eye to drop an eye cut by the frame edge.
+    Limitations: a center closer than the radius to any edge is rejected.
+    """
+
     return radius <= x < width - radius and radius <= y < height - radius
 
 
 def _contrast(gray: np.ndarray, x: int, y: int, radius: int) -> float:
+    """Measure how much darker the disk is than the ring around it.
+
+    Inputs: a grayscale image and a disk center and radius.
+    Output: mean ring brightness minus mean disk brightness, or 0.0 when either mask is empty.
+    Uses: locate_eye to reject a spot that is not darker than its surround.
+    Limitations: an empty disk or ring returns 0.0.
+    """
+
     height, width = gray.shape[:2]
     disk = np.zeros(gray.shape, dtype=np.uint8)
     ring = np.zeros(gray.shape, dtype=np.uint8)
@@ -145,6 +192,14 @@ def _contrast(gray: np.ndarray, x: int, y: int, radius: int) -> float:
 
 
 def _masked_sharpness(gray: np.ndarray, x: int, y: int, radius: int) -> float:
+    """Variance of the Laplacian inside the eye disk.
+
+    Inputs: a grayscale image and a disk center and radius.
+    Output: a sharpness number, or 0.0 when fewer than 40 pixels are inside the disk.
+    Uses: locate_eye when the eye is large enough to rate.
+    Limitations: a disk with fewer than 40 Laplacian samples returns 0.0.
+    """
+
     lap = cv2.Laplacian(gray, cv2.CV_64F)
     mask = np.zeros(gray.shape, dtype=np.uint8)
     cv2.circle(mask, (x, y), radius, 255, -1)

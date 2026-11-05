@@ -1,4 +1,7 @@
-"""Subject detection stays optional, and weights download only through ensure_model."""
+"""Subject detection stays optional, and weights download only through ensure_model.
+
+The tests check the device name, a missing or local weights file, the models folder, download, a cancelled or failed download, and ``detect_many`` on one batch. ``_weights_bytes``, ``_Body``, and ``_opener`` fake the download response.
+"""
 
 from __future__ import annotations
 

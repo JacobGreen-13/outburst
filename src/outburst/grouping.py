@@ -1,10 +1,6 @@
 """Group photographs into bursts from capture timestamps.
 
-Frames are sorted by capture time. Consecutive frames stay in the same burst
-while the gap between neighbors is strictly shorter than the threshold.
-A one-second default matches typical wildlife bursts and starts a new burst
-after a pause. Frames with no capture time stay alone so a missing clock
-cannot glue unrelated pictures together.
+``group_frames`` sorts by capture time and keeps neighbors together while the gap is strictly under the threshold. Frames with no clock stay in bursts of one, after the timed bursts. A gap equal to the threshold starts a new burst.
 """
 
 from __future__ import annotations
@@ -16,7 +12,13 @@ from outburst.models import Burst, Frame
 
 
 def group_frames(frames: Sequence[Frame], threshold_seconds: float) -> list[Burst]:
-    """Return bursts in capture order. The input sequence is not modified."""
+    """Return bursts in capture order. The input sequence is not modified.
+
+    Inputs: frames and a non-negative finite gap threshold in seconds.
+    Output: bursts numbered burst-001 upward, timed frames first and each untimed frame alone after them.
+    Uses: the scan pipeline when a folder is grouped or regrouped.
+    Limitations: a missing capture time stays in its own burst, and a negative or non-finite threshold raises ValueError.
+    """
 
     if not math.isfinite(threshold_seconds) or threshold_seconds < 0:
         raise ValueError("threshold_seconds must be a finite number that is zero or positive")

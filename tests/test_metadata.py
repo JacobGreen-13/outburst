@@ -1,4 +1,7 @@
-"""Timestamp reading, including the built-in EXIF parser."""
+"""Timestamp reading, including the built-in EXIF parser.
+
+The tests round-trip a JPEG clock, subseconds, endianness, a CR3-like header, a missing clock, a hidden exiftool process on Windows, the exiftool and exifread order, and the warning when a RAW format needs exiftool.
+"""
 
 from __future__ import annotations
 

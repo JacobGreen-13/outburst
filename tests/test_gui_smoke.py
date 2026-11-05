@@ -1,4 +1,7 @@
-"""The review window can load a folder and move between frames."""
+"""The review window can load a folder and move between frames.
+
+``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, automatic keepers, rescan, model download, zoom, filmstrip order, compare, stars, eye scoring, and a save that stays disabled until the copy finishes.
+"""
 
 from __future__ import annotations
 

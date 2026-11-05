@@ -1,4 +1,7 @@
-"""Burst grouping from capture timestamps."""
+"""Burst grouping from capture timestamps.
+
+``frame`` builds one timed frame. The tests check gaps under, equal to, and just below the threshold, filename ties, missing clocks, an empty list, a zero threshold, and a rejected negative threshold.
+"""
 
 from __future__ import annotations
 
