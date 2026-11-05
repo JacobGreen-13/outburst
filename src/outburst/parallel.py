@@ -24,7 +24,13 @@ T = TypeVar("T")
 
 
 def preview_workers(task_count: int) -> int:
-    """How many preview tasks to run at once. One task needs no pool."""
+    """How many preview tasks to run at once. One task needs no pool.
+
+    Inputs: how many preview tasks are waiting.
+    Output: a worker count from 1 through 4.
+    Uses: the scan pipeline when it scores pending previews.
+    Limitations: one or fewer tasks returns 1, and two or more tasks use at most four workers and never more workers than tasks.
+    """
 
     if task_count <= 1:
         return 1
@@ -46,6 +52,11 @@ def run_ordered(
     thread, in order, as soon as that prefix is done. A failure is raised
     when its index is reached, after earlier results have been delivered.
     ``cancel`` runs on this thread between completions and may raise.
+
+    Inputs: a task count, a function of an index, a worker cap, and optional cancel and completion callbacks.
+    Output: results in index order.
+    Uses: preview scoring, keeper copies, and XMP writes.
+    Limitations: a non-positive count returns an empty list, and shutdown cancels futures that have not started.
     """
 
     if count <= 0:

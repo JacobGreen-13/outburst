@@ -56,7 +56,13 @@ class ScannedFile:
 
 
 def scan_folder(folder: Path, *, recursive: bool = False) -> list[ScannedFile]:
-    """Return RAW files, plus JPEGs that are not sitting beside a same-named RAW."""
+    """Return RAW files, plus JPEGs that are not sitting beside a same-named RAW.
+
+    Inputs: a folder and whether to walk subfolders.
+    Output: scanned photographs sorted by name.
+    Uses: the scan pipeline when a folder is opened.
+    Limitations: a missing folder raises NotADirectoryError, and file contents are not read.
+    """
 
     folder = folder.expanduser().resolve()
     if not folder.is_dir():
@@ -93,6 +99,14 @@ def scan_folder(folder: Path, *, recursive: bool = False) -> list[ScannedFile]:
 
 
 def _describe(path: Path, kind: str, paired_jpeg: Path | None) -> ScannedFile | None:
+    """Stat one photograph into a ScannedFile.
+
+    Inputs: a path, a kind of raw or jpeg, and an optional paired JPEG.
+    Output: a ScannedFile, or None when the file cannot be stat'd.
+    Uses: scan_folder for each RAW and leftover JPEG.
+    Limitations: an OSError is logged and that file is skipped.
+    """
+
     try:
         stat = path.stat()
     except OSError as exc:
@@ -108,9 +122,25 @@ def _describe(path: Path, kind: str, paired_jpeg: Path | None) -> ScannedFile | 
 
 
 def _iter_files(folder: Path, recursive: bool) -> list[Path]:
+    """List photograph candidates in a folder.
+
+    Inputs: a folder and whether to walk subfolders.
+    Output: file paths, excluding names that start with a dot.
+    Uses: scan_folder before extensions are filtered.
+    Limitations: a folder that cannot be listed is logged and skipped, and symbolic links are not followed.
+    """
+
     files: list[Path] = []
 
     def on_error(error: OSError) -> None:
+        """Log a directory walk error and continue.
+
+        Inputs: the OSError from os.walk.
+        Output: none.
+        Uses: os.walk when a subdirectory cannot be listed.
+        Limitations: the error is only logged, and the walk continues.
+        """
+
         log.warning("Could not list a folder: %s", error)
 
     if not recursive:

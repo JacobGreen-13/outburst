@@ -26,6 +26,11 @@ def filmstrip_order(scores: Sequence[float | None], mode: str) -> list[int]:
 
     Equal scores stay in the order the frames were shot. A frame with no score
     stays at the right.
+
+    Inputs: one score per frame, which may be None, and a mode string.
+    Output: indexes into that sequence.
+    Uses: the review window filmstrip.
+    Limitations: any mode other than score keeps shooting order.
     """
 
     order = list(range(len(scores)))
@@ -35,13 +40,27 @@ def filmstrip_order(scores: Sequence[float | None], mode: str) -> list[int]:
 
 
 def visible_bursts(bursts: Sequence[Burst], *, minimum_frames: int) -> tuple[Burst, ...]:
-    """Bursts long enough to list. Shorter bursts stay hidden and are not saved."""
+    """Bursts long enough to list. Shorter bursts stay hidden and are not saved.
+
+    Inputs: bursts and a minimum frame count.
+    Output: the bursts whose count meets the minimum, in the same order.
+    Uses: the review window burst list.
+    Limitations: a minimum below 1 is treated as 1, and this function does not save files.
+    """
 
     minimum = max(1, int(minimum_frames))
     return tuple(burst for burst in bursts if burst.count >= minimum)
 
 
 def human_burst_name(burst_id: str) -> str:
+    """Turn a burst id such as burst-003 into Burst 3.
+
+    Inputs: a burst id string.
+    Output: a display name, or the original id when it is not burst- plus digits.
+    Uses: the burst list and the preview panel.
+    Limitations: only the burst- prefix with trailing digits is rewritten.
+    """
+
     prefix = "burst-"
     if burst_id.startswith(prefix) and burst_id[len(prefix) :].isdigit():
         return f"Burst {int(burst_id[len(prefix) :])}"
@@ -49,6 +68,14 @@ def human_burst_name(burst_id: str) -> str:
 
 
 def format_captured(moment: datetime | None) -> str:
+    """Format a capture time for the burst list and preview panel.
+
+    Inputs: a capture datetime, or None.
+    Output: a clock string, or the text No capture time.
+    Uses: burst_list_text and frame_info_html.
+    Limitations: a missing time is a fixed sentence, and milliseconds appear only when microseconds are set.
+    """
+
     if moment is None:
         return "No capture time"
     text = moment.strftime("%Y-%m-%d %H:%M:%S")
@@ -62,6 +89,14 @@ def burst_list_text(
     by_path: dict[Path, FrameAnalysis],
     decisions: dict[Path, str],
 ) -> str:
+    """Two lines for one row of the burst list.
+
+    Inputs: a burst, analyses keyed by path, and keep or reject marks.
+    Output: a name, frame count, capture time, best score, and optional eye or keeper text.
+    Uses: the review window burst list.
+    Limitations: an empty burst is labeled Empty, and a missing analysis shows an em dash for the score.
+    """
+
     when = format_captured(burst.started_at)
     if not burst.frames:
         return f"{human_burst_name(burst.id)}\nEmpty"
@@ -75,7 +110,13 @@ def burst_list_text(
 
 
 def star_glyphs(stars: int | None) -> str:
-    """Five stars, filled up to `stars`. None and 0 are empty."""
+    """Five stars, filled up to `stars`. None and 0 are empty.
+
+    Inputs: a star count, or None.
+    Output: five star characters, filled then empty.
+    Uses: the preview panel mark line.
+    Limitations: counts outside 0 through 5 are clamped.
+    """
 
     count = 0 if stars is None else max(0, min(5, int(stars)))
     return "★" * count + "☆" * (5 - count)
@@ -88,7 +129,13 @@ def score_caption(
     best_composite: float | None,
     stars: int | None = None,
 ) -> str:
-    """Score for a filmstrip card, with CLIP or SOFT when the frame needs a look."""
+    """Score for a filmstrip card, with CLIP or SOFT when the frame needs a look.
+
+    Inputs: this frame's score, its metrics, the burst's best score, and an optional star count.
+    Output: a short caption such as a percent, CLIP, SOFT, and a star count.
+    Uses: the review window filmstrip cards.
+    Limitations: a None score or missing metrics omits the matching note.
+    """
 
     text = score_percent(composite)
     notes: list[str] = []
@@ -116,6 +163,11 @@ def obvious_misses(
 
     A miss is much softer than the recommended frame, or heavily clipped.
     The recommended frame stays, and so does any frame already marked keep.
+
+    Inputs: frames in a burst, analyses keyed by path, and current decisions.
+    Output: paths of frames that look like obvious misses.
+    Uses: the review window when G rejects the obvious misses.
+    Limitations: a burst shorter than two frames returns nothing, and a frame already marked keep or reject is skipped.
     """
 
     if len(frames) < 2:
@@ -142,6 +194,14 @@ def obvious_misses(
 
 
 def thumb_badge(best: bool, decision: str | None) -> str:
+    """Badge text for one filmstrip thumbnail.
+
+    Inputs: whether the frame is the recommended one, and its keep or reject mark.
+    Output: REJECT, BEST, KEEP, a combination, or an empty string.
+    Uses: the review window filmstrip.
+    Limitations: a reject replaces BEST and KEEP.
+    """
+
     if decision == "reject":
         return "REJECT"
     parts: list[str] = []
@@ -153,6 +213,14 @@ def thumb_badge(best: bool, decision: str | None) -> str:
 
 
 def burst_state(burst: Burst, decisions: dict[Path, str]) -> str:
+    """Summarize a burst as keeper, rejected, or unmarked.
+
+    Inputs: a burst and keep or reject marks keyed by path.
+    Output: keeper when any frame is kept, rejected when every frame is rejected, otherwise empty.
+    Uses: burst_list_text.
+    Limitations: an empty burst returns an empty string, and a mix of rejects and unmarked frames is not called rejected.
+    """
+
     marks = [decisions.get(frame.path) for frame in burst.frames]
     if marks and any(mark == "keep" for mark in marks):
         return "keeper"
@@ -162,6 +230,14 @@ def burst_state(burst: Burst, decisions: dict[Path, str]) -> str:
 
 
 def _eye_line(metrics: Metrics) -> str:
+    """One HTML line about the detected eye.
+
+    Inputs: metrics that may include an eye center, radius, and sharpness.
+    Output: an HTML div for no eye, an eye too small to rate, or an eye sharpness number.
+    Uses: frame_info_html when eye scoring is on.
+    Limitations: a missing center or radius is reported as no eye found.
+    """
+
     if metrics.eye_radius is None or metrics.eye_center is None:
         return '<div style="color:#9a9a9a; margin-top:4px;">No eye found</div>'
     if metrics.eye_sharpness is None:
@@ -172,7 +248,13 @@ def _eye_line(metrics: Metrics) -> str:
 
 
 def clip_status(metrics: Metrics) -> tuple[str, bool]:
-    """A short exposure sentence and whether it should be shown as a warning."""
+    """A short exposure sentence and whether it should be shown as a warning.
+
+    Inputs: highlight and shadow clip measurements.
+    Output: a sentence and True when clipping crosses the warning thresholds.
+    Uses: frame_info_html for the exposure line.
+    Limitations: light clipping is described without a warning.
+    """
 
     notes: list[str] = []
     if metrics.highlight_clip >= 0.005:
@@ -201,7 +283,13 @@ def frame_info_html(
     stars: int | None = None,
     eye_active: bool = False,
 ) -> str:
-    """Rich text for the preview panel. Filenames are escaped."""
+    """Rich text for the preview panel. Filenames are escaped.
+
+    Inputs: frame identity, analysis, weights, recommendation, decision, stars, and subject or eye flags.
+    Output: an HTML fragment for the preview panel.
+    Uses: the review window preview panel.
+    Limitations: a missing preview is described as unread, and error text is escaped.
+    """
 
     badges: list[str] = []
     if recommended and decision != "reject":

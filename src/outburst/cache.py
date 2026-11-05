@@ -78,7 +78,13 @@ class CacheRecord:
 
 
 def default_cache_dir() -> Path:
-    """Per-user cache directory. Created on first use."""
+    """Per-user cache directory. Created on first use.
+
+    Inputs: none.
+    Output: the platform cache path, created if it is missing.
+    Uses: the review window and the scan pipeline when no cache directory is passed.
+    Limitations: creates the directory on disk and does not write photographs.
+    """
 
     if sys.platform == "darwin":
         root = Path.home() / "Library" / "Caches" / "Outburst"
@@ -98,6 +104,14 @@ class Cache:
     """One SQLite file plus preview and thumbnail directories."""
 
     def __init__(self, directory: Path) -> None:
+        """Open or create the SQLite cache and its preview folders.
+
+        Inputs: the directory that holds outburst.sqlite, previews, and thumbs.
+        Output: none; the connection is stored on this instance.
+        Uses: the review window and the scan pipeline when they open a cache.
+        Limitations: adds missing columns to an older database and does not write photographs.
+        """
+
         self.directory = directory
         self.directory.mkdir(parents=True, exist_ok=True)
         (self.directory / "previews").mkdir(exist_ok=True)
@@ -113,12 +127,36 @@ class Cache:
         self._conn.commit()
 
     def close(self) -> None:
+        """Close the SQLite connection.
+
+        Inputs: none beyond this cache.
+        Output: none.
+        Uses: __exit__ when the cache is used as a context manager.
+        Limitations: does not delete rows or preview files.
+        """
+
         self._conn.close()
 
     def __enter__(self) -> Cache:
+        """Begin a cache context.
+
+        Inputs: none beyond this cache.
+        Output: this Cache instance.
+        Uses: callers that open the cache with a with statement.
+        Limitations: does not open a second connection.
+        """
+
         return self
 
     def __exit__(self, *args: object) -> None:
+        """Close the cache when the with block ends.
+
+        Inputs: the usual exception triple, which is ignored.
+        Output: none, so an exception continues to propagate.
+        Uses: the review window and the scan pipeline.
+        Limitations: does not roll back a write that was already committed.
+        """
+
         self.close()
 
     def get(
@@ -128,6 +166,14 @@ class Cache:
         size: int,
         subject_key: str,
     ) -> CacheRecord | None:
+        """Load one cached measurement when the file identity still matches.
+
+        Inputs: the photograph path, mtime, size, and subject model key.
+        Output: a CacheRecord, or None when the row or its preview files are missing.
+        Uses: the scan pipeline to skip work on an unchanged file.
+        Limitations: a different score version misses, and this does not write photographs.
+        """
+
         row = self._conn.execute(
             """
             SELECT * FROM frame_metrics
@@ -181,6 +227,14 @@ class Cache:
         preview_path: Path,
         thumb_path: Path,
     ) -> None:
+        """Store one measurement and the relative paths of its preview files.
+
+        Inputs: file identity, capture time, camera, metrics, and preview paths.
+        Output: none; the row is inserted or replaced and committed.
+        Uses: the scan pipeline after a frame is scored.
+        Limitations: stores paths relative to the cache directory and does not copy the photograph.
+        """
+
         self._conn.execute(
             """
             INSERT OR REPLACE INTO frame_metrics (
@@ -224,6 +278,14 @@ class Cache:
         self._conn.commit()
 
     def decisions_for(self, paths: list[Path]) -> dict[Path, str]:
+        """Read keep and reject marks for the given photographs.
+
+        Inputs: photograph paths to look up.
+        Output: a path-to-decision map containing only keep and reject.
+        Uses: the review window when a folder is opened.
+        Limitations: an empty path list returns an empty dict, and other decision text is skipped.
+        """
+
         found: dict[Path, str] = {}
         if not paths:
             return found
@@ -242,7 +304,13 @@ class Cache:
         return found
 
     def decision_origins(self, paths: list[Path]) -> dict[Path, str]:
-        """``auto`` when Outburst marked the keeper, ``user`` when the photographer did."""
+        """``auto`` when Outburst marked the keeper, ``user`` when the photographer did.
+
+        Inputs: photograph paths to look up.
+        Output: a path-to-origin map of user or auto.
+        Uses: the review window so an automatic keeper can be replaced.
+        Limitations: an unrecognized origin is returned as user.
+        """
 
         found: dict[Path, str] = {}
         if not paths:
@@ -263,6 +331,14 @@ class Cache:
         return found
 
     def set_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
+        """Save or clear one keep or reject mark.
+
+        Inputs: a photograph path, keep, reject, or None, and an origin of user or auto.
+        Output: none; the row is replaced or deleted and committed.
+        Uses: the review window when the photographer flags a frame.
+        Limitations: a reject is stored as user origin, and None deletes the mark.
+        """
+
         if decision not in {None, "keep", "reject"}:
             raise ValueError(f"Unknown decision: {decision}")
         if origin not in {"user", "auto"}:
@@ -286,7 +362,13 @@ class Cache:
         self._conn.commit()
 
     def stars_for(self, paths: list[Path]) -> dict[Path, int]:
-        """Star ratings the photographer set. Missing paths have no rating yet."""
+        """Star ratings the photographer set. Missing paths have no rating yet.
+
+        Inputs: photograph paths to look up.
+        Output: a path-to-stars map for ratings from 0 through 5.
+        Uses: the review window when a folder is opened.
+        Limitations: ratings outside 0 through 5 are omitted.
+        """
 
         found: dict[Path, int] = {}
         if not paths:
@@ -307,6 +389,14 @@ class Cache:
         return found
 
     def set_stars(self, path: Path, stars: int | None) -> None:
+        """Save or clear one star rating.
+
+        Inputs: a photograph path and a rating from 0 through 5, or None.
+        Output: none; the row is replaced or deleted and committed.
+        Uses: the review window when the photographer rates a frame.
+        Limitations: None deletes the rating, and a value outside 0 through 5 raises ValueError.
+        """
+
         if stars is not None and stars not in range(6):
             raise ValueError(f"Star rating must be 0 through 5, not {stars}")
         if stars is None:
@@ -322,6 +412,14 @@ class Cache:
         self._conn.commit()
 
     def _ensure_decision_origin(self) -> None:
+        """Add the origin column to an older decisions table.
+
+        Inputs: none beyond this cache.
+        Output: none.
+        Uses: Cache initialization before the first commit.
+        Limitations: a missing column defaults existing rows to user and does not rewrite marks.
+        """
+
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(decisions)")}
         if "origin" in columns:
             return
@@ -330,12 +428,28 @@ class Cache:
         )
 
     def _ensure_critical_sharpness(self) -> None:
+        """Add the critical sharpness column to an older metrics table.
+
+        Inputs: none beyond this cache.
+        Output: none.
+        Uses: Cache initialization before the first commit.
+        Limitations: older rows keep a null critical sharpness until they are scored again.
+        """
+
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(frame_metrics)")}
         if "critical_sharpness" in columns:
             return
         self._conn.execute("ALTER TABLE frame_metrics ADD COLUMN critical_sharpness REAL")
 
     def _ensure_eye_columns(self) -> None:
+        """Add eye measurement columns to an older metrics table.
+
+        Inputs: none beyond this cache.
+        Output: none.
+        Uses: Cache initialization before the first commit.
+        Limitations: older rows keep null eye fields until they are scored again.
+        """
+
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(frame_metrics)")}
         additions = (
             ("eye_sharpness", "REAL"),
@@ -352,6 +466,11 @@ class Cache:
 
         Keeper and reject marks are left in place. Returns how many photograph
         paths were forgotten.
+
+        Inputs: a folder path, which is expanded and resolved.
+        Output: the number of photograph paths whose measurements were removed.
+        Uses: the review window when the photographer forgets one folder.
+        Limitations: keeper, reject, and star rows stay in the database.
         """
 
         folder = folder.expanduser().resolve()
@@ -378,6 +497,11 @@ class Cache:
         """Drop every cached measurement and preview file.
 
         Keeper and reject marks stay. Returns how many measurement rows were removed.
+
+        Inputs: none beyond this cache.
+        Output: the number of measurement rows removed.
+        Uses: the review window when the photographer clears the cache.
+        Limitations: keeper, reject, and star rows stay in the database.
         """
 
         rows = self._conn.execute("SELECT preview_rel, thumb_rel FROM frame_metrics").fetchall()
@@ -390,6 +514,14 @@ class Cache:
         return len(rows)
 
     def _delete_cached_file(self, relative: str | None) -> None:
+        """Delete one preview or thumbnail if it sits inside the cache directory.
+
+        Inputs: a path relative to the cache directory, or None.
+        Output: none.
+        Uses: forget_folder and clear.
+        Limitations: a missing file or a path outside the cache is left alone, and a failed unlink is logged.
+        """
+
         path = self._abs(relative)
         if path is None:
             return
@@ -408,6 +540,14 @@ class Cache:
             log.warning("Could not delete cached file %s: %s", resolved, exc)
 
     def _sweep_preview_files(self) -> None:
+        """Delete leftover files in the preview and thumbnail folders.
+
+        Inputs: none beyond this cache.
+        Output: none.
+        Uses: clear after measurement rows are removed.
+        Limitations: only regular files are removed, and a failed unlink is logged.
+        """
+
         for name in ("previews", "thumbs"):
             folder = self.directory / name
             if not folder.is_dir():
@@ -420,15 +560,39 @@ class Cache:
                         log.warning("Could not delete cached file %s: %s", child, exc)
 
     def _rel(self, path: Path) -> str:
+        """Turn an absolute cache path into a posix path relative to the cache directory.
+
+        Inputs: a path that already lives under the cache directory.
+        Output: a relative posix path string.
+        Uses: put when storing preview and thumbnail locations.
+        Limitations: a path outside the cache directory raises ValueError.
+        """
+
         return path.resolve().relative_to(self.directory.resolve()).as_posix()
 
     def _abs(self, relative: str | None) -> Path | None:
+        """Turn a stored relative path back into a path under the cache directory.
+
+        Inputs: a relative path string, or None.
+        Output: a path under the cache directory, or None when the stored value is empty.
+        Uses: get and _delete_cached_file.
+        Limitations: does not check that the file exists.
+        """
+
         if not relative:
             return None
         return self.directory / relative
 
 
 def _stored_path_inside(stored: str, folder: Path) -> bool:
+    """Tell whether a stored photograph path is the folder or a child of it.
+
+    Inputs: a path string from the database and a resolved folder.
+    Output: True when the path is the folder or lies under it.
+    Uses: forget_folder while scanning measurement rows.
+    Limitations: an OSError during resolve falls back to the stored path as written.
+    """
+
     path = Path(stored)
     try:
         resolved = path.resolve()
@@ -438,12 +602,28 @@ def _stored_path_inside(stored: str, folder: Path) -> bool:
 
 
 def _format_box(box: tuple[int, int, int, int] | None) -> str | None:
+    """Turn a subject box into a comma-separated string for SQLite.
+
+    Inputs: x, y, width, and height, or None.
+    Output: a four-integer string, or None.
+    Uses: put when storing metrics.subject_box.
+    Limitations: None stays None, and each part is stored as an integer.
+    """
+
     if box is None:
         return None
     return ",".join(str(int(part)) for part in box)
 
 
 def _parse_box(value: str | None) -> tuple[int, int, int, int] | None:
+    """Read a stored subject box back into four integers.
+
+    Inputs: a comma-separated string, or None.
+    Output: a four-integer box, or None when the text is empty or not four integers.
+    Uses: get when rebuilding Metrics.
+    Limitations: a malformed value returns None instead of raising.
+    """
+
     if not value:
         return None
     parts = value.split(",")
@@ -457,6 +637,14 @@ def _parse_box(value: str | None) -> tuple[int, int, int, int] | None:
 
 
 def _parse_center(x: object, y: object) -> tuple[int, int] | None:
+    """Read stored eye coordinates into a pair of integers.
+
+    Inputs: the eye_x and eye_y column values.
+    Output: an integer pair, or None when either value is None.
+    Uses: get when rebuilding Metrics.eye_center.
+    Limitations: a non-numeric value raises rather than returning None.
+    """
+
     if x is None or y is None:
         return None
     return (int(x), int(y))

@@ -30,10 +30,26 @@ class Burst:
 
     @property
     def count(self) -> int:
+        """How many frames are in this burst.
+
+        Inputs: none beyond this burst.
+        Output: the length of frames.
+        Uses: the burst list and the minimum-frame filter.
+        Limitations: an empty frames tuple counts as zero.
+        """
+
         return len(self.frames)
 
     @property
     def started_at(self) -> datetime | None:
+        """Capture time of the first frame.
+
+        Inputs: none beyond this burst.
+        Output: the first frame's capture time, or None when the burst is empty or that time is missing.
+        Uses: the burst list clock line.
+        Limitations: later frames are ignored, and a missing first timestamp stays None.
+        """
+
         if not self.frames:
             return None
         return self.frames[0].captured_at
@@ -69,6 +85,14 @@ class Weights:
     prefer_subject: bool = False
 
     def clamped(self) -> Weights:
+        """Return weights that are safe to apply to a score.
+
+        Inputs: none beyond this Weights instance.
+        Output: a new Weights with non-negative sharpness and exposure, and center mix between 0 and 1.
+        Uses: scoring and the scan pipeline before a score is computed.
+        Limitations: a zero sharpness plus exposure pair falls back to 0.75 and 0.25, and the original object is unchanged.
+        """
+
         sharpness = max(0.0, float(self.sharpness))
         exposure = max(0.0, float(self.exposure))
         if sharpness + exposure == 0:

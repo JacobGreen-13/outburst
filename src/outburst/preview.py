@@ -30,7 +30,13 @@ class PreviewError(RuntimeError):
 
 
 def extract_preview_bytes(path: Path, paired_jpeg: Path | None = None) -> bytes:
-    """Return JPEG (or JPEG-encoded bitmap) bytes for a photograph."""
+    """Return JPEG (or JPEG-encoded bitmap) bytes for a photograph.
+
+    Inputs: a photograph path and an optional same-stem JPEG.
+    Output: preview bytes.
+    Uses: the scan pipeline before a frame is decoded and scored.
+    Limitations: the original file is not modified, and a missing preview raises PreviewError.
+    """
 
     if paired_jpeg is not None:
         try:
@@ -67,7 +73,13 @@ def extract_preview_bytes(path: Path, paired_jpeg: Path | None = None) -> bytes:
 
 
 def decode_image(data: bytes) -> np.ndarray:
-    """Decode JPEG bytes into a BGR array."""
+    """Decode JPEG bytes into a BGR array.
+
+    Inputs: encoded image bytes.
+    Output: a color BGR array.
+    Uses: the scan pipeline and the embedded JPEG scan.
+    Limitations: bytes that OpenCV cannot decode raise PreviewError.
+    """
 
     array = np.frombuffer(data, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
@@ -77,7 +89,13 @@ def decode_image(data: bytes) -> np.ndarray:
 
 
 def resize_max_edge(image: np.ndarray, max_edge: int) -> np.ndarray:
-    """Shrink so the long edge is at most `max_edge`. Smaller images stay as they are."""
+    """Shrink so the long edge is at most `max_edge`. Smaller images stay as they are.
+
+    Inputs: an image array and the longest edge to allow.
+    Output: the same array or a smaller array.
+    Uses: the scan pipeline for the analysis preview and the thumbnail.
+    Limitations: an image already within the limit is returned unchanged, and a zero long edge is left alone.
+    """
 
     height, width = image.shape[:2]
     long_edge = max(height, width)
@@ -89,6 +107,14 @@ def resize_max_edge(image: np.ndarray, max_edge: int) -> np.ndarray:
 
 
 def encode_jpeg(image: np.ndarray, quality: int = 90) -> bytes:
+    """Encode an image array as JPEG bytes.
+
+    Inputs: an image array and a JPEG quality.
+    Output: JPEG bytes.
+    Uses: cached previews and a rawpy bitmap thumbnail.
+    Limitations: a failed encode raises PreviewError, and the source photograph is not written.
+    """
+
     ok, buffer = cv2.imencode(
         ".jpg",
         image,
@@ -100,6 +126,14 @@ def encode_jpeg(image: np.ndarray, quality: int = 90) -> bytes:
 
 
 def _extract_with_rawpy(path: Path) -> bytes | None:
+    """Ask rawpy for the embedded thumbnail without demosaicing.
+
+    Inputs: a RAW path, with rawpy already imported.
+    Output: JPEG bytes, or None when the thumbnail is empty.
+    Uses: extract_preview_bytes before the header scan.
+    Limitations: does not demosaic the RAW, and a bitmap thumbnail is re-encoded as JPEG.
+    """
+
     assert rawpy is not None
     with rawpy.imread(str(path)) as raw:
         thumb = raw.extract_thumb()
@@ -119,6 +153,14 @@ def _extract_with_rawpy(path: Path) -> bytes | None:
 
 
 def _scan_embedded_jpeg(path: Path) -> bytes | None:
+    """Find the largest decodable JPEG embedded in the start of a file.
+
+    Inputs: a photograph path.
+    Output: JPEG bytes, or None when none of the candidates decode.
+    Uses: extract_preview_bytes when rawpy has no thumbnail.
+    Limitations: only the first 48 MiB is read, and the file is not modified.
+    """
+
     try:
         size = path.stat().st_size
     except OSError as exc:

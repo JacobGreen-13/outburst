@@ -16,7 +16,13 @@ from outburst.models import Burst, Frame
 
 
 def group_frames(frames: Sequence[Frame], threshold_seconds: float) -> list[Burst]:
-    """Return bursts in capture order. The input sequence is not modified."""
+    """Return bursts in capture order. The input sequence is not modified.
+
+    Inputs: frames and a non-negative finite gap threshold in seconds.
+    Output: bursts numbered burst-001 upward, timed frames first and each untimed frame alone after them.
+    Uses: the scan pipeline when a folder is grouped or regrouped.
+    Limitations: a missing capture time stays in its own burst, and a negative or non-finite threshold raises ValueError.
+    """
 
     if not math.isfinite(threshold_seconds) or threshold_seconds < 0:
         raise ValueError("threshold_seconds must be a finite number that is zero or positive")
