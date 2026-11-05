@@ -49,7 +49,7 @@ from outburst.gui.worker import AnalyzeWorker, ModelFetchWorker
 from outburst.models import Burst, FrameAnalysis, Library
 from outburst.output import choose_keepers, export_keepers, write_library_sidecars, write_reports
 from outburst.pipeline import with_threshold, with_weights
-from outburst.scoring import compare_partner_offset, recommended_offset
+from outburst.scoring import compare_partner_offset, eye_chooses_best, recommended_offset
 from outburst.subject import (
     DEFAULT_MODEL_ID,
     MODEL_OPTIONS,
@@ -280,6 +280,7 @@ class MainWindow(QMainWindow):
         self.controls.threshold_changed.connect(self._apply_threshold)
         self.controls.weights_changed.connect(self._apply_weights)
         self.controls.subject_toggled.connect(self._on_subject_toggled)
+        self.controls.eye_toggled.connect(self._on_eye_toggled)
         self.controls.model_changed.connect(self._on_model_changed)
         self.controls.minimum_changed.connect(self._on_minimum_changed)
         left = QWidget()
@@ -447,6 +448,7 @@ class MainWindow(QMainWindow):
             weights=self.controls.weights(),
             cache_dir=self._cache_dir,
             subject_model=subject_model,
+            eye_scoring=self.controls.eye_scoring(),
         )
         worker.progress.connect(self._on_progress)
         worker.succeeded.connect(lambda library, ident=scan_id: self._on_success(ident, library))
@@ -677,6 +679,8 @@ class MainWindow(QMainWindow):
             modes.append("1:1 loupe")
         if self._peaking:
             modes.append("focus peaking")
+        if library.eye_active:
+            message += " · eye scoring"
         if modes:
             message += " · " + " · ".join(modes)
         return message
@@ -876,6 +880,7 @@ class MainWindow(QMainWindow):
             decision=decision,
             subject_active=show_subject,
             stars=self._stars.get(frame.path),
+            eye_active=self._library.eye_active,
         )
         keeper = decision == "keep"
         rejected = decision == "reject"
@@ -895,6 +900,7 @@ class MainWindow(QMainWindow):
             keeper=keeper,
             rejected=rejected,
             stars=self._stars.get(frame.path),
+            circle=self._eye_circle(analysis),
         )
         self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
         self.viewer.set_compare(self._compare)
@@ -924,6 +930,7 @@ class MainWindow(QMainWindow):
             None if partner is None else partner.preview_path,
             partner_box,
             f"{role}  ·  {score}  ·  {partner_frame.path.name}",
+            circle=None if partner is None else self._eye_circle(partner),
             keeper=partner_decision == "keep",
             rejected=partner_decision == "reject",
         )
@@ -1081,19 +1088,56 @@ class MainWindow(QMainWindow):
             return 0
 
     def _mark_recommended_keepers(self) -> None:
-        """Mark the recommended frame when a burst does not already have a keeper."""
+        """Mark the recommended frame when a burst does not already have a keeper.
+
+        When two or more frames have a rated eye, the sharpest eye is the
+        frame Outburst marks. Earlier automatic keepers in that burst are
+        cleared. A reject stays rejected, and a keeper the photographer set
+        keeps its origin.
+        """
 
         if self._library is None:
             return
         for burst in self._library.bursts:
             if not burst.frames:
                 continue
-            if any(self._decisions.get(frame.path) == "keep" for frame in burst.frames):
+            offset = recommended_offset(burst.frames, self._by_path)
+            frame = burst.frames[offset]
+            if eye_chooses_best(burst.frames, self._by_path):
+                for other in burst.frames:
+                    if other.path == frame.path:
+                        continue
+                    if (
+                        self._decisions.get(other.path) == "keep"
+                        and self._origins.get(other.path) == "auto"
+                    ):
+                        self._apply_decision(other.path, None)
+                if self._decisions.get(frame.path) == "reject":
+                    continue
+                if self._decisions.get(frame.path) == "keep":
+                    continue
+                self._apply_decision(frame.path, "keep", origin="auto")
                 continue
-            frame = burst.frames[recommended_offset(burst.frames, self._by_path)]
+            if any(self._decisions.get(item.path) == "keep" for item in burst.frames):
+                continue
             if self._decisions.get(frame.path) == "reject":
                 continue
             self._apply_decision(frame.path, "keep", origin="auto")
+
+    def _on_eye_toggled(self, enabled: bool) -> None:
+        del enabled
+        self._clear_automatic_keepers()
+        if self._folder is not None:
+            self.rescan()
+
+    def _eye_circle(self, analysis: FrameAnalysis) -> tuple[int, int, int] | None:
+        if self._library is None or not self._library.eye_active:
+            return None
+        metrics = analysis.metrics
+        if metrics is None or metrics.eye_center is None or metrics.eye_radius is None:
+            return None
+        x, y = metrics.eye_center
+        return (int(x), int(y), int(metrics.eye_radius))
 
     def _clear_automatic_keepers(self) -> None:
         """Drop keepers Outburst chose. Marks the photographer set stay."""
@@ -1259,6 +1303,7 @@ class MainWindow(QMainWindow):
         self.controls.set_recursive(_as_bool(settings.value("recursive"), False))
         self.controls.set_minimum_frames(_saved_minimum_frames(settings))
         self.controls.set_subject_checked(_as_bool(settings.value("prefer_subject"), False))
+        self.controls.set_eye_scoring(_as_bool(settings.value("eye_scoring"), False))
         folder = settings.value("last_folder", "")
         if folder:
             self._dialog_start = Path(str(folder))
@@ -1273,6 +1318,7 @@ class MainWindow(QMainWindow):
         settings.setValue("recursive", self.controls.recursive())
         settings.setValue("minimum_frames", self.controls.minimum_frames())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
+        settings.setValue("eye_scoring", self.controls.eye_scoring())
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:
             settings.setValue("last_folder", str(self._folder))

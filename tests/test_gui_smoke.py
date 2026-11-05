@@ -483,6 +483,73 @@ def test_star_keys_are_saved_apart_from_the_pick_flag(qt_app, tmp_path: Path) ->
     qt_app.processEvents()
 
 
+def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import datetime, timedelta
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
+    from outburst.pipeline import analyze_folder
+    from tests.helpers import write_jpeg
+    from tests.test_eyes import _portrait
+
+    _isolate_settings(tmp_path / "settings")
+    folder = tmp_path / "photos"
+    folder.mkdir()
+    moment = datetime(2024, 7, 2, 9, 0, 0)
+    sharp = folder / "sharp.jpg"
+    soft = folder / "soft.jpg"
+    write_jpeg(sharp, _portrait(36), moment)
+    write_jpeg(soft, _portrait(36, blur=21), moment + timedelta(milliseconds=200))
+    library = analyze_folder(folder, cache_dir=tmp_path / "cache", threshold=1.0, eye_scoring=True)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    assert window.controls.eye_scoring() is False
+    window.present(library)
+    qt_app.processEvents()
+
+    assert window._decisions[sharp] == "keep"
+    assert window._origins[sharp] == "auto"
+    assert soft not in window._decisions
+    assert "Eye sharpness" in window.viewer.info.text()
+    assert "eye" in window.burst_list.item(0).text()
+    assert "eye scoring" in window.statusBar().currentMessage()
+    assert window.viewer.keeper_button.isChecked()
+
+    window._apply_decision(soft, "keep", origin="user")
+    window._mark_recommended_keepers()
+    assert window._decisions[sharp] == "keep"
+    assert window._origins[sharp] == "auto"
+    assert window._decisions[soft] == "keep"
+    assert window._origins[soft] == "user"
+
+    window._apply_decision(sharp, "reject", origin="user")
+    window._apply_decision(soft, "keep", origin="auto")
+    window._mark_recommended_keepers()
+    assert window._decisions[sharp] == "reject"
+    assert soft not in window._decisions
+
+    started: list[bool] = []
+
+    def spy_start(self: AnalyzeWorker) -> None:
+        started.append(self._eye_scoring)
+
+    monkeypatch.setattr(AnalyzeWorker, "start", spy_start)
+    window._apply_decision(soft, "keep", origin="user")
+    window._apply_decision(sharp, "keep", origin="auto")
+    window.controls._eye.setChecked(True)
+    qt_app.processEvents()
+    assert started == [True]
+    assert sharp not in window._decisions
+    assert window._decisions[soft] == "keep"
+    assert window._origins[soft] == "user"
+    window._scanning = False
+    window.close()
+    qt_app.processEvents()
+
+
 def test_version_flag() -> None:
     from outburst.main import main
 
