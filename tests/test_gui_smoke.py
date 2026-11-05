@@ -1,6 +1,6 @@
 """The review window can load a folder and move between frames.
 
-``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, automatic keepers, rescan, model download, zoom, filmstrip order, compare, stars, bird eye detection, and a save that stays disabled until the copy finishes.
+``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, automatic keepers, rescan, a blank preview while scoring, model download, zoom, filmstrip order, compare, stars, bird eye detection, and a save that stays disabled until the copy finishes.
 """
 
 from __future__ import annotations
@@ -295,6 +295,51 @@ def test_rescan_forgets_cached_measurements_for_the_open_folder(
     assert window.is_scanning is False
     assert forgotten == [written["folder"].resolve()]
     assert window._decisions[written["sharp"]] == "keep"
+    assert window.filmstrip._cards
+    assert not window.viewer.preview.text().startswith("Scanning")
+    window.close()
+    qt_app.processEvents()
+
+
+def test_rescan_blanks_the_preview_and_filmstrip_until_scoring_finishes(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+    assert window.filmstrip._cards
+    assert window.burst_list.count() > 0
+
+    def spy_start(self: AnalyzeWorker) -> None:
+        del self
+
+    monkeypatch.setattr(AnalyzeWorker, "start", spy_start)
+    window.rescan()
+    qt_app.processEvents()
+
+    assert window.is_scanning is True
+    assert window.filmstrip._cards == []
+    assert window.burst_list.count() == 0
+    assert window.viewer.keeper_button.isEnabled() is False
+    assert window.viewer.preview.text().startswith("Scanning and scoring")
+    QTest.keyClick(window, Qt.Key.Key_Right)
+    QTest.keyClick(window, Qt.Key.Key_A)
+    qt_app.processEvents()
+    assert window.filmstrip._cards == []
+    assert window.viewer.preview.text().startswith("Scanning and scoring")
+    window._scanning = False
     window.close()
     qt_app.processEvents()
 

@@ -1,6 +1,6 @@
 """The Outburst review window.
 
-``MainWindow.open_path`` and ``rescan`` scan a folder. ``present`` shows a finished library. ``_select_frame``, ``_step_frame``, and ``_show_burst`` move through the filmstrip order. ``_toggle_decision``, ``_set_stars``, and ``_reject_obvious`` record picks, stars, and rejects. ``_export_keepers``, ``_export_report``, and ``_write_xmp`` write copies, a report, and sidecars. ``_load_settings`` and ``_save_settings`` remember the controls, including filmstrip order. Keyboard handling ignores a focused slider or text box.
+``MainWindow.open_path`` and ``rescan`` scan a folder and clear the burst list, preview, and filmstrip until that scan finishes. ``present`` shows a finished library. ``_select_frame``, ``_step_frame``, and ``_show_burst`` move through the filmstrip order. ``_toggle_decision``, ``_set_stars``, and ``_reject_obvious`` record picks, stars, and rejects. ``_export_keepers``, ``_export_report``, and ``_write_xmp`` write copies, a report, and sidecars. ``_load_settings`` and ``_save_settings`` remember the controls, including filmstrip order. Keyboard handling ignores a focused slider or text box.
 """
 
 from __future__ import annotations
@@ -77,6 +77,11 @@ _WELCOME = (
     "Original files stay untouched."
 )
 
+_SCANNING_PREVIEW = (
+    "Scanning and scoring this folder.\n\n"
+    "The preview and filmstrip stay empty until the scan finishes."
+)
+
 
 def _short_bursts_hidden(minimum: int) -> str:
     """
@@ -138,6 +143,7 @@ class MainWindow(QMainWindow):
         self._worker: AnalyzeWorker | None = None
         self._scan_id = 0
         self._scanning = False
+        self._review_suspended = False
         self._save_worker: QThread | None = None
         self._save_id = 0
         self._saving = False
@@ -205,11 +211,12 @@ class MainWindow(QMainWindow):
         Show a finished library. Tests and the scan worker both use this.
 
         Inputs: library, the scanned folder, bursts, analyses, and warnings.
-        Output: no return value. Decisions are loaded, recommended keepers are marked, and the burst list, preview, and status summary update.
+        Output: no return value. The review surface is shown again. Decisions are loaded, recommended keepers are marked, and the burst list, preview, and status summary update.
         Uses: the review window after a scan.
         Limitations: a library with warnings and no analyses shows the first warning as a notice. Original files are not modified.
         """
 
+        self._resume_review()
         self._library = library
         self._folder = library.folder
         self._by_path = {item.frame.path: item for item in library.analyses}
@@ -254,9 +261,9 @@ class MainWindow(QMainWindow):
         Drop cached measurements for the open folder and scan it again.
 
         Inputs: none.
-        Output: no return value. With no folder, nothing happens. Otherwise the folder cache is forgotten and a scan starts, after a missing subject model or bird-eye model is downloaded when that option is on.
+        Output: no return value. With no folder, nothing happens. Otherwise the preview and filmstrip are cleared, the folder cache is forgotten, and a scan starts, after a missing subject model or bird-eye model is downloaded when that option is on.
         Uses: the Rescan action.
-        Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not forget the cache.
+        Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not clear the review. The cleared frames stay hidden if the new scan is cancelled.
         """
         if self._folder is None:
             return
@@ -268,6 +275,7 @@ class MainWindow(QMainWindow):
                 "warning",
             )
             return
+        self._suspend_review()
         self._forget_folder_cache(folder)
         if self.controls.prefer_subject() and not self._model_ready():
             self._begin_download(then_scan=True)
@@ -331,8 +339,13 @@ class MainWindow(QMainWindow):
         Inputs: key, the Qt key code.
         Output: True when the key is a review shortcut, and False when it is not.
         Uses: frame, burst, rating, compare, zoom, peaking, and cancel shortcuts.
-        Limitations: the caller ignores keys while a spin box is focused. Arrow keys follow the on-screen filmstrip order. Home and End use that same order. Escape cancels only while a scan or a download is active.
+        Limitations: the caller ignores keys while a spin box is focused. Arrow keys follow the on-screen filmstrip order. Home and End use that same order. Escape cancels only while a scan or a download is active. While the review is cleared for a scan, only Escape is handled.
         """
+        if self._review_suspended:
+            if key == Qt.Key.Key_Escape and (self._scanning or self._downloading):
+                self._cancel_scan()
+                return True
+            return False
         if key == Qt.Key.Key_Right:
             self._step_frame(1)
         elif key == Qt.Key.Key_Left:
@@ -648,12 +661,13 @@ class MainWindow(QMainWindow):
         Start a background scan of the open folder.
 
         Inputs: none. The folder, recursion, gap, weights, cache, subject model, and bird eye detection are read from the window.
-        Output: no return value. The progress bar is shown and the worker starts. A missing subject model or bird-eye model starts a download instead.
+        Output: no return value. The preview and filmstrip are cleared, the progress bar is shown, and the worker starts. A missing subject model or bird-eye model starts a download instead.
         Uses: opening and rescanning a folder.
         Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. The subject model is downloaded before the bird-eye model when both are missing.
         """
         if self._folder is None:
             return
+        self._suspend_review()
         if self.controls.prefer_subject() and not self._model_ready():
             self._begin_download(then_scan=True)
             return
@@ -725,6 +739,7 @@ class MainWindow(QMainWindow):
             return
         if self._scanning:
             self._stop_worker()
+            self.viewer.set_placeholder("Scan cancelled.\n\nRescan to score this folder again.")
             self.statusBar().showMessage("Scan cancelled")
             self._sync_actions()
 
@@ -769,6 +784,7 @@ class MainWindow(QMainWindow):
         if scan_id != self._scan_id:
             return
         self._scanning = False
+        self.viewer.set_placeholder("The scan did not finish.\n\nRescan to try this folder again.")
         self._sync_actions()
         self._notify("Scan failed", message, "warning")
 
@@ -784,6 +800,7 @@ class MainWindow(QMainWindow):
         if scan_id != self._scan_id:
             return
         self._scanning = False
+        self.viewer.set_placeholder("Scan cancelled.\n\nRescan to score this folder again.")
         self._sync_actions()
         self.statusBar().showMessage("Scan cancelled")
 
@@ -794,9 +811,9 @@ class MainWindow(QMainWindow):
         Inputs: value, the gap in seconds.
         Output: no return value. Automatic keepers are cleared, bursts are rebuilt, new best frames are marked, and the list keeps the current file when it is still visible.
         Uses: the Burst gap control.
-        Limitations: nothing happens before a library is loaded. This regroups measurements already in memory and does not read the files again.
+        Limitations: nothing happens before a library is loaded or while the review is cleared for a scan. This regroups measurements already in memory and does not read the files again.
         """
-        if self._library is None:
+        if self._library is None or self._review_suspended:
             return
         selected = self._selected_path()
         self._clear_automatic_keepers()
@@ -811,9 +828,9 @@ class MainWindow(QMainWindow):
         Inputs: none. Weights are read from the control panel.
         Output: no return value. The analysis map, burst labels, filmstrip scores, and preview refresh.
         Uses: the Sharp and Center sliders, and turning subject scoring off.
-        Limitations: nothing happens before a library is loaded. This rescores cached measurements and does not scan the files again.
+        Limitations: nothing happens before a library is loaded or while the review is cleared for a scan. This rescores cached measurements and does not scan the files again.
         """
-        if self._library is None:
+        if self._library is None or self._review_suspended:
             return
         self._library = with_weights(self._library, self.controls.weights())
         self._by_path = {item.frame.path: item for item in self._library.analyses}
@@ -1174,8 +1191,10 @@ class MainWindow(QMainWindow):
         Inputs: prefer_path, a file to keep selected, or None to select the first visible burst.
         Output: no return value. The list, filmstrip, and preview update. No visible bursts shows the short-burst message when the library has bursts, and the welcome message otherwise.
         Uses: the burst list after a scan, a gap change, or a minimum change.
-        Limitations: bursts under Minimum frames stay off the list. List signals are blocked while the rows are rebuilt.
+        Limitations: bursts under Minimum frames stay off the list. List signals are blocked while the rows are rebuilt. Nothing is drawn while the review is cleared for a scan.
         """
+        if self._review_suspended:
+            return
         library = self._library
         self.burst_list.blockSignals(True)
         self.burst_list.clear()
@@ -1226,8 +1245,10 @@ class MainWindow(QMainWindow):
         Inputs: index, the visible-burst index; prefer_path, a file to select, or None for the recommended frame.
         Output: no return value. The compare partner is cleared, the filmstrip is rebuilt, and the preview updates.
         Uses: moving between bursts.
-        Limitations: an index outside the visible bursts returns immediately. A preferred path that is not in the burst falls back to the recommended frame.
+        Limitations: an index outside the visible bursts returns immediately. A preferred path that is not in the burst falls back to the recommended frame. A scan in progress returns without drawing.
         """
+        if self._review_suspended:
+            return
         bursts = self._visible_bursts()
         if not (0 <= index < len(bursts)):
             return
@@ -1292,7 +1313,7 @@ class MainWindow(QMainWindow):
         if not checked or mode == self._filmstrip_sort:
             return
         self._filmstrip_sort = mode
-        if self._current_burst() is None:
+        if self._review_suspended or self._current_burst() is None:
             return
         self.filmstrip.set_cards(self._thumbs())
         self._update_viewer()
@@ -1607,8 +1628,11 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: no return value. The preview shows the frame, its info, border, badges, and stars. Compare shows the partner, or a one-frame message when there is no other frame.
         Uses: the large preview.
-        Limitations: zoom uses the embedded preview. With no current frame the welcome placeholder is shown. A rejected frame uses the red border ahead of the keeper and recommended colors. The subject box is drawn only when subject scoring is active and preferred.
+        Limitations: zoom uses the embedded preview. With no current frame the welcome placeholder is shown. While a scan has cleared the review, the scanning message stays up. A rejected frame uses the red border ahead of the keeper and recommended colors. The subject box is drawn only when subject scoring is active and preferred.
         """
+        if self._review_suspended:
+            self.viewer.set_placeholder(_SCANNING_PREVIEW)
+            return
         analysis = self._current_analysis()
         burst = self._current_burst()
         if analysis is None or burst is None or self._library is None:
@@ -2237,16 +2261,43 @@ class MainWindow(QMainWindow):
         self.folder_label.setText(str(self._folder))
         self.folder_label.setToolTip(str(self._folder))
 
+    def _suspend_review(self) -> None:
+        """
+        Clear the burst list, preview, and filmstrip for a scan.
+
+        Inputs: none.
+        Output: no return value. The list and filmstrip are emptied, the preview shows the scanning message, and those controls are disabled.
+        Uses: Rescan and the start of a folder scan.
+        Limitations: keeper marks stay in memory. The cleared frames are not drawn again until a finished library is presented. Arrow keys and filmstrip clicks do nothing while this is in effect. The controls stay enabled so focus does not jump to a slider.
+        """
+        self._review_suspended = True
+        self.burst_list.blockSignals(True)
+        self.burst_list.clear()
+        self.burst_list.blockSignals(False)
+        self.filmstrip.set_cards([])
+        self.viewer.set_placeholder(_SCANNING_PREVIEW)
+
+    def _resume_review(self) -> None:
+        """
+        Allow the burst list, preview, and filmstrip to show a finished library.
+
+        Inputs: none.
+        Output: no return value. The cleared review can be drawn again.
+        Uses: presenting a library after a scan.
+        Limitations: this does not draw frames. The caller rebuilds the list and preview.
+        """
+        self._review_suspended = False
+
     def _review_locked(self) -> bool:
         """
         Report whether keeper, reject, and star changes should wait.
 
         Inputs: none.
-        Output: True while a scan or a save is running.
+        Output: True while a scan or a save is running, or while the review is cleared for a scan.
         Uses: the mark and rating actions.
-        Limitations: a model download does not lock review.
+        Limitations: a model download locks review only when the preview was already cleared for the scan that follows.
         """
-        return self._scanning or self._saving
+        return self._scanning or self._saving or self._review_suspended
 
     def _start_save(self, worker: QThread, message: str) -> None:
         """
