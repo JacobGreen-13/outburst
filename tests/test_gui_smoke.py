@@ -384,6 +384,18 @@ def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monke
     window.close()
 
 
+def test_zoom_steps() -> None:
+    from outburst.gui.image_viewer import next_zoom
+
+    assert next_zoom(None, 1) == 1.0
+    assert next_zoom(1.0, 1) == 2.0
+    assert next_zoom(2.0, 1) == 4.0
+    assert next_zoom(4.0, 1) == 4.0
+    assert next_zoom(4.0, -1) == 2.0
+    assert next_zoom(1.0, -1) is None
+    assert next_zoom(None, -1) is None
+
+
 def test_compare_loupe_and_obvious_misses(qt_app, tmp_path: Path) -> None:
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
@@ -423,6 +435,35 @@ def test_compare_loupe_and_obvious_misses(qt_app, tmp_path: Path) -> None:
     assert window.viewer.hint.isVisible()
     assert "1:1" in window.viewer.hint.text()
     assert "Green" in window.viewer.hint.text()
+
+    QTest.keyClick(window, Qt.Key.Key_Plus)
+    qt_app.processEvents()
+    assert window.viewer.preview.scale() == 2
+    assert "2:1" in window.viewer.hint.text()
+    QTest.keyClick(window, Qt.Key.Key_Minus)
+    qt_app.processEvents()
+    assert window.viewer.preview.scale() == 1
+
+    QTest.keyClick(window, Qt.Key.Key_BracketRight)
+    qt_app.processEvents()
+    caption = window.viewer.partner_caption.text()
+    assert caption.startswith("Frame ")
+    assert "Best in the burst" not in caption
+    burst = window._current_burst()
+    assert burst is not None and burst.count >= 3
+    target = next(
+        index
+        for index in range(burst.count)
+        if index != window.current_frame_index and index != window._compare_index
+    )
+    QTest.mouseClick(
+        window.filmstrip._cards[target],
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ShiftModifier,
+    )
+    qt_app.processEvents()
+    assert window._compare_index == target
+    assert window.viewer.partner_box.isVisible()
 
     window._select_frame(0)
     qt_app.processEvents()
