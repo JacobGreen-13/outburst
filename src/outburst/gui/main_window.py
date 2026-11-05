@@ -138,8 +138,6 @@ class MainWindow(QMainWindow):
         self._loupe = False
         self._zoom_scale: float | None = None
         self._peaking = False
-        self._show_subject_box = True
-        self._show_eye_circle = True
         self._obvious_burst_id: str | None = None
         self._obvious_rejects: list[Path] = []
         self._folder: Path | None = None
@@ -435,6 +433,8 @@ class MainWindow(QMainWindow):
         self.controls.weights_changed.connect(self._apply_weights)
         self.controls.subject_toggled.connect(self._on_subject_toggled)
         self.controls.eye_toggled.connect(self._on_eye_toggled)
+        self.controls.subject_box_toggled.connect(self._on_subject_box_toggled)
+        self.controls.eye_circle_toggled.connect(self._on_eye_circle_toggled)
         self.controls.model_changed.connect(self._on_model_changed)
         self.controls.minimum_changed.connect(self._on_minimum_changed)
         self.controls.minimum_score_changed.connect(self._on_minimum_score_changed)
@@ -598,26 +598,12 @@ class MainWindow(QMainWindow):
             "Focus peaking",
             "Paint the strongest edges green. Keyboard: F",
         )
-        self.subject_box_action = self._check_action(
-            "Subject box",
-            "Draw the detected animal box on the preview and the compare pane.",
-        )
-        self.eye_circle_action = self._check_action(
-            "Eye circle",
-            "Draw the bird eye ring on the preview and the compare pane.",
-        )
-        self.subject_box_action.setChecked(True)
-        self.eye_circle_action.setChecked(True)
         self.compare_action.toggled.connect(self._on_compare_toggled)
         self.loupe_action.toggled.connect(self._on_loupe_toggled)
         self.peak_action.toggled.connect(self._on_peak_toggled)
-        self.subject_box_action.toggled.connect(self._on_subject_box_toggled)
-        self.eye_circle_action.toggled.connect(self._on_eye_circle_toggled)
         view_menu.addAction(self.compare_action)
         view_menu.addAction(self.loupe_action)
         view_menu.addAction(self.peak_action)
-        view_menu.addAction(self.subject_box_action)
-        view_menu.addAction(self.eye_circle_action)
         view_menu.addSeparator()
         view_menu.addAction(self.warnings_action)
         view_menu.addAction(cache_action)
@@ -656,7 +642,7 @@ class MainWindow(QMainWindow):
 
         Inputs: text, the label; tooltip, the explanation.
         Output: an unchecked checkable action parented to the window.
-        Uses: Compare, Zoom, Focus peaking, Subject box, and Eye circle.
+        Uses: Compare, Zoom, and Focus peaking.
         Limitations: the action is not added to a menu here, and this method sets no shortcut.
         """
         action = QAction(text, self)
@@ -1731,28 +1717,26 @@ class MainWindow(QMainWindow):
         self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self._show_mode_status()
 
-    def _on_subject_box_toggled(self, checked: bool) -> None:
+    def _on_subject_box_toggled(self, _checked: bool) -> None:
         """
         Show or hide the detected animal box.
 
-        Inputs: checked, whether the box is drawn.
+        Inputs: _checked, whether the box is drawn. The checkbox is read again while the preview is redrawn.
         Output: no return value. The preview and compare pane redraw.
-        Uses: the Subject box action in the View menu.
-        Limitations: hiding the box does not turn off subject scoring. A frame with no detected animal still has no box. Zoom still centers on the animal when the box is hidden and no eye is present.
+        Uses: the Show subject box checkbox in the Scoring section.
+        Limitations: hiding the box does not turn off subject scoring and does not rescan. A frame with no detected animal still has no box. Zoom still centers on the animal when the box is hidden and no eye is present.
         """
-        self._show_subject_box = checked
         self._update_viewer()
 
-    def _on_eye_circle_toggled(self, checked: bool) -> None:
+    def _on_eye_circle_toggled(self, _checked: bool) -> None:
         """
         Show or hide the bird eye ring.
 
-        Inputs: checked, whether the ring is drawn.
+        Inputs: _checked, whether the ring is drawn. The checkbox is read again while the preview is redrawn.
         Output: no return value. The preview and compare pane redraw.
-        Uses: the Eye circle action in the View menu.
-        Limitations: hiding the ring does not turn off bird eye detection. The info line, filmstrip, and ranking still use the eye. Zoom still centers on the eye when the ring is hidden.
+        Uses: the Show eye circle checkbox in the Scoring section.
+        Limitations: hiding the ring does not turn off bird eye detection and does not rescan. The info line, filmstrip, and ranking still use the eye. Zoom still centers on the eye when the ring is hidden.
         """
-        self._show_eye_circle = checked
         self._update_viewer()
 
     def _on_zoom_changed(self, scale: float) -> None:
@@ -1986,13 +1970,13 @@ class MainWindow(QMainWindow):
             border = "#2e2e2e"
         self.viewer.set_frame(
             analysis.preview_path,
-            box if self._show_subject_box else None,
+            box if self.controls.show_subject_box() else None,
             html,
             border,
             keeper=keeper,
             rejected=rejected,
             stars=self._stars.get(frame.path),
-            circle=circle if self._show_eye_circle else None,
+            circle=circle if self.controls.show_eye_circle() else None,
             focus=_overlay_focus(box, circle),
         )
         self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
@@ -2036,9 +2020,9 @@ class MainWindow(QMainWindow):
         )
         self.viewer.set_partner(
             None if partner is None else partner.preview_path,
-            partner_box if self._show_subject_box else None,
+            partner_box if self.controls.show_subject_box() else None,
             f"{role}  ·  {score}  ·  {partner_frame.path.name}",
-            circle=partner_circle if self._show_eye_circle else None,
+            circle=partner_circle if self.controls.show_eye_circle() else None,
             focus=_overlay_focus(partner_box, partner_circle),
             keeper=partner_decision == "keep",
             rejected=partner_decision == "reject",
@@ -2769,10 +2753,8 @@ class MainWindow(QMainWindow):
         self.controls.set_minimum_score_enabled(_as_bool(settings.value("minimum_score_enabled"), False))
         self.controls.set_subject_checked(_as_bool(settings.value("prefer_subject"), False))
         self.controls.set_eye_scoring(_as_bool(settings.value("eye_scoring"), False))
-        self._show_subject_box = _as_bool(settings.value("show_subject_box"), True)
-        self._show_eye_circle = _as_bool(settings.value("show_eye_circle"), True)
-        self.subject_box_action.setChecked(self._show_subject_box)
-        self.eye_circle_action.setChecked(self._show_eye_circle)
+        self.controls.set_show_subject_box(_as_bool(settings.value("show_subject_box"), True))
+        self.controls.set_show_eye_circle(_as_bool(settings.value("show_eye_circle"), True))
         self._set_filmstrip_sort(str(settings.value("filmstrip_sort", "time") or "time"))
         folder = settings.value("last_folder", "")
         if folder:
@@ -2799,8 +2781,8 @@ class MainWindow(QMainWindow):
         settings.setValue("minimum_score_enabled", self.controls.minimum_score_enabled())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
         settings.setValue("eye_scoring", self.controls.eye_scoring())
-        settings.setValue("show_subject_box", self._show_subject_box)
-        settings.setValue("show_eye_circle", self._show_eye_circle)
+        settings.setValue("show_subject_box", self.controls.show_subject_box())
+        settings.setValue("show_eye_circle", self.controls.show_eye_circle())
         settings.setValue("filmstrip_sort", self._filmstrip_sort)
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:

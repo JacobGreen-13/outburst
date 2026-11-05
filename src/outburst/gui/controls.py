@@ -1,6 +1,6 @@
 """Threshold, weights, and the optional subject-detection toggle.
 
-``ControlPanel`` is the Grouping and Scoring sections. The getters read burst gap, sharpness, center, minimum frames, minimum score, subfolders, subject, bird eye detection, and the model id. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark.
+``ControlPanel`` is the Grouping and Scoring sections. The getters read burst gap, sharpness, center, minimum frames, minimum score, subfolders, subject, bird eye detection, the subject-box and eye-circle marks, and the model id. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark.
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ class ControlPanel(QWidget):
     weights_changed = Signal()
     subject_toggled = Signal(bool)
     eye_toggled = Signal(bool)
+    subject_box_toggled = Signal(bool)
+    eye_circle_toggled = Signal(bool)
     model_changed = Signal(str)
     minimum_changed = Signal(int)
     minimum_score_changed = Signal()
@@ -97,6 +99,13 @@ class ControlPanel(QWidget):
             "Choosing a model turns this on. Rescan downloads that model if it is not in the models folder."
         )
         self._subject.toggled.connect(self.subject_toggled.emit)
+        self._show_box = QCheckBox("Show subject box")
+        self._show_box.setChecked(True)
+        self._show_box.setToolTip(
+            "Draw the detected animal box on the preview and the compare pane. "
+            "This does not rescan and does not turn subject scoring off."
+        )
+        self._show_box.toggled.connect(self.subject_box_toggled.emit)
         self._eye = QCheckBox("Bird eye detection")
         self._eye.setToolTip(
             "Download the open-weight bird eye model (about 6 MB) and use the eye it finds. "
@@ -105,6 +114,13 @@ class ControlPanel(QWidget):
             "Turning this on or off rescans."
         )
         self._eye.toggled.connect(self.eye_toggled.emit)
+        self._show_eye = QCheckBox("Show eye circle")
+        self._show_eye.setChecked(True)
+        self._show_eye.setToolTip(
+            "Draw the bird eye ring on the preview and the compare pane. "
+            "This does not rescan and does not turn bird eye detection off."
+        )
+        self._show_eye.toggled.connect(self.eye_circle_toggled.emit)
         self._model = QComboBox()
         self._model.setToolTip(
             "Subject model. Choosing one turns subject scoring on. "
@@ -133,7 +149,9 @@ class ControlPanel(QWidget):
         scoring_layout.addWidget(self._slider_row(self._center_label, self._center))
         scoring_layout.addWidget(self._score_row())
         scoring_layout.addWidget(self._subject)
+        scoring_layout.addWidget(self._indented(self._show_box))
         scoring_layout.addWidget(self._eye)
+        scoring_layout.addWidget(self._indented(self._show_eye))
         scoring_layout.addWidget(self._model)
         scoring_layout.addWidget(self._model_label)
 
@@ -163,6 +181,22 @@ class ControlPanel(QWidget):
         name.setMinimumWidth(88)
         layout.addWidget(name)
         layout.addWidget(widget, 1)
+        return row
+
+    def _indented(self, widget: QWidget) -> QWidget:
+        """
+        Place a checkbox under the detection option it belongs to.
+
+        Inputs: widget, the show-box or show-circle checkbox.
+        Output: a row with 22 pixels of space on the left.
+        Uses: Show subject box and Show eye circle in the Scoring section.
+        Limitations: the indent is visual. The checkbox has its own signal and does not change the detection checkbox.
+        """
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(22, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(widget)
         return row
 
     def _score_row(self) -> QWidget:
@@ -365,6 +399,28 @@ class ControlPanel(QWidget):
         """
         return self._eye.isChecked()
 
+    def show_subject_box(self) -> bool:
+        """
+        Read whether the detected animal box is drawn.
+
+        Inputs: none.
+        Output: True when Show subject box is checked.
+        Uses: the preview and the compare pane.
+        Limitations: this does not say whether a box was found. Subject scoring is a different checkbox.
+        """
+        return self._show_box.isChecked()
+
+    def show_eye_circle(self) -> bool:
+        """
+        Read whether the bird eye ring is drawn.
+
+        Inputs: none.
+        Output: True when Show eye circle is checked.
+        Uses: the preview and the compare pane.
+        Limitations: this does not say whether an eye was found. Bird eye detection is a different checkbox.
+        """
+        return self._show_eye.isChecked()
+
     def weights(self) -> Weights:
         """
         Build the scoring weights from the sliders and the subject checkbox.
@@ -459,6 +515,32 @@ class ControlPanel(QWidget):
         self._eye.blockSignals(True)
         self._eye.setChecked(checked)
         self._eye.blockSignals(False)
+
+    def set_show_subject_box(self, checked: bool) -> None:
+        """
+        Set the subject-box checkbox without emitting a change.
+
+        Inputs: checked, whether the detected animal box is drawn.
+        Output: no return value. The checkbox matches checked.
+        Uses: restoring the saved Show subject box setting.
+        Limitations: signals are blocked, so the preview is not redrawn by this call. Subject scoring is left as it is.
+        """
+        self._show_box.blockSignals(True)
+        self._show_box.setChecked(bool(checked))
+        self._show_box.blockSignals(False)
+
+    def set_show_eye_circle(self, checked: bool) -> None:
+        """
+        Set the eye-circle checkbox without emitting a change.
+
+        Inputs: checked, whether the bird eye ring is drawn.
+        Output: no return value. The checkbox matches checked.
+        Uses: restoring the saved Show eye circle setting.
+        Limitations: signals are blocked, so the preview is not redrawn by this call. Bird eye detection is left as it is.
+        """
+        self._show_eye.blockSignals(True)
+        self._show_eye.setChecked(bool(checked))
+        self._show_eye.blockSignals(False)
 
     def model_id(self) -> str:
         """

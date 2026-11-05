@@ -183,7 +183,7 @@ The launcher installs Ultralytics with Outburst. If you are in an older environm
 pip install "outburst[subject]"
 ```
 
-Choose a model in the dropdown, or check **Subject-aware sharpness**, then press **Rescan**. That turns subject scoring on, downloads the weights into the models folder when the file is not there yet, and scores the open folder with that model. Progress shows in the status bar. Cancel with Esc. When a bird or animal is found, the sharpest patch inside that box (with a small margin) becomes the score, and the box is drawn on the preview. **View → Subject box** hides that rectangle. The score still uses the box, and zoom still centers on it when no eye is present. If nothing is found, or the model cannot be loaded, Outburst keeps the center-patch score and tells you.
+Choose a model in the dropdown, or check **Subject-aware sharpness**, then press **Rescan**. That turns subject scoring on, downloads the weights into the models folder when the file is not there yet, and scores the open folder with that model. Progress shows in the status bar. Cancel with Esc. When a bird or animal is found, the sharpest patch inside that box (with a small margin) becomes the score, and the box is drawn on the preview. **Show subject box**, under that checkbox, hides the rectangle without rescanning and without turning subject scoring off. The score still uses the box, and zoom still centers on it when no eye is present. If nothing is found, or the model cannot be loaded, Outburst keeps the center-patch score and tells you.
 
 When you run Outburst from this project, the folder is `models` next to this README. Otherwise the weights go in a `models` folder inside the Outburst cache. Set `OUTBURST_MODELS` to use a different folder. A model marked **ready** is already on disk. A model marked **download** is fetched when you choose it or when you rescan with subject scoring on. Photos are still never uploaded.
 
@@ -197,7 +197,7 @@ The model is birds only. It was trained on studio and Flickr-style bird photos, 
 
 When a burst has two or more frames with a rated eye, the sharpest of those eyes is the best frame and Outburst marks it as a keeper. A reject on that frame stays rejected. A keeper you already set stays yours. Other automatic keepers in that burst are cleared. A burst with fewer than two rated eyes uses the usual sharpness rank, and Outburst marks a keeper only when the burst does not already have one.
 
-A detected eye is drawn on the preview as a gold ring labeled EYE. **View → Eye circle** hides that ring without changing the score or the zoom center. The info line says the eye was detected. The filmstrip card says EYE, and the burst row counts the eyes in that burst. The status bar counts every detected eye in the folder, including frames in bursts that are hidden because they are shorter than Minimum frames. Turning the checkbox off scans the folder again with the usual sharpness ranking.
+A detected eye is drawn on the preview as a gold ring labeled EYE. **Show eye circle**, under Bird eye detection, hides that ring without rescanning and without turning detection off. The score and the zoom center stay as they are. The info line says the eye was detected. The filmstrip card says EYE, and the burst row counts the eyes in that burst. The status bar counts every detected eye in the folder, including frames in bursts that are hidden because they are shorter than Minimum frames. Turning the checkbox off scans the folder again with the usual sharpness ranking.
 
 ## Apple Silicon
 
