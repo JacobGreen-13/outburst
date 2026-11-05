@@ -81,6 +81,14 @@ class ModelCancelled(Exception):
 
 
 def option_by_id(model_id: str) -> ModelOption | None:
+    """Look up one catalog entry by its model id.
+
+    Inputs: model_id, a catalog id such as yolo11n.
+    Output: the matching ModelOption, or None when the id is not in the catalog.
+    Uses: the subject-model dropdown when it resolves the saved choice.
+    Limitations: only the four catalog ids match. This does not download weights or load a detector.
+    """
+
     for option in MODEL_OPTIONS:
         if option.id == model_id:
             return option
@@ -88,7 +96,13 @@ def option_by_id(model_id: str) -> ModelOption | None:
 
 
 def models_dir() -> Path:
-    """Folder where subject weights are stored. Created on first use."""
+    """Folder where subject weights are stored. Created on first use.
+
+    Inputs: none. OUTBURST_MODELS overrides the location when that environment variable is set.
+    Output: the models directory, created if it was missing.
+    Uses: model downloads and the path passed to the detector loader.
+    Limitations: creating the directory is the side effect. Photographs are not written. Without the override, a project models folder is used when the checkout is found, and the cache models folder otherwise.
+    """
 
     override = os.environ.get("OUTBURST_MODELS")
     if override:
@@ -101,12 +115,26 @@ def models_dir() -> Path:
 
 
 def model_path(option: ModelOption, directory: Path | None = None) -> Path:
+    """Path of one catalog weights file inside the models folder.
+
+    Inputs: option, a catalog entry; directory, an optional folder. The models folder is used when directory is omitted.
+    Output: the path of option.filename in that folder. The file is not created.
+    Uses: the download check and the loader.
+    Limitations: this does not download or open the weights. A custom directory is not created.
+    """
+
     root = directory if directory is not None else models_dir()
     return root / option.filename
 
 
 def model_is_ready(path: Path) -> bool:
-    """True when path looks like a downloaded PyTorch weights file."""
+    """True when path looks like a downloaded PyTorch weights file.
+
+    Inputs: path, a candidate weights file.
+    Output: True when the file exists, is at least MIN_MODEL_BYTES, and starts with the PK zip signature.
+    Uses: ensure_model before and after a download.
+    Limitations: the check is size plus the first two bytes. It does not load the network. The Ultralytics license is separate from this check.
+    """
 
     try:
         if not path.is_file() or path.stat().st_size < MIN_MODEL_BYTES:
@@ -123,7 +151,13 @@ def ensure_model(
     progress: Callable[[int, int | None], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> Path:
-    """Return the weights file, downloading it when the models folder does not have it."""
+    """Return the weights file, downloading it when the models folder does not have it.
+
+    Inputs: option, the catalog entry; directory, an optional models folder; progress, an optional callback of bytes downloaded and total size; should_cancel, an optional callback that is true when the photographer cancels.
+    Output: the path of the ready weights file.
+    Uses: a subject-scoring rescan, which downloads a missing model before the scan loads it.
+    Limitations: a ready file is returned without a download. Cancel deletes the partial file and raises ModelCancelled. The weights are official Ultralytics YOLO files under the AGPL-3.0 license, separate from Outburst. Photographs are not uploaded.
+    """
 
     root = directory if directory is not None else models_dir()
     root.mkdir(parents=True, exist_ok=True)
@@ -154,6 +188,14 @@ def ensure_model(
 
 
 def _discover_project_models() -> Path | None:
+    """Find a models folder beside an Outburst checkout.
+
+    Inputs: none. The walk starts at the working directory and at this file's project root.
+    Output: the project models path when a pyproject.toml names outburst, otherwise None. The folder is not created here.
+    Uses: models_dir when OUTBURST_MODELS is unset.
+    Limitations: the first matching project wins. A checkout whose name is not outburst is ignored.
+    """
+
     starts = [Path.cwd(), Path(__file__).resolve().parents[1].parent]
     seen: set[Path] = set()
     for start in starts:
@@ -173,6 +215,14 @@ def _discover_project_models() -> Path | None:
 
 
 def _is_outburst_project(marker: Path) -> bool:
+    """Tell whether a pyproject.toml belongs to this project.
+
+    Inputs: marker, the path of a pyproject.toml.
+    Output: True when a line sets the project name to outburst.
+    Uses: _discover_project_models.
+    Limitations: the match is a stripped name line, with double or single quotes. A file that cannot be read returns False.
+    """
+
     try:
         text = marker.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -186,6 +236,14 @@ def _stream_download(
     progress: Callable[[int, int | None], None] | None,
     should_cancel: Callable[[], bool] | None,
 ) -> None:
+    """Download a weights file to a partial path, reporting progress and stopping when cancelled.
+
+    Inputs: url, the catalog URL; destination, the partial file to write; progress, an optional byte callback; should_cancel, an optional cancel check.
+    Output: none. The partial file is written. ModelCancelled is raised when the photographer cancels.
+    Uses: ensure_model.
+    Limitations: the request times out after 60 seconds and reads 256 KB at a time. HTTP and URL errors become RuntimeError. The caller renames the partial file only after this returns.
+    """
+
     request = urllib.request.Request(url, headers={"User-Agent": "Outburst"})
     try:
         response = urllib.request.urlopen(request, timeout=60)
@@ -214,6 +272,14 @@ def _stream_download(
 
 
 def _content_length(response: object) -> int | None:
+    """Read a positive Content-Length from a download response.
+
+    Inputs: response, an object that may have headers.
+    Output: the length in bytes, or None when the header is missing or not a positive integer.
+    Uses: _stream_download so the progress callback can show a total.
+    Limitations: a missing header leaves the total unknown. The body is not read.
+    """
+
     headers = getattr(response, "headers", None)
     getter = getattr(headers, "get", None)
     if not callable(getter):
@@ -230,6 +296,14 @@ class Detection:
     """One subject box in preview-pixel coordinates: x, y, width, height."""
 
     def __init__(self, box: tuple[int, int, int, int], label: str, confidence: float) -> None:
+        """Store one animal box in preview pixels.
+
+        Inputs: box, x, y, width, and height; label, the class name; confidence, the detector score.
+        Output: none. The three fields are stored on the instance.
+        Uses: YoloSubjectDetector when it returns the best animal in a preview.
+        Limitations: the box is not clipped here. Coordinates are preview pixels on the 1024 px analysis image, not the original RAW.
+        """
+
         self.box = box
         self.label = label
         self.confidence = confidence
@@ -237,11 +311,23 @@ class Detection:
 
 class SubjectDetector(Protocol):
     def detect(self, image: np.ndarray) -> Detection | None:
-        """Return the best animal box, or None when the frame has no subject."""
+        """Return the best animal box, or None when the frame has no subject.
+
+        Inputs: image, one BGR preview.
+        Output: a Detection, or None.
+        Uses: the scan pipeline when a detector has no detect_many method, and YoloSubjectDetector.detect.
+        Limitations: a detector is not shared across threads. The caller runs detection on one thread. No animal means the frame keeps full-frame sharpness.
+        """
 
 
 def preferred_device() -> str:
-    """Pick MPS on Apple Silicon, CUDA on NVIDIA, otherwise CPU."""
+    """Pick MPS on Apple Silicon, CUDA on NVIDIA, otherwise CPU.
+
+    Inputs: none.
+    Output: `mps`, `cuda`, or `cpu`.
+    Uses: load_yolo_detector when the caller does not pass a device.
+    Limitations: a missing torch install, or a failed device query, returns cpu. The choice belongs to one detector and is not shared across threads.
+    """
 
     try:
         import torch
@@ -260,14 +346,26 @@ def preferred_device() -> str:
 
 
 def make_subject_key(model_path: Path) -> str:
-    """Cache key that changes when the model file changes."""
+    """Cache key that changes when the model file changes.
+
+    Inputs: model_path, the weights file already on disk.
+    Output: a string of the resolved path, the mtime in nanoseconds, and the size.
+    Uses: the scan cache so a replaced weights file is not scored from old rows.
+    Limitations: the file must exist so stat can run. This does not load the model. Eye scoring appends its own suffix later, in the pipeline.
+    """
 
     stat = model_path.stat()
     return f"{model_path.resolve()}|{stat.st_mtime_ns}|{stat.st_size}"
 
 
 def load_yolo_detector(model_path: Path, device: str | None = None) -> SubjectDetector:
-    """Load a YOLO weights file that is already on disk. This does not download anything."""
+    """Load a YOLO weights file that is already on disk. This does not download anything.
+
+    Inputs: model_path, the .pt file; device, an optional torch device. preferred_device is used when device is omitted.
+    Output: a YoloSubjectDetector bound to that file and device.
+    Uses: analyze_folder when subject scoring is on and no detector was passed in.
+    Limitations: a missing file raises FileNotFoundError, and a missing ultralytics install raises ImportError. The weights are Ultralytics YOLO files under the AGPL-3.0 license, separate from Outburst. The returned detector must stay on one thread. Device order is MPS, then CUDA, then CPU.
+    """
 
     if not model_path.is_file():
         raise FileNotFoundError(f"Subject model not found: {model_path}")
@@ -286,17 +384,39 @@ class YoloSubjectDetector:
     """Ultralytics YOLO wrapper limited to animal and bird classes."""
 
     def __init__(self, model: object, device: str) -> None:
+        """Keep one loaded YOLO model and the device it runs on.
+
+        Inputs: model, an ultralytics YOLO instance; device, `mps`, `cuda`, or `cpu`.
+        Output: none. The model and device are stored on the instance.
+        Uses: load_yolo_detector.
+        Limitations: the instance is not shared across threads. Loading it does not download weights. The Ultralytics AGPL-3.0 license applies to the model.
+        """
+
         self._model = model
         self.device = device
 
     def detect(self, image: np.ndarray) -> Detection | None:
+        """Detect the animal in one preview by running a one-image batch.
+
+        Inputs: image, a BGR preview.
+        Output: the Detection for that image, or None when the frame has no animal.
+        Uses: callers that ask for a single frame, including the pipeline fallback.
+        Limitations: the call goes through detect_many on this same thread. The model is not shared across threads.
+        """
+
         found = self.detect_many([image])
         if not found:
             return None
         return found[0]
 
     def detect_many(self, images: list[np.ndarray]) -> list[Detection | None]:
-        """Score a small batch on this one model. Callers keep this on one thread."""
+        """Score a small batch on this one model. Callers keep this on one thread.
+
+        Inputs: images, BGR previews in batch order.
+        Output: one Detection or None per image, in the same order. An empty input returns an empty list.
+        Uses: the scan pipeline, which calls this on the coordinating thread.
+        Limitations: the model is not shared across threads. Images are converted to RGB and predicted at imgsz 640 on this detector's device. Only COCO animal and bird classes are kept. A short result list is padded with None.
+        """
 
         if not images:
             return []
@@ -314,6 +434,14 @@ class YoloSubjectDetector:
 
 
 def _best_animal(result: object) -> Detection | None:
+    """Pick the highest-confidence animal or bird box from one YOLO result.
+
+    Inputs: result, one Ultralytics prediction.
+    Output: a Detection in preview pixels, or None when no animal class is present.
+    Uses: detect_many.
+    Limitations: classes outside the COCO animal and bird set are ignored. The box is the highest confidence, not the largest area.
+    """
+
     boxes = getattr(result, "boxes", None)
     if boxes is None or len(boxes) == 0:
         return None
@@ -338,6 +466,14 @@ def _best_animal(result: object) -> Detection | None:
 
 
 def _as_numpy(value: object) -> np.ndarray:
+    """Copy a detector tensor onto a NumPy array.
+
+    Inputs: value, a tensor or an array-like box field.
+    Output: a NumPy array. A cpu method is called first when it exists.
+    Uses: _best_animal so MPS or CUDA boxes can be read as pixels.
+    Limitations: this moves values to the CPU for reading. It does not run the model.
+    """
+
     cpu = getattr(value, "cpu", None)
     if callable(cpu):
         value = cpu()

@@ -56,7 +56,13 @@ def analyze_folder(
     progress: ProgressCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> Library:
-    """Score every supported photograph in `folder` and group them into bursts."""
+    """Score every supported photograph in `folder` and group them into bursts.
+
+    Inputs: folder, the directory to scan; recursive, whether subfolders are included; threshold, the burst gap in seconds; weights, the sharpness blend; cache_dir, an optional cache location; subject_model, an optional weights path; detector, an optional already-loaded detector; eye_scoring, whether to measure eyes; progress, an optional count callback; should_cancel, an optional cancel check.
+    Output: a Library of analyses, bursts, and warnings.
+    Uses: the window's scan.
+    Limitations: photographs are opened for reading only. Previews are an embedded JPEG or a paired JPEG, with the long edge resized to 1024 px, and there is no demosaic. The subject model is not shared across threads. Cache rows are written on this coordinating thread. Consecutive frames share a burst only while the gap is strictly less than threshold. Cancel raises CancelledError.
+    """
 
     weights = (weights or Weights()).clamped()
     folder = folder.expanduser().resolve()
@@ -153,7 +159,13 @@ def analyze_folder(
 
 
 def with_weights(library: Library, weights: Weights) -> Library:
-    """Recompute composite scores from cached measurements."""
+    """Recompute composite scores from cached measurements.
+
+    Inputs: library, an existing scan; weights, the new sharpness, exposure, and center mix.
+    Output: a library with the same frames and bursts and new composite scores.
+    Uses: the sharpness, exposure, and center sliders.
+    Limitations: measurements are not reread from the photographs. A frame with no metrics gets a None composite.
+    """
 
     weights = weights.clamped()
     analyses = tuple(_retarget(item, weights) for item in library.analyses)
@@ -161,7 +173,13 @@ def with_weights(library: Library, weights: Weights) -> Library:
 
 
 def with_threshold(library: Library, threshold: float) -> Library:
-    """Regroup the same frames under a new gap threshold."""
+    """Regroup the same frames under a new gap threshold.
+
+    Inputs: library, an existing scan; threshold, the new gap in seconds.
+    Output: a library with the same analyses and new bursts.
+    Uses: the burst-gap control.
+    Limitations: frames are not reread. Consecutive frames stay together only while the gap is strictly less than the threshold. A frame with no capture time stays in its own burst.
+    """
 
     bursts = tuple(group_frames([item.frame for item in library.analyses], threshold))
     return replace(library, bursts=bursts, threshold=float(threshold))
@@ -178,6 +196,14 @@ def _score_all(
     progress: ProgressCallback | None,
     should_cancel: Callable[[], bool] | None,
 ) -> tuple[list[FrameAnalysis], int]:
+    """Reuse cache hits and measure the rest, preserving folder order.
+
+    Inputs: files, the scanned photographs; cache, the score cache or None; weights, the current blend; detector, an optional subject detector; subject_key, the cache identity for the model and eye setting; eye_scoring, whether eyes are measured; progress and should_cancel, optional callbacks.
+    Output: analyses in file order, and the count of frames whose subject detection failed.
+    Uses: analyze_folder.
+    Limitations: cache rows are read here. New cache rows are written later on the coordinating thread, not on the preview workers. Photographs are not opened for writing.
+    """
+
     cached_rows: dict[Path, FrameAnalysis] = {}
     pending: list[ScannedFile] = []
     total = len(files)
@@ -237,22 +263,52 @@ def _measure_pending(
     total: int,
     should_cancel: Callable[[], bool] | None,
 ) -> dict[Path, tuple[FrameAnalysis, int]]:
-    """Score cache misses. Preview work uses a small pool. The cache is written here."""
+    """Score cache misses. Preview work uses a small pool. The cache is written here.
+
+    Inputs: pending, the cache misses; capture_info, clocks keyed by path; cache, weights, detector, subject_key, and eye_scoring, the measurement settings; progress, done_offset, and total, the status line; should_cancel, an optional cancel check.
+    Output: a dict from path to the analysis and a detection-failure count of 0 or 1.
+    Uses: _score_all for files that were not in the cache.
+    Limitations: without a detector, workers score previews and persist runs on this thread. With a detector, the model stays on this thread. Cache rows are written in persist, not on the workers. Originals are not written.
+    """
 
     found: dict[Path, tuple[FrameAnalysis, int]] = {}
 
     def persist(index: int, pair: tuple[FrameAnalysis, int]) -> None:
+        """Store one finished analysis in the cache and in the result map.
+
+        Inputs: index, the position in pending; pair, the analysis and its detection-failure count.
+        Output: none. The cache row is written and the pair is stored under the frame path.
+        Uses: _measure_pending. The ordered pool and the detector loop call this on the coordinating thread.
+        Limitations: cache writes happen here, not on a worker thread. A missing cache, or an analysis with no metrics or preview files, is not stored. The photograph is not written.
+        """
+
         analysis, _failed_count = pair
         _store_analysis(cache, analysis, subject_key)
         found[analysis.frame.path] = pair
         _report(progress, done_offset + index + 1, total, f"Scored {pending[index].path.name}")
 
     def cancel() -> None:
+        """Stop the measurement when the photographer has cancelled.
+
+        Inputs: none. The enclosing should_cancel callback is read.
+        Output: none. CancelledError is raised when the callback returns true.
+        Uses: the preview pool and the detector loop between batches.
+        Limitations: the check runs on the coordinating thread. It does not roll back cache rows already written.
+        """
+
         _check_cancel(should_cancel)
 
     if detector is None:
 
         def score_at(index: int) -> tuple[FrameAnalysis, int]:
+            """Load and score one cache miss when subject detection is off.
+
+            Inputs: index, the position in pending.
+            Output: the analysis and a detection-failure count of 0.
+            Uses: _measure_pending. A preview worker calls this.
+            Limitations: no subject model runs on this call. The preview is an embedded or paired JPEG resized to a 1024 px long edge, with no demosaic. The SQLite cache row is written later on the coordinating thread. Eye sharpness is None when the eye is smaller than 16 px.
+            """
+
             scanned = pending[index]
             return _score_loaded(
                 scanned,
@@ -312,6 +368,11 @@ def _measure_with_detector(
 
     The model is not shared across threads. A batch is a few frames. Decode of
     the next frames keeps running while that batch is predicted.
+
+    Inputs: pending, the cache misses; capture_info, clocks; cache, weights, detector, subject_key, and eye_scoring, the measurement settings; persist, the coordinating-thread callback that stores one result; cancel, the cancel check.
+    Output: none. Results are delivered through persist in file order.
+    Uses: _measure_pending when a subject detector is active.
+    Limitations: detect_many runs on this caller thread, in batches of up to four frames. The model is not shared across threads. Cache rows stay in persist. Photographs are not written, and previews are not demosaiced.
     """
 
     total = len(pending)
@@ -326,6 +387,14 @@ def _measure_with_detector(
     measure_flight: dict[Future[tuple[FrameAnalysis, int]], int] = {}
 
     def fill_decodes() -> int:
+        """Submit preview decodes until the worker cap or the look-ahead cap is reached.
+
+        Inputs: none. The enclosing pool, pending list, and cursors are used.
+        Output: how many decode tasks were submitted on this call.
+        Uses: _measure_with_detector so the next frames decode while a batch is predicted.
+        Limitations: at most the preview-worker count is in flight, and look-ahead stays within that count plus SUBJECT_BATCH of the last persisted frame. Decodes do not write the cache and do not run the model.
+        """
+
         nonlocal next_decode
         submitted = 0
         while (
@@ -404,6 +473,14 @@ def _next_detect_group(
     total: int,
     force: bool,
 ) -> tuple[str, list[int]] | None:
+    """Take the next ready frames for one subject batch, or a single decode failure.
+
+    Inputs: decoded, loaded frames by index; start, the next index to detect; total, the number of pending files; force, whether every decode has already finished.
+    Output: an error pair for one index when that frame has no preview, a batch pair when a full batch is ready or force drains a short tail, or None when the next frame is not ready.
+    Uses: _measure_with_detector.
+    Limitations: a batch stops at SUBJECT_BATCH frames or at the first frame that failed to decode. A partial batch waits unless force is set.
+    """
+
     if start not in decoded:
         return None
     if decoded[start].image is None:
@@ -421,6 +498,14 @@ def _next_detect_group(
 
 
 def _collect(in_flight: dict[Future, int], destination: dict) -> None:
+    """Move finished futures into a result dict without waiting.
+
+    Inputs: in_flight, futures mapped to their indexes; destination, the dict that receives results.
+    Output: none. Completed futures are popped and their results stored by index.
+    Uses: the detector loop for both decode and score futures.
+    Limitations: the wait timeout is zero, so only futures that are already done are collected. A failed future raises when its result is read.
+    """
+
     if not in_flight:
         return
     done, _pending = wait(set(in_flight), timeout=0, return_when=FIRST_COMPLETED)
@@ -433,6 +518,14 @@ def _detect_batch(
     detector: SubjectDetector,
     images: list[np.ndarray | None],
 ) -> tuple[list[object], list[int]]:
+    """Run subject detection for one batch on the caller thread.
+
+    Inputs: detector, the subject model; images, the BGR previews. A None entry is rejected.
+    Output: one box or None per image, and a matching list of 0 or 1 failure flags.
+    Uses: _measure_with_detector.
+    Limitations: detect_many is preferred and runs on this thread. The model is not shared across threads. A detection exception marks every frame in that batch as failed and returns no boxes. Those frames then use full-frame sharpness.
+    """
+
     ready = [image for image in images if image is not None]
     if len(ready) != len(images):
         raise RuntimeError("A frame in the subject batch has no preview")
@@ -462,6 +555,14 @@ def _detect_batch(
 
 
 def _load_scanned(scanned: ScannedFile, info: object) -> _Loaded:
+    """Build the frame record and decode its analysis preview.
+
+    Inputs: scanned, the file from the folder scan; info, the capture-time record, or any other object.
+    Output: a loaded frame with the image, or with an error string when the preview cannot be read.
+    Uses: the preview workers.
+    Limitations: the photograph is opened for reading only. The preview is an embedded JPEG or a paired JPEG, then resized to a 1024 px long edge. There is no demosaic.
+    """
+
     frame = _frame_for(scanned, info)
     try:
         image = _load_analysis_image(scanned)
@@ -484,6 +585,14 @@ def _score_loaded(
     detection: object,
     detection_failures: int,
 ) -> tuple[FrameAnalysis, int]:
+    """Decode one file and score it with a detection result that is already known.
+
+    Inputs: scanned and info, the file and its capture clock; cache, weights, subject_key, and eye_scoring, the measurement settings; detection, an optional subject box; detection_failures, 0 or 1.
+    Output: the analysis and the same detection-failure count.
+    Uses: score_at when subject detection is off, passing an empty detection.
+    Limitations: this does not write the SQLite cache. The preview is not demosaiced. Eye sharpness stays None when the eye is under 16 px.
+    """
+
     loaded = _load_scanned(scanned, info)
     return _score_image(
         loaded,
@@ -507,6 +616,14 @@ def _score_image(
     subject_key: str,
     eye_scoring: bool,
 ) -> tuple[FrameAnalysis, int]:
+    """Measure one decoded preview and write its cache JPEGs.
+
+    Inputs: loaded, the frame and any decode error; image, the BGR preview or None; detection, an optional box with label and confidence; detection_failures, 0 or 1; cache, weights, subject_key, and eye_scoring, the measurement settings.
+    Output: a FrameAnalysis and the detection-failure count. A missing image becomes a failed analysis.
+    Uses: the preview workers after a subject batch, and the path with no detector.
+    Limitations: preview JPEGs go into the cache directory, not beside the photograph. Eye scoring is classical, and sharpness is None when the eye is smaller than MIN_RATED_DIAMETER (16 px). There is no demosaic. The SQLite cache row is written later on the coordinating thread.
+    """
+
     if image is None:
         return _failed(loaded.frame, loaded.error or "No preview"), detection_failures
     try:
@@ -549,6 +666,14 @@ def _score_image(
 
 
 def _frame_for(scanned: ScannedFile, info: object) -> Frame:
+    """Build a Frame from a scanned file and its capture-time record.
+
+    Inputs: scanned, the path, kind, size, and mtime; info, an object with captured_at, source, and camera, or anything else.
+    Output: a Frame. A missing or non-datetime clock stays None, and the timestamp source defaults to `missing`.
+    Uses: preview loading before a frame is scored.
+    Limitations: the file is not opened. Camera is kept only when it is a string.
+    """
+
     captured_at = getattr(info, "captured_at", None)
     source = getattr(info, "source", None) or "missing"
     camera = getattr(info, "camera", None)
@@ -568,6 +693,14 @@ def _frame_for(scanned: ScannedFile, info: object) -> Frame:
 
 
 def _store_analysis(cache: Cache | None, analysis: FrameAnalysis, subject_key: str) -> None:
+    """Write one scored frame into the SQLite cache.
+
+    Inputs: cache, the cache or None; analysis, the scored frame; subject_key, the model and eye identity.
+    Output: none. A complete analysis is stored. Incomplete rows are skipped.
+    Uses: persist, on the coordinating thread.
+    Limitations: nothing is written when the cache is missing or the analysis has no metrics or preview paths. This is not called from a worker thread. The original photograph is not written.
+    """
+
     if cache is None or analysis.metrics is None or analysis.preview_path is None or analysis.thumb_path is None:
         return
     frame = analysis.frame
@@ -586,6 +719,14 @@ def _store_analysis(cache: Cache | None, analysis: FrameAnalysis, subject_key: s
 
 
 def _load_analysis_image(scanned: ScannedFile):
+    """Decode a preview and shrink its long edge to 1024 px.
+
+    Inputs: scanned, the photograph and its optional paired JPEG.
+    Output: the BGR analysis image.
+    Uses: _load_scanned.
+    Limitations: there is no demosaic. A paired JPEG is tried first. If that decode fails, the embedded RAW preview is tried. The original is opened for reading only.
+    """
+
     try:
         blob = extract_preview_bytes(scanned.path, scanned.paired_jpeg)
         image = decode_image(blob)
@@ -604,6 +745,14 @@ def _write_previews(
     subject_key: str,
     image,
 ) -> tuple[Path | None, Path | None]:
+    """Write the analysis JPEG and the 360 px thumbnail into the cache directory.
+
+    Inputs: cache, the cache or None; scanned, the source identity; subject_key, part of the file digest; image, the analysis preview.
+    Output: the preview path and thumbnail path, or None and None when there is no cache.
+    Uses: _score_image after a frame is measured.
+    Limitations: these are cache JPEGs, not the original photograph, which is never opened for writing. The SQLite cache row is a separate write on the coordinating thread.
+    """
+
     if cache is None:
         return None, None
     digest = hashlib.sha1(
@@ -622,6 +771,14 @@ def _from_cache(
     weights: Weights,
     subject_key: str,
 ) -> FrameAnalysis | None:
+    """Rebuild an analysis from a cache row when the file identity still matches.
+
+    Inputs: cache, the cache or None; scanned, the current path, size, and mtime; weights, the blend used to recompute the composite; subject_key, the model and eye identity.
+    Output: a FrameAnalysis, or None when the cache is missing or has no matching row.
+    Uses: _score_all before a file is measured again.
+    Limitations: the photograph is not reread. A changed size, mtime, or subject key misses. The composite is recomputed from the stored metrics.
+    """
+
     if cache is None:
         return None
     record = cache.get(scanned.path, scanned.mtime_ns, scanned.size, subject_key)
@@ -648,6 +805,14 @@ def _from_cache(
 
 
 def _failed(frame: Frame, message: str) -> FrameAnalysis:
+    """Build an analysis that records why a preview could not be scored.
+
+    Inputs: frame, the photograph; message, the error text.
+    Output: a FrameAnalysis with no metrics, composite, or preview paths.
+    Uses: the scoring path when decode or measurement fails.
+    Limitations: the frame stays in the library so grouping can still place it. Nothing is written to the photograph.
+    """
+
     return FrameAnalysis(
         frame=frame,
         metrics=None,
@@ -659,16 +824,40 @@ def _failed(frame: Frame, message: str) -> FrameAnalysis:
 
 
 def _retarget(item: FrameAnalysis, weights: Weights) -> FrameAnalysis:
+    """Replace one frame's composite with the score for a new weight mix.
+
+    Inputs: item, an existing analysis; weights, the weights to apply.
+    Output: the same analysis with a new composite, or a None composite when metrics are missing.
+    Uses: with_weights.
+    Limitations: measurements are not recomputed and the photograph is not read.
+    """
+
     if item.metrics is None:
         return replace(item, composite=None)
     return replace(item, composite=composite_score(item.metrics, weights))
 
 
 def _check_cancel(should_cancel: Callable[[], bool] | None) -> None:
+    """Raise when the photographer has cancelled the scan.
+
+    Inputs: should_cancel, a callback, or None.
+    Output: none. CancelledError is raised when the callback returns true.
+    Uses: the cache walk and the measurement loops.
+    Limitations: a missing callback does nothing. Work already finished is not undone.
+    """
+
     if should_cancel is not None and should_cancel():
         raise CancelledError("Scan cancelled")
 
 
 def _report(progress: ProgressCallback | None, done: int, total: int, message: str) -> None:
+    """Forward a progress line when a callback was provided.
+
+    Inputs: progress, the callback or None; done and total, the counts; message, the status text.
+    Output: none. The callback is called only when it is set.
+    Uses: analyze_folder and the scoring loops.
+    Limitations: this does not write a file and does not decide whether the scan is cancelled.
+    """
+
     if progress is not None:
         progress(done, total, message)
