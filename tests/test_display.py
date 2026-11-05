@@ -1,6 +1,6 @@
 """Review-window wording.
 
-``test_filmstrip_order_keeps_time_and_ranks_score`` checks Time and Score order. The other tests check hidden short bursts, escaped filenames, badges, score captions, and obvious misses.
+``test_filmstrip_order_keeps_time_and_ranks_score`` checks Time and Score order. The other tests check hidden short bursts, the minimum-score filter, escaped filenames, badges, score captions, and obvious misses.
 """
 
 from __future__ import annotations
@@ -13,10 +13,12 @@ from outburst.display import (
     detected_eye_count,
     filmstrip_order,
     frame_info_html,
+    frame_meets_minimum_score,
     obvious_misses,
     score_caption,
     thumb_badge,
     visible_bursts,
+    visible_frame_indexes,
 )
 from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
 
@@ -41,6 +43,32 @@ def test_bursts_shorter_than_the_minimum_stay_hidden() -> None:
     assert visible_bursts([pair, single], minimum_frames=2) == (pair,)
     assert visible_bursts([pair, single], minimum_frames=1) == (pair, single)
     assert visible_bursts([pair, single], minimum_frames=3) == ()
+
+
+def test_minimum_score_hides_frames_and_bursts_below_the_cutoff() -> None:
+    when = datetime(2024, 6, 1, 12, 0, 0)
+    strong = Frame(Path("strong.jpg"), "jpeg", when, "exif", None, 1, 1)
+    weak = Frame(Path("weak.jpg"), "jpeg", when, "exif", None, 1, 2)
+    low = Frame(Path("low.jpg"), "jpeg", when, "exif", None, 1, 3)
+    missing = Frame(Path("missing.jpg"), "jpeg", when, "exif", None, 1, 4)
+    metrics = Metrics(10, 10, 1, 0.5, 0.0, 0.0)
+    by_path = {
+        strong.path: FrameAnalysis(strong, metrics, 0.80, None, None, None),
+        weak.path: FrameAnalysis(weak, metrics, 0.494, None, None, None),
+        low.path: FrameAnalysis(low, metrics, 0.20, None, None, None),
+        missing.path: FrameAnalysis(missing, None, None, None, None, None),
+    }
+    mixed = Burst("burst-001", (strong, weak))
+    soft = Burst("burst-002", (low, missing))
+    assert frame_meets_minimum_score(0.80, 50) is True
+    assert frame_meets_minimum_score(0.50, 50) is True
+    assert frame_meets_minimum_score(0.494, 50) is False
+    assert frame_meets_minimum_score(None, 50) is False
+    assert visible_frame_indexes(mixed.frames, by_path, minimum_score=None) == [0, 1]
+    assert visible_frame_indexes(mixed.frames, by_path, minimum_score=50) == [0]
+    assert visible_bursts([mixed, soft], minimum_frames=1, by_path=by_path, minimum_score=50) == (mixed,)
+    assert "1 of 2 frames" in burst_list_text(mixed, by_path, {}, shown_frames=1)
+    assert "2 frames" in burst_list_text(mixed, by_path, {})
 
 
 def test_html_escapes_filenames_and_marks_the_recommendation() -> None:
