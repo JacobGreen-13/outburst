@@ -583,16 +583,17 @@ class ImageViewer(QFrame):
         caption: str,
         *,
         circle: tuple[int, int, int] | None = None,
+        focus: tuple[int, int] | None = None,
         keeper: bool = False,
         rejected: bool = False,
     ) -> None:
         """
         Show the other frame in the compare pane.
 
-        Inputs: preview, the embedded preview path or None; box, the subject rectangle or None; caption, the line above the pane; circle, the eye circle or None; keeper and rejected, which badge to draw.
+        Inputs: preview, the embedded preview path or None; box, the subject rectangle or None; caption, the line above the pane; circle, the eye circle or None; focus, a zoom center, or None to use the circle then the box; keeper and rejected, which badge to draw.
         Output: no return value. The caption, badge, and image update. A missing or unreadable preview shows "No preview for this frame".
         Uses: the compare pane.
-        Limitations: zoom uses the embedded preview. A rejected badge is drawn ahead of a keeper badge. The zoom centers on the eye circle when one is given, otherwise on the subject box.
+        Limitations: zoom uses the embedded preview. A rejected badge is drawn ahead of a keeper badge. A missing focus centers on the eye circle when one is given, otherwise on the subject box. A box or circle that is omitted is not drawn.
         """
         self.partner_caption.setText(caption)
         pixmap = QPixmap(str(preview)) if preview is not None else QPixmap()
@@ -602,7 +603,8 @@ class ImageViewer(QFrame):
             self.partner.set_badge("KEEPER", "#146b45")
         else:
             self.partner.set_badge("", "#146b45")
-        focus = (circle[0], circle[1]) if circle is not None else _box_center(box)
+        if focus is None:
+            focus = (circle[0], circle[1]) if circle is not None else _box_center(box)
         identity = "" if preview is None else str(preview)
         if pixmap.isNull():
             self.partner.set_source(QPixmap(), identity=identity)
@@ -635,14 +637,15 @@ class ImageViewer(QFrame):
         rejected: bool = False,
         stars: int | None = None,
         circle: tuple[int, int, int] | None = None,
+        focus: tuple[int, int] | None = None,
     ) -> None:
         """
         Show one frame in the main preview with its info and marks.
 
-        Inputs: preview, the embedded preview path or None; box, the subject rectangle or None; html, the info panel; border, the frame color; keeper, rejected, and stars, the marks; circle, the eye circle or None.
+        Inputs: preview, the embedded preview path or None; box, the subject rectangle or None; html, the info panel; border, the frame color; keeper, rejected, and stars, the marks; circle, the eye circle or None; focus, a zoom center, or None to use the circle then the box.
         Output: no return value. The preview, info, border, and buttons update. A missing or unreadable preview shows "No preview for this frame". The mark buttons are enabled.
         Uses: the frame currently under review.
-        Limitations: zoom uses the embedded preview. A rejected badge is drawn ahead of a keeper badge. The zoom centers on the eye circle when one is given, otherwise on the subject box.
+        Limitations: zoom uses the embedded preview. A rejected badge is drawn ahead of a keeper badge. A missing focus centers on the eye circle when one is given, otherwise on the subject box. A box or circle that is omitted is not drawn.
         """
         pixmap = QPixmap(str(preview)) if preview is not None else QPixmap()
         if rejected:
@@ -651,7 +654,8 @@ class ImageViewer(QFrame):
             self.preview.set_badge("KEEPER", "#146b45")
         else:
             self.preview.set_badge("", "#146b45")
-        focus = (circle[0], circle[1]) if circle is not None else _box_center(box)
+        if focus is None:
+            focus = (circle[0], circle[1]) if circle is not None else _box_center(box)
         identity = "" if preview is None else str(preview)
         if pixmap.isNull():
             self.preview.set_source(QPixmap(), identity=identity)
