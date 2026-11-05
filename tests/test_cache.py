@@ -24,6 +24,7 @@ def _metrics() -> Metrics:
         subject_box=(1, 2, 3, 4),
         subject_label="bird",
         subject_confidence=0.91,
+        critical_sharpness=77,
     )
 
 
@@ -53,6 +54,7 @@ def test_metrics_and_decisions_round_trip(tmp_path: Path) -> None:
     assert record.camera == "TestCam"
     assert record.metrics.subject_box == (1, 2, 3, 4)
     assert record.metrics.subject_label == "bird"
+    assert record.metrics.critical_sharpness == 77
     assert record.preview_path == preview.resolve()
     assert cache.get(photo, 11, 20, "") is None
     assert cache.get(photo, 10, 20, "other-model") is None

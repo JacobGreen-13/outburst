@@ -49,6 +49,7 @@ class Metrics:
     exposure: float
     highlight_clip: float
     shadow_clip: float
+    critical_sharpness: float | None = None
     subject_sharpness: float | None = None
     subject_box: tuple[int, int, int, int] | None = None
     subject_label: str | None = None

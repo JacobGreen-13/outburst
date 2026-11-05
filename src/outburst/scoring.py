@@ -19,10 +19,11 @@ import numpy as np
 from outburst.models import Frame, Metrics, Weights
 
 # Bump this when the measurement formula changes so cached rows are rebuilt.
-SCORE_VERSION = 1
+SCORE_VERSION = 2
 SHARPNESS_SCALE = 300.0
 CENTER_CROP_FRACTION = 0.6
 SUBJECT_BOX_MARGIN = 0.12
+_PEAK_WINDOW_FRACTION = 0.34
 
 
 class Rankable(Protocol):
@@ -49,7 +50,7 @@ def score_bgr(
     if subject_box is not None:
         region = crop_box(image, subject_box, SUBJECT_BOX_MARGIN)
         if region.size > 0 and min(region.shape[0], region.shape[1]) >= 8:
-            subject_sharpness = laplacian_variance(region)
+            subject_sharpness = peak_window_sharpness(region)
     return Metrics(
         sharpness=sharpness,
         center_sharpness=center,
@@ -57,6 +58,7 @@ def score_bgr(
         exposure=exposure,
         highlight_clip=highlight_clip,
         shadow_clip=shadow_clip,
+        critical_sharpness=peak_window_sharpness(center_crop(image, CENTER_CROP_FRACTION)),
         subject_sharpness=subject_sharpness,
         subject_box=subject_box if subject_sharpness is not None else None,
         subject_label=subject_label if subject_sharpness is not None else None,
@@ -108,15 +110,71 @@ def normalize_sharpness(value: float) -> float:
 
 
 def effective_sharpness(metrics: Metrics, weights: Weights) -> float:
-    """The sharpness number that actually feeds the composite score."""
+    """The sharpness number that actually feeds the composite score.
+
+    With subject scoring on, this is the sharpest patch inside the animal.
+    Otherwise the center-weight slider mixes the sharpest patch in the middle
+    of the frame with the full-frame measurement.
+    """
 
     weights = weights.clamped()
     if weights.prefer_subject and metrics.subject_sharpness is not None:
         return float(metrics.subject_sharpness)
-    return float(
-        weights.center_mix * metrics.center_sharpness
-        + (1.0 - weights.center_mix) * metrics.sharpness
+    patch = (
+        metrics.critical_sharpness
+        if metrics.critical_sharpness is not None
+        else metrics.center_sharpness
     )
+    return float(weights.center_mix * patch + (1.0 - weights.center_mix) * metrics.sharpness)
+
+
+def peak_window_sharpness(image: np.ndarray) -> float:
+    """Laplacian variance of the sharpest patch in `image`.
+
+    Nine windows cover the image. The score is mostly the sharpest window,
+    with a little of the next one, so a single bright speck does not decide it.
+    """
+
+    if image.size == 0:
+        return 0.0
+    height, width = image.shape[:2]
+    short = min(height, width)
+    if short < 24:
+        return laplacian_variance(image)
+    window = max(16, min(int(round(short * _PEAK_WINDOW_FRACTION)), short))
+    if window >= short - 1:
+        return laplacian_variance(image)
+
+    def origin(length: int, slot: int) -> int:
+        if slot <= 0:
+            return 0
+        if slot == 1:
+            return max(0, (length - window) // 2)
+        return max(0, length - window)
+
+    samples = [
+        laplacian_variance(image[y0 : y0 + window, x0 : x0 + window])
+        for row in range(3)
+        for col in range(3)
+        for y0 in (origin(height, row),)
+        for x0 in (origin(width, col),)
+    ]
+    samples.sort(reverse=True)
+    return samples[0] * 0.85 + samples[1] * 0.15
+
+
+def focus_peak_bgr(image: np.ndarray) -> np.ndarray:
+    """Paint the strongest edges green so a loupe can show where detail sits."""
+
+    if image.ndim != 3 or image.shape[2] != 3 or image.size == 0:
+        raise ValueError("expected a color image")
+    gray = _gray(image)
+    edges = np.abs(cv2.Laplacian(gray, cv2.CV_32F))
+    cutoff = float(np.percentile(edges, 97))
+    mask = edges >= max(cutoff, 12.0)
+    painted = image.copy()
+    painted[mask] = (80, 255, 120)
+    return painted
 
 
 def composite_score(metrics: Metrics, weights: Weights) -> float:
@@ -136,6 +194,21 @@ def score_percent(composite: float | None) -> str:
     return str(int(round(max(0.0, min(1.0, composite)) * 100)))
 
 
+def _rank_key(frames: Sequence[Frame], by_path: Mapping[Path, Rankable], index: int) -> tuple[float, float, str, str]:
+    frame = frames[index]
+    item = by_path.get(frame.path)
+    composite = None if item is None else item.composite
+    sharpness = None
+    if item is not None and item.metrics is not None:
+        sharpness = item.metrics.sharpness
+    return (
+        -(composite if composite is not None else -1.0),
+        -(sharpness if sharpness is not None else -1.0),
+        frame.path.name.lower(),
+        str(frame.path),
+    )
+
+
 def recommended_offset(frames: Sequence[Frame], by_path: Mapping[Path, Rankable]) -> int:
     """Index of the frame that should be offered as the keeper.
 
@@ -145,22 +218,26 @@ def recommended_offset(frames: Sequence[Frame], by_path: Mapping[Path, Rankable]
 
     if not frames:
         return 0
+    return min(range(len(frames)), key=lambda index: _rank_key(frames, by_path, index))
 
-    def sort_key(index: int) -> tuple[float, float, str, str]:
-        frame = frames[index]
-        item = by_path.get(frame.path)
-        composite = None if item is None else item.composite
-        sharpness = None
-        if item is not None and item.metrics is not None:
-            sharpness = item.metrics.sharpness
-        return (
-            -(composite if composite is not None else -1.0),
-            -(sharpness if sharpness is not None else -1.0),
-            frame.path.name.lower(),
-            str(frame.path),
-        )
 
-    return min(range(len(frames)), key=sort_key)
+def compare_partner_offset(
+    frames: Sequence[Frame],
+    by_path: Mapping[Path, Rankable],
+    current: int,
+) -> int | None:
+    """The other frame to put beside `current`.
+
+    That is the recommended frame, or the next sharpest one when `current`
+    is already the recommendation. A one-frame burst has no partner.
+    """
+
+    if len(frames) < 2 or not 0 <= current < len(frames):
+        return None
+    order = sorted(range(len(frames)), key=lambda index: _rank_key(frames, by_path, index))
+    if current == order[0]:
+        return order[1]
+    return order[0]
 
 
 def center_crop(image: np.ndarray, fraction: float) -> np.ndarray:

@@ -384,6 +384,67 @@ def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monke
     window.close()
 
 
+def test_compare_loupe_and_obvious_misses(qt_app, tmp_path: Path) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from outburst.display import obvious_misses
+    from outburst.gui.main_window import MainWindow
+    from outburst.pipeline import analyze_folder
+    from outburst.scoring import compare_partner_offset
+
+    _isolate_settings(tmp_path / "settings")
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+
+    burst = window._current_burst()
+    assert burst is not None
+    partner = compare_partner_offset(burst.frames, window._by_path, window.current_frame_index)
+    assert partner is not None
+    QTest.keyClick(window, Qt.Key.Key_C)
+    qt_app.processEvents()
+    assert window.viewer.partner_box.isVisible()
+    assert "Next sharpest" in window.viewer.partner_caption.text()
+    QTest.mouseClick(window.viewer.partner, Qt.MouseButton.LeftButton)
+    qt_app.processEvents()
+    assert window.current_frame_index == partner
+    assert "Best in the burst" in window.viewer.partner_caption.text()
+
+    QTest.keyClick(window, Qt.Key.Key_Z)
+    QTest.keyClick(window, Qt.Key.Key_F)
+    qt_app.processEvents()
+    assert window._loupe is True
+    assert window._peaking is True
+    assert window.viewer.hint.isVisible()
+    assert "1:1" in window.viewer.hint.text()
+    assert "Green" in window.viewer.hint.text()
+
+    window._select_frame(0)
+    qt_app.processEvents()
+    burst = window._current_burst()
+    assert burst is not None
+    misses = obvious_misses(burst.frames, window._by_path, window._decisions)
+    assert misses
+    assert written["sharp"] not in misses
+    QTest.keyClick(window, Qt.Key.Key_G)
+    qt_app.processEvents()
+    for path in misses:
+        assert window._decisions[path] == "reject"
+    assert window._decisions[written["sharp"]] == "keep"
+    QTest.keyClick(window, Qt.Key.Key_G)
+    qt_app.processEvents()
+    for path in misses:
+        assert path not in window._decisions
+    assert window._decisions[written["sharp"]] == "keep"
+    window.close()
+    qt_app.processEvents()
+
+
 def test_version_flag() -> None:
     from outburst.main import main
 
