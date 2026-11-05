@@ -150,6 +150,83 @@ def test_forget_folder_drops_measurements_and_keeps_decisions(tmp_path: Path) ->
     cache.close()
 
 
+def test_eye_measurements_round_trip_and_migrate(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "previews").mkdir()
+    (legacy / "thumbs").mkdir()
+    connection = sqlite3.connect(legacy / "outburst.sqlite")
+    connection.executescript(
+        """
+        CREATE TABLE frame_metrics (
+            path TEXT NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            size INTEGER NOT NULL,
+            score_version INTEGER NOT NULL,
+            subject_key TEXT NOT NULL,
+            captured_at TEXT,
+            timestamp_source TEXT,
+            camera TEXT,
+            sharpness REAL,
+            center_sharpness REAL,
+            critical_sharpness REAL,
+            tenengrad REAL,
+            exposure REAL,
+            highlight_clip REAL,
+            shadow_clip REAL,
+            subject_sharpness REAL,
+            subject_confidence REAL,
+            subject_label TEXT,
+            subject_box TEXT,
+            preview_rel TEXT,
+            thumb_rel TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (path, mtime_ns, size, score_version, subject_key)
+        );
+        CREATE TABLE decisions (
+            path TEXT PRIMARY KEY,
+            decision TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            origin TEXT NOT NULL DEFAULT 'user'
+        );
+        CREATE TABLE ratings (
+            path TEXT PRIMARY KEY,
+            stars INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    cache = Cache(legacy)
+    photo = tmp_path / "eye.jpg"
+    preview = legacy / "previews" / "eye.jpg"
+    thumb = legacy / "thumbs" / "eye.jpg"
+    preview.write_bytes(b"preview")
+    thumb.write_bytes(b"thumb")
+    cache.put(
+        photo,
+        10,
+        20,
+        "eye",
+        captured_at=None,
+        timestamp_source="missing",
+        camera=None,
+        metrics=replace(_metrics(), eye_sharpness=18.5, eye_center=(40, 50), eye_radius=11),
+        preview_path=preview,
+        thumb_path=thumb,
+    )
+    record = cache.get(photo, 10, 20, "eye")
+    assert record is not None
+    assert record.metrics.eye_sharpness == 18.5
+    assert record.metrics.eye_center == (40, 50)
+    assert record.metrics.eye_radius == 11
+    cache.close()
+
+
 def test_legacy_decisions_without_origin_count_as_user_marks(tmp_path: Path) -> None:
     photo = tmp_path / "outside.jpg"
     legacy = tmp_path / "legacy"

@@ -29,6 +29,7 @@ class AnalyzeWorker(QThread):
         weights: Weights,
         cache_dir: Path,
         subject_model: Path | None,
+        eye_scoring: bool = False,
     ) -> None:
         super().__init__()
         self._folder = folder
@@ -37,6 +38,7 @@ class AnalyzeWorker(QThread):
         self._weights = weights
         self._cache_dir = cache_dir
         self._subject_model = subject_model
+        self._eye_scoring = eye_scoring
         self._abort = False
 
     def abort(self) -> None:
@@ -51,6 +53,7 @@ class AnalyzeWorker(QThread):
                 weights=self._weights,
                 cache_dir=self._cache_dir,
                 subject_model=self._subject_model,
+                eye_scoring=self._eye_scoring,
                 progress=self._on_progress,
                 should_cancel=lambda: self._abort,
             )
