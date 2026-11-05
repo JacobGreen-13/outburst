@@ -21,7 +21,18 @@ from outburst.models import Burst, Frame, FrameAnalysis, Library
 from outburst.scoring import recommended_offset
 
 _XMP_NS = "http://ns.adobe.com/xap/1.0/"
+_XMPDM_NS = "http://ns.adobe.com/xmp/1.0/DynamicMedia/"
+_MICROSOFT_PHOTO_NS = "http://ns.microsoft.com/photo/1.0/"
+_DIGIKAM_NS = "http://www.digikam.org/ns/1.0/"
 _OUTBURST_NS = "https://outburst.app/ns/1.0/"
+_MICROSOFT_STAR_PERCENT = {0: "0", 1: "1", 2: "25", 3: "50", 4: "75", 5: "99"}
+_XMP_NAMESPACES = (
+    ("xmlns:xmp", _XMP_NS),
+    ("xmlns:xmpDM", _XMPDM_NS),
+    ("xmlns:MicrosoftPhoto", _MICROSOFT_PHOTO_NS),
+    ("xmlns:digiKam", _DIGIKAM_NS),
+    ("xmlns:outburst", _OUTBURST_NS),
+)
 
 
 class SidecarError(RuntimeError):
@@ -107,10 +118,61 @@ def export_keepers(
     return results
 
 
+def sidecar_rating(decision: str | None, stars: int | None) -> int:
+    """The ``xmp:Rating`` value for one frame.
+
+    A rating the photographer set is written as that many stars, from 0 to 5.
+    With no rating of their own, a pick is 5 stars and a reject is -1 so apps
+    that only read ``xmp:Rating`` still see the reject. A reject that also has
+    stars keeps those stars here; the reject flag is ``xmpDM:pick``.
+    """
+
+    if stars is not None:
+        if decision == "reject" and stars == 0:
+            return -1
+        return stars
+    if decision == "keep":
+        return 5
+    if decision == "reject":
+        return -1
+    return 0
+
+
+def review_xmp_fields(decision: str | None, stars: int | None) -> dict[str, str | None]:
+    """Star rating and pick flag in the XMP fields other editors already read.
+
+    ``xmp:Rating`` is the star rating (``-1`` only for a reject that has no stars).
+    ``xmpDM:pick`` is 1 for a pick, -1 for a reject, and 0 when the frame is unflagged.
+    ``xmpDM:good`` is the Lightroom companion of that flag. ``MicrosoftPhoto:Rating``
+    is the same stars as a percent, which Windows and some catalogs read.
+    ``digiKam:PickLabel`` is 3 for a pick, 1 for a reject, and 0 otherwise.
+    A value of None removes that attribute from an existing sidecar.
+    """
+
+    if stars is not None and stars not in range(6):
+        raise ValueError(f"Star rating must be 0 through 5, not {stars}")
+    rating = sidecar_rating(decision, stars)
+    star_count = stars if stars is not None else (5 if decision == "keep" else 0)
+    if decision == "keep":
+        pick, good, digikam = "1", "true", "3"
+    elif decision == "reject":
+        pick, good, digikam = "-1", "false", "1"
+    else:
+        pick, good, digikam = "0", None, "0"
+    return {
+        "xmp:Rating": str(rating),
+        "MicrosoftPhoto:Rating": _MICROSOFT_STAR_PERCENT[star_count],
+        "xmpDM:pick": pick,
+        "xmpDM:good": good,
+        "digiKam:PickLabel": digikam,
+    }
+
+
 def write_library_sidecars(
     library: Library,
     decisions: Mapping[Path, str],
     *,
+    stars: Mapping[Path, int] | None = None,
     minimum_frames: int = 2,
 ) -> tuple[list[Path], list[str]]:
     """Write one XMP sidecar per frame. Returns written paths and warning strings."""
@@ -137,17 +199,14 @@ def write_library_sidecars(
 
     written: list[Path] = []
     warnings: list[str] = []
+    star_ratings = {} if stars is None else stars
     for analysis in library.analyses:
         frame = analysis.frame
         decision = decisions.get(frame.path)
-        if decision == "reject":
-            rating = -1
-        elif frame.path in keepers:
-            rating = 5
-        else:
-            rating = 0
-        fields = {
-            "xmp:Rating": str(rating),
+        # A keeper in a hidden short burst is not saved, so the sidecar does not flag it as a pick.
+        exported = None if frame.path not in keepers and decision == "keep" else decision
+        fields: dict[str, str | None] = {
+            **review_xmp_fields(exported, star_ratings.get(frame.path)),
             "outburst:Score": "" if analysis.composite is None else f"{analysis.composite:.4f}",
             "outburst:ScorePercent": ""
             if analysis.composite is None
@@ -168,7 +227,7 @@ def write_library_sidecars(
     return written, warnings
 
 
-def write_xmp_sidecar(image_path: Path, fields: Mapping[str, str]) -> Path:
+def write_xmp_sidecar(image_path: Path, fields: Mapping[str, str | None]) -> Path:
     """Create or update `<stem>.xmp` beside the photograph."""
 
     sidecar = image_path.with_suffix(".xmp")
@@ -187,31 +246,36 @@ def write_xmp_sidecar(image_path: Path, fields: Mapping[str, str]) -> Path:
     return sidecar
 
 
-def fresh_xmp(fields: Mapping[str, str]) -> str:
-    attributes = "\n".join(f'      {key}="{_xml_attr(value)}"' for key, value in fields.items())
+def fresh_xmp(fields: Mapping[str, str | None]) -> str:
+    attributes = "\n".join(
+        f'      {key}="{_xml_attr(value)}"' for key, value in fields.items() if value is not None
+    )
+    namespaces = "\n".join(f'      {name}="{uri}"' for name, uri in _XMP_NAMESPACES)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
         '  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
-        '    <rdf:Description rdf:about=""\n'
-        f'      xmlns:xmp="{_XMP_NS}"\n'
-        f'      xmlns:outburst="{_OUTBURST_NS}"\n'
+        "    <rdf:Description rdf:about=\"\"\n"
+        f"{namespaces}\n"
         f"{attributes}/>\n"
         "  </rdf:RDF>\n"
         "</x:xmpmeta>\n"
     )
 
 
-def upsert_xmp(text: str, fields: Mapping[str, str]) -> str:
+def upsert_xmp(text: str, fields: Mapping[str, str | None]) -> str:
     """Update Outburst fields in an existing sidecar and leave other text in place."""
 
     if "rdf:Description" not in text or "xmpmeta" not in text:
         raise SidecarError("existing sidecar is not XMP, so Outburst left it alone")
     updated = text
-    updated = _ensure_xmlns(updated, "xmlns:xmp", _XMP_NS)
-    updated = _ensure_xmlns(updated, "xmlns:outburst", _OUTBURST_NS)
+    for name, uri in _XMP_NAMESPACES:
+        updated = _ensure_xmlns(updated, name, uri)
     for key, value in fields.items():
-        updated = _upsert_attr(updated, key, value)
+        if value is None:
+            updated = _remove_attr(updated, key)
+        else:
+            updated = _upsert_attr(updated, key, value)
     return updated
 
 
@@ -220,12 +284,13 @@ def write_reports(
     decisions: Mapping[Path, str],
     dest_dir: Path,
     *,
+    stars: Mapping[Path, int] | None = None,
     minimum_frames: int = 2,
 ) -> tuple[Path, Path]:
     """Write `outburst-report.json` and `outburst-report.csv`."""
 
     dest_dir.mkdir(parents=True, exist_ok=True)
-    report = build_report(library, decisions, minimum_frames=minimum_frames)
+    report = build_report(library, decisions, stars=stars, minimum_frames=minimum_frames)
     json_path = dest_dir / "outburst-report.json"
     csv_path = dest_dir / "outburst-report.csv"
     json_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -242,11 +307,13 @@ def build_report(
     library: Library,
     decisions: Mapping[Path, str],
     *,
+    stars: Mapping[Path, int] | None = None,
     minimum_frames: int = 2,
 ) -> dict[str, object]:
     by_path = {item.frame.path: item for item in library.analyses}
     keepers = choose_keepers(library.bursts, by_path, decisions, minimum_frames=minimum_frames)
     keeper_paths = {choice.path for choice in keepers}
+    star_ratings = {} if stars is None else stars
     frames: list[dict[str, object]] = []
     bursts_out: list[dict[str, object]] = []
     for burst in library.bursts:
@@ -262,7 +329,18 @@ def build_report(
             }
         )
         for index, frame in enumerate(burst.frames, start=1):
-            frames.append(_frame_row(burst.id, index, frame, by_path, decisions, recommended_path, keeper_paths))
+            frames.append(
+                _frame_row(
+                    burst.id,
+                    index,
+                    frame,
+                    by_path,
+                    decisions,
+                    recommended_path,
+                    keeper_paths,
+                    star_ratings.get(frame.path),
+                )
+            )
     return {
         "app": "Outburst",
         "version": __version__,
@@ -289,6 +367,7 @@ def _frame_row(
     decisions: Mapping[Path, str],
     recommended_path: Path | None,
     keeper_paths: set[Path],
+    stars: int | None,
 ) -> dict[str, object]:
     analysis = by_path.get(frame.path)
     metrics = None if analysis is None else analysis.metrics
@@ -315,6 +394,8 @@ def _frame_row(
             "recommended": frame.path == recommended_path,
             "keeper": frame.path in keeper_paths,
             "decision": decisions.get(frame.path, "unset"),
+            "stars": stars,
+            "flag": _flag_name(decisions.get(frame.path)),
             "error": "" if analysis is None or not analysis.error else analysis.error,
         }
     )
@@ -341,8 +422,18 @@ def _empty_row() -> dict[str, object]:
         "recommended": False,
         "keeper": False,
         "decision": "unset",
+        "stars": None,
+        "flag": "",
         "error": "",
     }
+
+
+def _flag_name(decision: str | None) -> str:
+    if decision == "keep":
+        return "pick"
+    if decision == "reject":
+        return "reject"
+    return ""
 
 
 def _rank(frame: Frame, by_path: Mapping[Path, FrameAnalysis]) -> tuple[float, float, str]:
@@ -373,6 +464,11 @@ def _destination(source: Path, dest_dir: Path, reserved: set[str]) -> tuple[Path
     raise OSError(f"Could not find a free filename for {source.name} in {dest_dir}")
 
 
+def _remove_attr(text: str, key: str) -> str:
+    pattern = re.compile(rf"\s{re.escape(key)}\s*=\s*\"[^\"]*\"")
+    return pattern.sub("", text, count=1)
+
+
 def _upsert_attr(text: str, key: str, value: str) -> str:
     pattern = re.compile(rf"(\s{re.escape(key)}\s*=\s*\")([^\"]*)(\")")
     if pattern.search(text):
@@ -400,6 +496,8 @@ def _insert_into_description(text: str, attribute: str) -> str:
         elif character in {'"', "'"}:
             quote = character
         elif character == ">":
+            if index > 0 and text[index - 1] == "/":
+                return text[: index - 1] + " " + attribute + "/>" + text[index + 1 :]
             return text[:index] + " " + attribute + text[index:]
         index += 1
     raise SidecarError("XMP description tag is incomplete")

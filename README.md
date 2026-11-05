@@ -98,7 +98,7 @@ A JPEG that sits next to a RAW file with the same name is used as the preview. I
 
 While the scan runs, the status bar shows progress. The first visit reads each file. The next visit is much faster, because measurements and thumbnails are cached on this computer. **Rescan** throws away the cached measurements for the open folder and reads it again. Keeper marks stay. **Clear cache** in the View menu does that for every folder.
 
-The left column lists bursts. The large frame is the one you are reviewing. Under it, **Mark as keeper** and **Reject** show the choice for that frame. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
+The left column lists bursts. The large frame is the one you are reviewing. Under it, five stars set the rating, and **Mark as keeper** and **Reject** set the pick and reject flags. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
 
 **C** puts the frame you are on beside the best other frame in the burst. When you are already on the best frame, the other side is the next sharpest. Click that side to review it. **Z** shows the embedded preview at 1:1 so you can drag across the detail. **F** paints the strongest edges green. These use the same preview Outburst scored. They do not demosaic the RAW file.
 
@@ -121,7 +121,9 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 | C | Compare this frame with the best other frame in the burst |
 | Z | 1:1 loupe. Drag to look around. Press again to fit the frame |
 | F | Focus peaking. Green marks the strongest edges |
-| A | Mark this frame as a keeper. Press again to clear it. Same as **Mark as keeper**. |
+| 1–5 | Set that star rating. Press the same number again to clear it |
+| 0 | Clear the star rating |
+| A | Flag this frame as a pick. Press again to clear it. Same as **Mark as keeper**. |
 | X | Reject this frame. Press again to clear it. Same as **Reject**. |
 | R | Reject the whole burst. Press again to clear it. |
 | G | Reject obvious misses in this burst. Press again to restore them. |
@@ -156,7 +158,13 @@ Delete that folder if you want Outburst to measure everything again. A log file,
 
 **Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. **G** rejects the other frames that are much softer than that best frame, or heavily clipped, and leaves anything you marked as a keeper. Press **G** again to bring those frames back. Changing **Burst gap** keeps the frames you marked, drops the automatic mark, and marks the best frame of each new burst. A burst with no keeper is skipped. A burst shorter than **Minimum frames** is hidden and is not saved, even if you marked a frame in it. Lower the minimum to review and save those bursts. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
 
-**XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom-style rating is 5 for a keeper, -1 for a reject, and 0 otherwise. A burst shorter than the minimum is not saved, so a mark on one of those frames stays at 0 unless you rejected it. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it.
+**XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom, Capture One, Darktable, and digiKam can read it.
+
+- Stars are `xmp:Rating` from 0 to 5, and `MicrosoftPhoto:Rating` as the matching percent. Keys **1** through **5** set them. **0**, or the same number again, clears them.
+- A pick (the keeper mark, key **A**) is `xmpDM:pick="1"` and `xmpDM:good="true"`. digiKam reads that as PickLabel 3. A pick with no star rating of its own is also written as 5 stars, which is what older catalogs expect.
+- A reject (key **X**) is `xmpDM:pick="-1"` and `xmpDM:good="false"`. digiKam reads that as PickLabel 1. With no stars of its own, `xmp:Rating` is -1 so a catalog that only reads the rating still sees the reject. Stars you set stay in `xmp:Rating` beside that flag.
+
+A burst shorter than the minimum is not saved, so a pick on one of those frames is not written as a pick. A reject on it still is. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it. In Lightroom, choose Metadata → Read Metadata from Files. In Capture One, choose Load Metadata.
 
 **Report** writes `outburst-report.json` and `outburst-report.csv`. `examples/sample_output` shows the shape of both, plus a sample sidecar. Reports you export use full file paths.
 

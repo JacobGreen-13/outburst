@@ -60,7 +60,13 @@ def test_metrics_and_decisions_round_trip(tmp_path: Path) -> None:
     assert cache.get(photo, 10, 20, "other-model") is None
 
     cache.set_decision(photo, "keep")
+    cache.set_stars(photo, 4)
     assert cache.decisions_for([photo])[photo] == "keep"
+    assert cache.stars_for([photo])[photo] == 4
+    cache.set_stars(photo, None)
+    assert photo not in cache.stars_for([photo])
+    with pytest.raises(ValueError):
+        cache.set_stars(photo, 6)
     assert cache.decision_origins([photo])[photo] == "user"
     cache.set_decision(photo, "keep", origin="auto")
     assert cache.decision_origins([photo])[photo] == "auto"

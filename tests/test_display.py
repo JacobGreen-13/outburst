@@ -67,6 +67,24 @@ def test_html_escapes_filenames_and_marks_the_recommendation() -> None:
         subject_active=False,
     )
     assert "KEEPER" in kept
+    assert "Pick" in kept
+    rated = frame_info_html(
+        filename=frame.path.name,
+        frame_number=1,
+        frame_count=1,
+        burst_id="burst-004",
+        captured_at=frame.captured_at,
+        camera=frame.camera,
+        analysis=analysis,
+        weights=Weights(),
+        recommended=False,
+        decision=None,
+        subject_active=False,
+        stars=2,
+    )
+    assert "★★☆☆☆" in rated
+    assert "2 stars" in rated
+    assert "No flag" in rated
     assert "Burst 4" in html
     assert "08:00:00.200" in html
     assert "Sharpest patch" not in html

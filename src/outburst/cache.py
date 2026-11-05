@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS decisions (
     updated_at TEXT NOT NULL,
     origin TEXT NOT NULL DEFAULT 'user'
 );
+
+CREATE TABLE IF NOT EXISTS ratings (
+    path TEXT PRIMARY KEY,
+    stars INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -263,6 +269,42 @@ class Cache:
                     datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     stored_origin,
                 ),
+            )
+        self._conn.commit()
+
+    def stars_for(self, paths: list[Path]) -> dict[Path, int]:
+        """Star ratings the photographer set. Missing paths have no rating yet."""
+
+        found: dict[Path, int] = {}
+        if not paths:
+            return found
+        for start in range(0, len(paths), 400):
+            chunk = paths[start : start + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self._conn.execute(
+                f"SELECT path, stars FROM ratings WHERE path IN ({placeholders})",
+                [str(path) for path in chunk],
+            )
+            by_text = {str(path): path for path in chunk}
+            for row in rows:
+                path = by_text.get(row["path"])
+                stars = row["stars"]
+                if path is not None and isinstance(stars, int) and 0 <= stars <= 5:
+                    found[path] = stars
+        return found
+
+    def set_stars(self, path: Path, stars: int | None) -> None:
+        if stars is not None and stars not in range(6):
+            raise ValueError(f"Star rating must be 0 through 5, not {stars}")
+        if stars is None:
+            self._conn.execute("DELETE FROM ratings WHERE path = ?", (str(path),))
+        else:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO ratings (path, stars, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (str(path), stars, datetime.now(timezone.utc).isoformat(timespec="seconds")),
             )
         self._conn.commit()
 
