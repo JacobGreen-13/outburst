@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QUrl
+from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QThread, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractSlider,
@@ -45,9 +45,9 @@ from outburst.gui.controls import ControlPanel
 from outburst.gui.dialogs import ExportKeepersDialog, ask, notify, show_shortcuts, show_warnings
 from outburst.gui.image_viewer import ImageViewer
 from outburst.gui.styles import build_app_icon
-from outburst.gui.worker import AnalyzeWorker, ModelFetchWorker
+from outburst.gui.worker import AnalyzeWorker, ExportWorker, ModelFetchWorker, SidecarWorker
 from outburst.models import Burst, FrameAnalysis, Library
-from outburst.output import choose_keepers, export_keepers, write_library_sidecars, write_reports
+from outburst.output import choose_keepers, write_reports
 from outburst.pipeline import with_threshold, with_weights
 from outburst.scoring import compare_partner_offset, eye_chooses_best, recommended_offset
 from outburst.subject import (
@@ -109,6 +109,9 @@ class MainWindow(QMainWindow):
         self._worker: AnalyzeWorker | None = None
         self._scan_id = 0
         self._scanning = False
+        self._save_worker: QThread | None = None
+        self._save_id = 0
+        self._saving = False
         self._build_ui()
         self.viewer.keeper_clicked.connect(lambda: self._toggle_decision("keep"))
         self.viewer.reject_clicked.connect(lambda: self._toggle_decision("reject"))
@@ -207,6 +210,9 @@ class MainWindow(QMainWindow):
         if self._download_worker is not None and self._download_worker.isRunning():
             self._download_worker.abort()
             self._download_worker.wait(2000)
+        self._save_id += 1
+        if self._save_worker is not None and self._save_worker.isRunning():
+            self._save_worker.wait(3000)
         self._stop_worker()
         super().closeEvent(event)
 
@@ -767,7 +773,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_decision(self, kind: str) -> None:
         analysis = self._current_analysis()
-        if analysis is None or self._scanning:
+        if analysis is None or self._review_locked():
             return
         path = analysis.frame.path
         updated = None if self._decisions.get(path) == kind else kind
@@ -778,7 +784,7 @@ class MainWindow(QMainWindow):
 
     def _reject_burst(self) -> None:
         burst = self._current_burst()
-        if burst is None or self._scanning:
+        if burst is None or self._review_locked():
             return
         clear = all(self._decisions.get(frame.path) == "reject" for frame in burst.frames)
         for frame in burst.frames:
@@ -819,7 +825,7 @@ class MainWindow(QMainWindow):
         """Reject soft or badly clipped frames, leaving the best frame and your keepers."""
 
         burst = self._current_burst()
-        if burst is None or self._scanning or self._library is None:
+        if burst is None or self._review_locked() or self._library is None:
             return
         paths = {frame.path for frame in burst.frames}
         remembered = [path for path in self._obvious_rejects if path in paths]
@@ -987,16 +993,10 @@ class MainWindow(QMainWindow):
                 "info",
             )
             return
-        try:
-            results = export_keepers([choice.path for choice in choices], request.folder, request.mode)
-        except OSError as exc:
-            self._notify("Save failed", str(exc), "warning")
-            return
-        notes = [result.note for result in results if result.note]
-        message = f"Saved {len(results)} keeper(s) to {request.folder}"
-        if notes:
-            message += " " + notes[0]
-        self.statusBar().showMessage(message)
+        self._start_save(
+            ExportWorker([choice.path for choice in choices], request.folder, request.mode),
+            f"Saving {len(choices)} keeper(s)…",
+        )
 
     def _export_report(self) -> None:
         if self._library is None or os.environ.get("OUTBURST_HEADLESS") == "1":
@@ -1033,19 +1033,15 @@ class MainWindow(QMainWindow):
             "Capture One, Darktable, and digiKam. Original RAW and JPEG files stay unchanged.",
         ):
             return
-        written, warnings = write_library_sidecars(
-            self._library,
-            self._decisions,
-            stars=self._stars,
-            minimum_frames=self.controls.minimum_frames(),
+        self._start_save(
+            SidecarWorker(
+                self._library,
+                dict(self._decisions),
+                dict(self._stars),
+                self.controls.minimum_frames(),
+            ),
+            f"Writing sidecars for {count} files…",
         )
-        message = f"Wrote {len(written)} sidecar(s)."
-        if warnings:
-            message += " " + warnings[0]
-        self.statusBar().showMessage(message)
-        if warnings:
-            self._warnings = tuple(warnings)
-            self._sync_actions()
 
     def _show_warnings(self) -> None:
         show_warnings(self, self._warnings)
@@ -1054,8 +1050,8 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._cache_dir)))
 
     def _clear_cache(self) -> None:
-        if self._scanning or self._downloading:
-            self._notify("Scan in progress", "Cancel the scan before clearing the cache.", "warning")
+        if self._scanning or self._downloading or self._saving:
+            self._notify("Still working", "Wait until the current save or scan finishes before clearing the cache.", "warning")
             return
         if not ask(
             self,
@@ -1243,7 +1239,7 @@ class MainWindow(QMainWindow):
 
     def _set_stars(self, stars: int) -> None:
         analysis = self._current_analysis()
-        if analysis is None or self._scanning:
+        if analysis is None or self._review_locked():
             return
         path = analysis.frame.path
         if stars == 0 or self._stars.get(path) == stars:
@@ -1279,15 +1275,66 @@ class MainWindow(QMainWindow):
         self.folder_label.setText(str(self._folder))
         self.folder_label.setToolTip(str(self._folder))
 
+    def _review_locked(self) -> bool:
+        return self._scanning or self._saving
+
+    def _start_save(self, worker: QThread, message: str) -> None:
+        if self._saving:
+            return
+        self._save_id += 1
+        save_id = self._save_id
+        self._save_worker = worker
+        self._saving = True
+        worker.progress.connect(self._on_progress)  # type: ignore[attr-defined]
+        worker.succeeded.connect(lambda payload, ident=save_id: self._on_save_finished(ident, payload))  # type: ignore[attr-defined]
+        worker.failed.connect(lambda message, ident=save_id: self._on_save_failed(ident, str(message)))  # type: ignore[attr-defined]
+        self._sync_actions()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.statusBar().showMessage(message)
+        worker.start()
+
+    def _on_save_finished(self, save_id: int, payload: object) -> None:
+        if save_id != self._save_id:
+            return
+        self._saving = False
+        self._save_worker = None
+        if isinstance(payload, tuple):
+            written, warnings = payload
+            message = f"Wrote {len(written)} sidecar(s)."
+            if warnings:
+                message += " " + str(warnings[0])
+                self._warnings = tuple(str(item) for item in warnings)
+        else:
+            results = payload if isinstance(payload, list) else []
+            notes = [getattr(result, "note", "") for result in results if getattr(result, "note", "")]
+            folder = results[0].destination.parent if results else ""
+            message = f"Saved {len(results)} keeper(s)"
+            if folder:
+                message += f" to {folder}"
+            if notes:
+                message += " " + str(notes[0])
+        self._sync_actions()
+        self.statusBar().showMessage(message)
+
+    def _on_save_failed(self, save_id: int, message: str) -> None:
+        if save_id != self._save_id:
+            return
+        self._saving = False
+        self._save_worker = None
+        self._sync_actions()
+        self._notify("Save failed", message, "warning")
+
     def _sync_actions(self) -> None:
-        busy = self._scanning or self._downloading
-        ready = self._library is not None and not self._scanning
+        busy = self._scanning or self._downloading or self._saving
+        ready = self._library is not None and not self._scanning and not self._saving
         self.export_action.setEnabled(ready)
         self.report_action.setEnabled(ready)
         self.xmp_action.setEnabled(ready)
+        self.open_action.setEnabled(not self._saving)
         self.rescan_action.setEnabled(self._folder is not None and not busy)
-        self.cancel_action.setEnabled(busy)
-        self.cancel_action.setVisible(busy)
+        self.cancel_action.setEnabled(self._scanning or self._downloading)
+        self.cancel_action.setVisible(self._scanning or self._downloading)
         self.cancel_action.setText("Cancel download" if self._downloading else "Cancel scan")
         self.warnings_action.setEnabled(bool(self._warnings))
         self.progress.setVisible(busy)

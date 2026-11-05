@@ -96,7 +96,7 @@ A normal desktop already has what PySide6 needs. If the window fails to open bec
 
 A JPEG that sits next to a RAW file with the same name is used as the preview. It is not counted as a second frame.
 
-While the scan runs, the status bar shows progress. The first visit reads each file. The next visit is much faster, because measurements and thumbnails are cached on this computer. **Rescan** throws away the cached measurements for the open folder and reads it again. Keeper marks stay. **Clear cache** in the View menu does that for every folder.
+While the scan runs, the status bar shows progress. The first visit reads each file, with a few frames measured at the same time. The next visit is much faster, because measurements and thumbnails are cached on this computer. **Rescan** throws away the cached measurements for the open folder and reads it again. Keeper marks stay. **Clear cache** in the View menu does that for every folder. **Save keepers** and **Write XMP sidecars** also run in the background, two files at a time, so the window stays usable.
 
 The left column lists bursts. The large frame is the one you are reviewing. Under it, five stars set the rating, and **Mark as keeper** and **Reject** set the pick and reject flags. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
 

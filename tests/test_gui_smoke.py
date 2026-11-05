@@ -550,6 +550,59 @@ def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
     qt_app.processEvents()
 
 
+def test_save_keepers_disables_save_until_the_copy_finishes(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    from outburst.gui.dialogs import ExportRequest
+    from outburst.gui.main_window import MainWindow
+    from outburst.output import export_keepers
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+    destination = tmp_path / "keepers"
+    monkeypatch.setattr(
+        "outburst.gui.main_window.ExportKeepersDialog.ask",
+        lambda *_args, **_kwargs: ExportRequest(destination, "copy"),
+    )
+    started = threading.Event()
+    release = threading.Event()
+
+    def wrapped(*args, **kwargs):  # type: ignore[no-untyped-def]
+        started.set()
+        assert release.wait(5)
+        return export_keepers(*args, **kwargs)
+
+    monkeypatch.setattr("outburst.gui.worker.export_keepers", wrapped)
+    window._export_keepers()
+    assert started.wait(3)
+    qt_app.processEvents()
+    assert window.export_action.isEnabled() is False
+    assert window.xmp_action.isEnabled() is False
+    assert window.progress.isVisible()
+    release.set()
+    for _ in range(100):
+        qt_app.processEvents()
+        if not window._saving:
+            break
+        time.sleep(0.02)
+    assert window._saving is False
+    assert window.export_action.isEnabled() is True
+    assert (destination / written["sharp"].name).is_file()
+    assert (destination / written["second_sharp"].name).is_file()
+    window.close()
+    qt_app.processEvents()
+
+
 def test_version_flag() -> None:
     from outburst.main import main
 
