@@ -445,6 +445,44 @@ def test_compare_loupe_and_obvious_misses(qt_app, tmp_path: Path) -> None:
     qt_app.processEvents()
 
 
+def test_star_keys_are_saved_apart_from_the_pick_flag(qt_app, tmp_path: Path) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from outburst.cache import Cache
+    from outburst.gui.main_window import MainWindow
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    written = write_burst_folder(tmp_path / "photos")
+    cache_dir = tmp_path / "cache"
+    library = analyze_folder(written["folder"], cache_dir=cache_dir, threshold=1.0)
+    window = MainWindow(cache_dir=cache_dir)
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+
+    assert window._decisions[written["sharp"]] == "keep"
+    QTest.keyClick(window, Qt.Key.Key_4)
+    qt_app.processEvents()
+    assert window._stars[written["sharp"]] == 4
+    assert window._decisions[written["sharp"]] == "keep"
+    assert "★★★★☆" in window.viewer.info.text()
+    assert window.viewer.star_buttons[3].property("filled") == "true"
+    assert window.viewer.star_buttons[4].property("filled") == "false"
+    QTest.keyClick(window, Qt.Key.Key_4)
+    qt_app.processEvents()
+    assert written["sharp"] not in window._stars
+    with Cache(cache_dir) as cache:
+        cache.set_stars(written["blur"], 2)
+    window.present(library)
+    qt_app.processEvents()
+    assert window._stars[written["blur"]] == 2
+    window.close()
+    qt_app.processEvents()
+
+
 def test_version_flag() -> None:
     from outburst.main import main
 

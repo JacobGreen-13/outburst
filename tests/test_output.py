@@ -13,6 +13,7 @@ from outburst.output import (
     SidecarError,
     choose_keepers,
     export_keepers,
+    review_xmp_fields,
     upsert_xmp,
     write_library_sidecars,
     write_reports,
@@ -134,6 +135,51 @@ def test_choose_keepers_and_export_modes(tmp_path: Path) -> None:
     assert linked[0].method == "hardlink"
     assert linked[0].destination.samefile(first)
     assert first.read_bytes() == b"aaa"
+
+
+def test_sidecar_writes_stars_and_pick_flags(tmp_path: Path) -> None:
+    photo = tmp_path / "IMG_0004.CR2"
+    photo.write_bytes(b"raw")
+    frame, analysis = _frame(photo, 0.6)
+    partner = tmp_path / "IMG_0005.CR2"
+    partner.write_bytes(b"raw-2")
+    partner_frame, partner_analysis = _frame(partner, 0.3)
+    library = _library(tmp_path, [(frame, analysis), (partner_frame, partner_analysis)])
+    written, warnings = write_library_sidecars(
+        library,
+        {photo: "keep", partner: "reject"},
+        stars={photo: 3, partner: 4},
+    )
+    assert warnings == []
+    kept = next(path for path in written if path.name.startswith("IMG_0004")).read_text(encoding="utf-8")
+    rejected = next(path for path in written if path.name.startswith("IMG_0005")).read_text(encoding="utf-8")
+    assert 'xmp:Rating="3"' in kept
+    assert 'MicrosoftPhoto:Rating="50"' in kept
+    assert 'xmpDM:pick="1"' in kept
+    assert 'xmpDM:good="true"' in kept
+    assert 'digiKam:PickLabel="3"' in kept
+    assert "http://ns.adobe.com/xmp/1.0/DynamicMedia/" in kept
+    assert 'xmp:Rating="4"' in rejected
+    assert 'xmpDM:pick="-1"' in rejected
+    assert 'xmpDM:good="false"' in rejected
+    assert 'digiKam:PickLabel="1"' in rejected
+    assert _digest(photo) == hashlib.sha256(b"raw").digest()
+
+    bare = review_xmp_fields("reject", None)
+    assert bare["xmp:Rating"] == "-1"
+    assert bare["xmpDM:pick"] == "-1"
+    cleared = review_xmp_fields(None, None)
+    assert cleared["xmp:Rating"] == "0"
+    assert cleared["xmpDM:pick"] == "0"
+    assert cleared["xmpDM:good"] is None
+
+    write_xmp_sidecar(photo, review_xmp_fields(None, 2))
+    again = photo.with_suffix(".xmp").read_text(encoding="utf-8")
+    assert 'xmp:Rating="2"' in again
+    assert 'xmpDM:pick="0"' in again
+    assert "xmpDM:good" not in again
+    assert again.count("<rdf:Description") == 1
+    assert "/>" in again
 
 
 def test_unmarked_frame_is_not_rated_as_a_keeper(tmp_path: Path) -> None:

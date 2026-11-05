@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
         self._by_path: dict[Path, FrameAnalysis] = {}
         self._decisions: dict[Path, str] = {}
         self._origins: dict[Path, str] = {}
+        self._stars: dict[Path, int] = {}
         self._compare = False
         self._loupe = False
         self._peaking = False
@@ -111,6 +112,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self.viewer.keeper_clicked.connect(lambda: self._toggle_decision("keep"))
         self.viewer.reject_clicked.connect(lambda: self._toggle_decision("reject"))
+        self.viewer.star_clicked.connect(self._set_stars)
         self._build_actions()
         self._load_settings()
         self._sync_actions()
@@ -226,6 +228,8 @@ class MainWindow(QMainWindow):
             self._select_frame(len(burst.frames) - 1)
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self._go_to_recommended()
+        elif Qt.Key.Key_0 <= key <= Qt.Key.Key_5:
+            self._set_stars(key - Qt.Key.Key_0)
         elif key == Qt.Key.Key_A:
             self._toggle_decision("keep")
         elif key == Qt.Key.Key_X:
@@ -871,6 +875,7 @@ class MainWindow(QMainWindow):
             recommended=recommended,
             decision=decision,
             subject_active=show_subject,
+            stars=self._stars.get(frame.path),
         )
         keeper = decision == "keep"
         rejected = decision == "reject"
@@ -889,6 +894,7 @@ class MainWindow(QMainWindow):
             border,
             keeper=keeper,
             rejected=rejected,
+            stars=self._stars.get(frame.path),
         )
         self.viewer.set_view_mode(zoom=self._loupe, peak=self._peaking)
         self.viewer.set_compare(self._compare)
@@ -942,6 +948,7 @@ class MainWindow(QMainWindow):
                         None if analysis is None else analysis.composite,
                         None if analysis is None else analysis.metrics,
                         best_composite=None if index == best else best_composite,
+                        stars=self._stars.get(frame.path),
                     ),
                     badge=thumb_badge(index == best, decision),
                     thumb_path=None if analysis is None else analysis.thumb_path,
@@ -999,6 +1006,7 @@ class MainWindow(QMainWindow):
                 self._library,
                 self._decisions,
                 Path(chosen),
+                stars=self._stars,
                 minimum_frames=self.controls.minimum_frames(),
             )
         except OSError as exc:
@@ -1013,12 +1021,15 @@ class MainWindow(QMainWindow):
         if not ask(
             self,
             "Write XMP sidecars",
-            f"Write sidecars next to {count} files?\n\nOriginal RAW and JPEG files stay unchanged.",
+            f"Write sidecars next to {count} files?\n\n"
+            "Each sidecar stores the star rating and the pick or reject flag for Lightroom, "
+            "Capture One, Darktable, and digiKam. Original RAW and JPEG files stay unchanged.",
         ):
             return
         written, warnings = write_library_sidecars(
             self._library,
             self._decisions,
+            stars=self._stars,
             minimum_frames=self.controls.minimum_frames(),
         )
         message = f"Wrote {len(written)} sidecar(s)."
@@ -1161,16 +1172,19 @@ class MainWindow(QMainWindow):
         if self._library is None:
             self._decisions = {}
             self._origins = {}
+            self._stars = {}
             return
         paths = [item.frame.path for item in self._library.analyses]
         try:
             with Cache(self._cache_dir) as cache:
                 self._decisions = cache.decisions_for(paths)
                 self._origins = cache.decision_origins(paths)
+                self._stars = cache.stars_for(paths)
         except OSError as exc:
             log.warning("Could not read saved decisions: %s", exc)
             self._decisions = {}
             self._origins = {}
+            self._stars = {}
 
     def _apply_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
         if decision is None:
@@ -1182,6 +1196,29 @@ class MainWindow(QMainWindow):
             self._decisions[path] = decision
             self._origins[path] = stored_origin
         self._save_decision(path, decision, origin=stored_origin)
+
+    def _set_stars(self, stars: int) -> None:
+        analysis = self._current_analysis()
+        if analysis is None or self._scanning:
+            return
+        path = analysis.frame.path
+        if stars == 0 or self._stars.get(path) == stars:
+            updated = None
+            self._stars.pop(path, None)
+        else:
+            updated = stars
+            self._stars[path] = stars
+        self._save_stars(path, updated)
+        self._refresh_burst_labels()
+        self.filmstrip.refresh_flags(self._thumbs())
+        self._update_viewer()
+
+    def _save_stars(self, path: Path, stars: int | None) -> None:
+        try:
+            with Cache(self._cache_dir) as cache:
+                cache.set_stars(path, stars)
+        except OSError as exc:
+            self._notify("Could not save that rating", str(exc), "warning")
 
     def _save_decision(self, path: Path, decision: str | None, *, origin: str = "user") -> None:
         try:

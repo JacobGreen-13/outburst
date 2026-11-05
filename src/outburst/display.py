@@ -60,11 +60,19 @@ def burst_list_text(
     return f"{human_burst_name(burst.id)}  ·  {burst.count} {noun}\n{when}  ·  best {score}{suffix}"
 
 
+def star_glyphs(stars: int | None) -> str:
+    """Five stars, filled up to `stars`. None and 0 are empty."""
+
+    count = 0 if stars is None else max(0, min(5, int(stars)))
+    return "★" * count + "☆" * (5 - count)
+
+
 def score_caption(
     composite: float | None,
     metrics: Metrics | None,
     *,
     best_composite: float | None,
+    stars: int | None = None,
 ) -> str:
     """Score for a filmstrip card, with CLIP or SOFT when the frame needs a look."""
 
@@ -78,9 +86,11 @@ def score_caption(
         and best_composite - composite >= SOFT_SCORE_GAP
     ):
         notes.append("SOFT")
-    if not notes:
-        return text
-    return f"{text}  {' '.join(notes)}"
+    if notes:
+        text = f"{text}  {' '.join(notes)}"
+    if stars:
+        text = f"{text}  ★{stars}"
+    return text
 
 
 def obvious_misses(
@@ -164,6 +174,7 @@ def frame_info_html(
     recommended: bool,
     decision: str | None,
     subject_active: bool,
+    stars: int | None = None,
 ) -> str:
     """Rich text for the preview panel. Filenames are escaped."""
 
@@ -181,9 +192,29 @@ def frame_info_html(
             'padding:1px 8px;">REJECTED</span>'
         )
     badge_html = (" &nbsp; ".join(badges)) if badges else ""
+    if decision == "keep":
+        flag = "Pick"
+    elif decision == "reject":
+        flag = "Reject"
+    else:
+        flag = "No flag"
+    if stars is None and decision == "keep":
+        star_note = "sidecar writes 5 stars with this pick"
+    elif stars is None and decision == "reject":
+        star_note = "sidecar writes the reject flag"
+    elif stars is None:
+        star_note = "no star rating"
+    else:
+        star_note = f"{stars} star" if stars == 1 else f"{stars} stars"
+    mark_line = (
+        f'<div style="color:#e6c15a; margin-top:4px;">{star_glyphs(stars)}'
+        f' &nbsp;·&nbsp; <span style="color:#d0d0d0;">{escape(flag)}</span>'
+        f' &nbsp;·&nbsp; <span style="color:#9a9a9a;">{escape(star_note)}</span></div>'
+    )
     title = (
         f'<div><span style="font-size:16px; font-weight:600;">{escape(filename)}</span>'
         f'&nbsp;&nbsp;{badge_html}</div>'
+        + mark_line
     )
     if analysis is None or (analysis.error and analysis.metrics is None):
         problem = "Outburst could not read a preview from this file."

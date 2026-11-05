@@ -160,6 +160,7 @@ class ImageViewer(QFrame):
     keeper_clicked = Signal()
     reject_clicked = Signal()
     partner_clicked = Signal()
+    star_clicked = Signal(int)
 
     def __init__(self) -> None:
         super().__init__()
@@ -186,20 +187,32 @@ class ImageViewer(QFrame):
         self.hint = QLabel()
         self.hint.setObjectName("viewerHint")
         self.hint.hide()
+        self.star_buttons: list[QPushButton] = []
+        for number in range(1, 6):
+            button = QPushButton("★")
+            button.setObjectName("starButton")
+            button.setToolTip(f"Set {number} star{'s' if number != 1 else ''}. Press again to clear. Keyboard: {number}")
+            button.clicked.connect(lambda _checked=False, value=number: self.star_clicked.emit(value))
+            self.star_buttons.append(button)
         self.keeper_button = QPushButton("Mark as keeper")
         self.keeper_button.setObjectName("keeperButton")
         self.keeper_button.setCheckable(True)
         self.keeper_button.setToolTip(
-            "Save this frame when you press Save keepers. Press again to clear it. Keyboard: A"
+            "Flag this frame as a pick. Save keepers copies picked frames, and the XMP sidecar "
+            "records the pick. Press again to clear it. Keyboard: A"
         )
         self.keeper_button.clicked.connect(lambda _checked=False: self.keeper_clicked.emit())
         self.reject_button = QPushButton("Reject")
         self.reject_button.setObjectName("rejectButton")
         self.reject_button.setCheckable(True)
-        self.reject_button.setToolTip("Set this frame aside. It will not be saved. Keyboard: X")
+        self.reject_button.setToolTip(
+            "Flag this frame as a reject. The XMP sidecar records the reject. Keyboard: X"
+        )
         self.reject_button.clicked.connect(lambda _checked=False: self.reject_clicked.emit())
         marks = QHBoxLayout()
         marks.setSpacing(8)
+        for button in self.star_buttons:
+            marks.addWidget(button)
         marks.addWidget(self.keeper_button, 1)
         marks.addWidget(self.reject_button, 1)
         self.info = QLabel()
@@ -226,7 +239,7 @@ class ImageViewer(QFrame):
         self.hint.hide()
         self.info.setText("")
         self.set_border("#2a2a2a")
-        self._apply_marks(False, False, enabled=False)
+        self._apply_marks(False, False, None, enabled=False)
 
     def set_view_mode(self, *, zoom: bool, peak: bool) -> None:
         self.preview.set_view(zoom=zoom, peak=peak)
@@ -282,6 +295,7 @@ class ImageViewer(QFrame):
         *,
         keeper: bool = False,
         rejected: bool = False,
+        stars: int | None = None,
     ) -> None:
         pixmap = QPixmap(str(preview)) if preview is not None else QPixmap()
         if rejected:
@@ -299,7 +313,7 @@ class ImageViewer(QFrame):
             self.preview.set_source(pixmap, box=box, focus=focus, identity=identity)
         self.info.setText(html)
         self.set_border(border)
-        self._apply_marks(keeper, rejected, enabled=True)
+        self._apply_marks(keeper, rejected, stars, enabled=True)
 
     def set_border(self, color: str) -> None:
         self.setStyleSheet(
@@ -312,6 +326,10 @@ class ImageViewer(QFrame):
             "QPushButton#keeperButton, QPushButton#rejectButton {"
             "min-height: 36px; font-size: 14px; font-weight: 600; padding: 8px 16px;"
             "}"
+            "QPushButton#starButton {"
+            "min-height: 36px; min-width: 36px; max-width: 42px; font-size: 18px; color: #6a6a6a; padding: 0;"
+            "}"
+            "QPushButton#starButton[filled=\"true\"] { color: #e6c15a; border: 1px solid #e6c15a; }"
             "QPushButton#keeperButton:checked {"
             "background: #1f6b45; color: #f4fff8; border: 1px solid #7dffc3;"
             "}"
@@ -320,7 +338,7 @@ class ImageViewer(QFrame):
             "}"
         )
 
-    def _apply_marks(self, keeper: bool, rejected: bool, *, enabled: bool) -> None:
+    def _apply_marks(self, keeper: bool, rejected: bool, stars: int | None, *, enabled: bool) -> None:
         self.keeper_button.blockSignals(True)
         self.reject_button.blockSignals(True)
         self.keeper_button.setChecked(keeper)
@@ -329,6 +347,13 @@ class ImageViewer(QFrame):
         self.reject_button.setText("Rejected" if rejected else "Reject")
         self.keeper_button.setEnabled(enabled)
         self.reject_button.setEnabled(enabled)
+        filled = 0 if stars is None else stars
+        for index, button in enumerate(self.star_buttons, start=1):
+            button.setEnabled(enabled)
+            button.setProperty("filled", "true" if index <= filled else "false")
+            style = button.style()
+            style.unpolish(button)
+            style.polish(button)
         self.keeper_button.blockSignals(False)
         self.reject_button.blockSignals(False)
 
