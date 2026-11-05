@@ -209,16 +209,51 @@ def _rank_key(frames: Sequence[Frame], by_path: Mapping[Path, Rankable], index: 
     )
 
 
+def _rated_eye_sharpness(item: Rankable | None) -> float | None:
+    if item is None or item.metrics is None or item.metrics.eye_sharpness is None:
+        return None
+    return float(item.metrics.eye_sharpness)
+
+
+def eye_chooses_best(frames: Sequence[Frame], by_path: Mapping[Path, Rankable]) -> bool:
+    """True when two or more frames have an eye large enough to rate."""
+
+    rated = 0
+    for frame in frames:
+        if _rated_eye_sharpness(by_path.get(frame.path)) is not None:
+            rated += 1
+            if rated >= 2:
+                return True
+    return False
+
+
 def recommended_offset(frames: Sequence[Frame], by_path: Mapping[Path, Rankable]) -> int:
     """Index of the frame that should be offered as the keeper.
 
-    Higher composite wins. Ties prefer a higher full-frame Laplacian, then
-    the earlier filename, so the choice stays put when two scores match.
+    When two or more frames have a rated eye, the sharpest eye wins and an
+    earlier filename breaks a tie. Otherwise the higher composite wins, then
+    the higher full-frame Laplacian, then the earlier filename.
     """
 
     if not frames:
         return 0
+    if eye_chooses_best(frames, by_path):
+        return min(range(len(frames)), key=lambda index: _eye_rank_key(frames, by_path, index))
     return min(range(len(frames)), key=lambda index: _rank_key(frames, by_path, index))
+
+
+def _eye_rank_key(
+    frames: Sequence[Frame],
+    by_path: Mapping[Path, Rankable],
+    index: int,
+) -> tuple[float, str, str]:
+    frame = frames[index]
+    sharpness = _rated_eye_sharpness(by_path.get(frame.path))
+    return (
+        -(sharpness if sharpness is not None else -1.0),
+        frame.path.name.lower(),
+        str(frame.path),
+    )
 
 
 def compare_partner_offset(
@@ -228,13 +263,14 @@ def compare_partner_offset(
 ) -> int | None:
     """The other frame to put beside `current`.
 
-    That is the recommended frame, or the next sharpest one when `current`
-    is already the recommendation. A one-frame burst has no partner.
+    That is the recommended frame, or the next one in the same ranking when
+    `current` is already the recommendation. A one-frame burst has no partner.
     """
 
     if len(frames) < 2 or not 0 <= current < len(frames):
         return None
-    order = sorted(range(len(frames)), key=lambda index: _rank_key(frames, by_path, index))
+    rank = _eye_rank_key if eye_chooses_best(frames, by_path) else _rank_key
+    order = sorted(range(len(frames)), key=lambda index: rank(frames, by_path, index))
     if current == order[0]:
         return order[1]
     return order[0]

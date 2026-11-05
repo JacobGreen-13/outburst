@@ -1,7 +1,7 @@
-burst_id,frame_index,filename,path,captured_at,camera,score,sharpness,center_sharpness,tenengrad,exposure,highlight_clip,shadow_clip,subject_sharpness,subject_label,recommended,keeper,decision,error
-burst-001,1,IMG_1001.jpg,examples/sample_burst/IMG_1001.jpg,2024-09-14T07:32:10.000000,Outburst Sample,0.4165,44.68,118.6,208.65,0.9578,0.0,0.0007,,,True,True,unset,
-burst-001,2,IMG_1002.jpg,examples/sample_burst/IMG_1002.jpg,2024-09-14T07:32:10.100000,Outburst Sample,0.2401,0.1,0.2,25.75,0.9585,0.0,0.0,,,False,False,unset,
-burst-001,3,IMG_1003.jpg,examples/sample_burst/IMG_1003.jpg,2024-09-14T07:32:10.200000,Outburst Sample,0.239,6.75,17.66,26.7,0.8238,0.0,0.0,,,False,False,unset,
-burst-001,4,IMG_1004.jpg,examples/sample_burst/IMG_1004.jpg,2024-09-14T07:32:10.300000,Outburst Sample,0.24,0.1,0.2,25.85,0.9585,0.0,0.0,,,False,False,unset,
-burst-002,1,IMG_1101.jpg,examples/sample_burst/IMG_1101.jpg,2024-09-14T07:32:14.000000,Outburst Sample,0.4183,45.24,120.16,203.14,0.9579,0.0,0.0007,,,True,True,unset,
-burst-002,2,IMG_1102.jpg,examples/sample_burst/IMG_1102.jpg,2024-09-14T07:32:14.120000,Outburst Sample,0.24,0.1,0.2,25.7,0.9585,0.0,0.0,,,False,False,unset,
+burst_id,frame_index,filename,path,captured_at,camera,score,sharpness,center_sharpness,tenengrad,exposure,highlight_clip,shadow_clip,subject_sharpness,subject_label,recommended,keeper,decision,stars,flag,error
+burst-001,1,IMG_1001.jpg,examples/sample_burst/IMG_1001.jpg,2024-09-14T07:32:10.000000,Outburst Sample,0.4165,44.68,118.6,208.65,0.9578,0.0,0.0007,,,True,True,unset,,,
+burst-001,2,IMG_1002.jpg,examples/sample_burst/IMG_1002.jpg,2024-09-14T07:32:10.100000,Outburst Sample,0.2401,0.1,0.2,25.75,0.9585,0.0,0.0,,,False,False,unset,,,
+burst-001,3,IMG_1003.jpg,examples/sample_burst/IMG_1003.jpg,2024-09-14T07:32:10.200000,Outburst Sample,0.239,6.75,17.66,26.7,0.8238,0.0,0.0,,,False,False,unset,,,
+burst-001,4,IMG_1004.jpg,examples/sample_burst/IMG_1004.jpg,2024-09-14T07:32:10.300000,Outburst Sample,0.24,0.1,0.2,25.85,0.9585,0.0,0.0,,,False,False,unset,,,
+burst-002,1,IMG_1101.jpg,examples/sample_burst/IMG_1101.jpg,2024-09-14T07:32:14.000000,Outburst Sample,0.4183,45.24,120.16,203.14,0.9579,0.0,0.0007,,,True,True,unset,,,
+burst-002,2,IMG_1102.jpg,examples/sample_burst/IMG_1102.jpg,2024-09-14T07:32:14.120000,Outburst Sample,0.24,0.1,0.2,25.7,0.9585,0.0,0.0,,,False,False,unset,,,

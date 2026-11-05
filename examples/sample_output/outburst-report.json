@@ -48,6 +48,8 @@
       "recommended": true,
       "keeper": true,
       "decision": "unset",
+      "stars": null,
+      "flag": "",
       "error": ""
     },
     {
@@ -69,6 +71,8 @@
       "recommended": false,
       "keeper": false,
       "decision": "unset",
+      "stars": null,
+      "flag": "",
       "error": ""
     },
     {
@@ -90,6 +94,8 @@
       "recommended": false,
       "keeper": false,
       "decision": "unset",
+      "stars": null,
+      "flag": "",
       "error": ""
     },
     {
@@ -111,6 +117,8 @@
       "recommended": false,
       "keeper": false,
       "decision": "unset",
+      "stars": null,
+      "flag": "",
       "error": ""
     },
     {
@@ -132,6 +140,8 @@
       "recommended": true,
       "keeper": true,
       "decision": "unset",
+      "stars": null,
+      "flag": "",
       "error": ""
     },
     {
@@ -153,6 +163,8 @@
       "recommended": false,
       "keeper": false,
       "decision": "unset",
+      "stars": null,
+      "flag": "",
       "error": ""
     }
   ]

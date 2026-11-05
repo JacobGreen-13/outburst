@@ -290,35 +290,51 @@ class YoloSubjectDetector:
         self.device = device
 
     def detect(self, image: np.ndarray) -> Detection | None:
+        found = self.detect_many([image])
+        if not found:
+            return None
+        return found[0]
+
+    def detect_many(self, images: list[np.ndarray]) -> list[Detection | None]:
+        """Score a small batch on this one model. Callers keep this on one thread."""
+
+        if not images:
+            return []
         import cv2
 
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        rgb = [cv2.cvtColor(image, cv2.COLOR_BGR2RGB) for image in images]
         predict = getattr(self._model, "predict")
         results = predict(rgb, verbose=False, device=self.device, imgsz=640)
         if not results:
-            return None
-        result = results[0]
-        boxes = getattr(result, "boxes", None)
-        if boxes is None or len(boxes) == 0:
-            return None
-        xyxy = _as_numpy(boxes.xyxy)
-        confidences = _as_numpy(boxes.conf)
-        classes = _as_numpy(boxes.cls).astype(int)
-        names = getattr(result, "names", {}) or {}
-        best: tuple[float, Detection] | None = None
-        for index, class_id in enumerate(classes):
-            if int(class_id) not in ANIMAL_CLASS_IDS:
-                continue
-            confidence = float(confidences[index])
-            if best is not None and confidence <= best[0]:
-                continue
-            x1, y1, x2, y2 = (float(value) for value in xyxy[index][:4])
-            box = (int(x1), int(y1), max(1, int(x2 - x1)), max(1, int(y2 - y1)))
-            label = str(names.get(int(class_id), class_id))
-            best = (confidence, Detection(box, label, confidence))
-        if best is None:
-            return None
-        return best[1]
+            return [None] * len(images)
+        parsed = [_best_animal(result) for result in results]
+        if len(parsed) < len(images):
+            parsed.extend([None] * (len(images) - len(parsed)))
+        return parsed[: len(images)]
+
+
+def _best_animal(result: object) -> Detection | None:
+    boxes = getattr(result, "boxes", None)
+    if boxes is None or len(boxes) == 0:
+        return None
+    xyxy = _as_numpy(boxes.xyxy)
+    confidences = _as_numpy(boxes.conf)
+    classes = _as_numpy(boxes.cls).astype(int)
+    names = getattr(result, "names", {}) or {}
+    best: tuple[float, Detection] | None = None
+    for index, class_id in enumerate(classes):
+        if int(class_id) not in ANIMAL_CLASS_IDS:
+            continue
+        confidence = float(confidences[index])
+        if best is not None and confidence <= best[0]:
+            continue
+        x1, y1, x2, y2 = (float(value) for value in xyxy[index][:4])
+        box = (int(x1), int(y1), max(1, int(x2 - x1)), max(1, int(y2 - y1)))
+        label = str(names.get(int(class_id), class_id))
+        best = (confidence, Detection(box, label, confidence))
+    if best is None:
+        return None
+    return best[1]
 
 
 def _as_numpy(value: object) -> np.ndarray:
