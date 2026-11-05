@@ -7,7 +7,7 @@ subject scoring needs it. Loading a detector never fetches weights by itself.
 If detection is unavailable or finds no animal, scoring falls back to the
 full frame.
 
-``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model.
+``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
 """
 
 from __future__ import annotations
@@ -45,6 +45,16 @@ class ModelOption:
     url: str
     note: str
 
+
+# Open weights: synthet/eye-pose-v0, YOLO11n-pose, AGPL-3.0. About 5.6 MB.
+# Trained on CUB-200-2011 bird photos. Not a mammal eye model.
+BIRD_EYE_OPTION = ModelOption(
+    "eye-pose-v0",
+    "Bird eye detection",
+    "eye_pose_v0.pt",
+    "https://huggingface.co/synthet/eye-pose-v0/resolve/main/eye_pose_v0.pt",
+    "Bird eyes, about 6 MB",
+)
 
 MODEL_OPTIONS: tuple[ModelOption, ...] = (
     ModelOption(
@@ -85,12 +95,14 @@ class ModelCancelled(Exception):
 def option_by_id(model_id: str) -> ModelOption | None:
     """Look up one catalog entry by its model id.
 
-    Inputs: model_id, a catalog id such as yolo11n.
-    Output: the matching ModelOption, or None when the id is not in the catalog.
-    Uses: the subject-model dropdown when it resolves the saved choice.
-    Limitations: only the four catalog ids match. This does not download weights or load a detector.
+    Inputs: model_id, a catalog id such as yolo11n, or eye-pose-v0.
+    Output: the matching ModelOption, or None when the id is not known.
+    Uses: the subject-model dropdown, and the bird-eye download.
+    Limitations: the four subject ids and the bird-eye id match. This does not download weights or load a detector. The bird-eye option is not part of MODEL_OPTIONS.
     """
 
+    if model_id == BIRD_EYE_OPTION.id:
+        return BIRD_EYE_OPTION
     for option in MODEL_OPTIONS:
         if option.id == model_id:
             return option
@@ -158,7 +170,7 @@ def ensure_model(
     Inputs: option, the catalog entry; directory, an optional models folder; progress, an optional callback of bytes downloaded and total size; should_cancel, an optional callback that is true when the photographer cancels.
     Output: the path of the ready weights file.
     Uses: a subject-scoring rescan, which downloads a missing model before the scan loads it.
-    Limitations: a ready file is returned without a download. Cancel deletes the partial file and raises ModelCancelled. The weights are official Ultralytics YOLO files under the AGPL-3.0 license, separate from Outburst. Photographs are not uploaded.
+    Limitations: a ready file is returned without a download. Cancel deletes the partial file and raises ModelCancelled. Subject weights are the official Ultralytics YOLO files. The bird-eye file is eye-pose-v0. Both are AGPL-3.0, separate from Outburst. Photographs are not uploaded.
     """
 
     root = directory if directory is not None else models_dir()
@@ -353,7 +365,7 @@ def make_subject_key(model_path: Path) -> str:
     Inputs: model_path, the weights file already on disk.
     Output: a string of the resolved path, the mtime in nanoseconds, and the size.
     Uses: the scan cache so a replaced weights file is not scored from old rows.
-    Limitations: the file must exist so stat can run. This does not load the model. Eye scoring appends its own suffix later, in the pipeline.
+    Limitations: the file must exist so stat can run. This does not load the model. Bird eye detection appends the same kind of suffix for its own weights file.
     """
 
     stat = model_path.stat()

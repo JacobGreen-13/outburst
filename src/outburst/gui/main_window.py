@@ -58,6 +58,7 @@ from outburst.output import choose_keepers, frames_for_sidecars, write_reports
 from outburst.pipeline import with_threshold, with_weights
 from outburst.scoring import compare_partner_offset, eye_chooses_best, recommended_offset
 from outburst.subject import (
+    BIRD_EYE_OPTION,
     DEFAULT_MODEL_ID,
     MODEL_OPTIONS,
     model_is_ready,
@@ -123,10 +124,12 @@ class MainWindow(QMainWindow):
         self._folder: Path | None = None
         self._dialog_start = Path.home()
         self._model_path: Path | None = None
+        self._eye_model_path: Path | None = None
         self._download_worker: ModelFetchWorker | None = None
         self._downloading = False
         self._download_then_scan = False
         self._download_model_id: str | None = None
+        self._download_role = "subject"
         self._replace_download = False
         self._burst_index = 0
         self._frame_index = 0
@@ -251,7 +254,7 @@ class MainWindow(QMainWindow):
         Drop cached measurements for the open folder and scan it again.
 
         Inputs: none.
-        Output: no return value. With no folder, nothing happens. Otherwise the folder cache is forgotten and a scan starts, after a missing subject model is downloaded when subject scoring is on.
+        Output: no return value. With no folder, nothing happens. Otherwise the folder cache is forgotten and a scan starts, after a missing subject model or bird-eye model is downloaded when that option is on.
         Uses: the Rescan action.
         Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not forget the cache.
         """
@@ -644,15 +647,18 @@ class MainWindow(QMainWindow):
         """
         Start a background scan of the open folder.
 
-        Inputs: none. The folder, recursion, gap, weights, cache, subject model, and eye scoring are read from the window.
-        Output: no return value. The progress bar is shown and the worker starts. Subject scoring with a missing model starts a download instead.
+        Inputs: none. The folder, recursion, gap, weights, cache, subject model, and bird eye detection are read from the window.
+        Output: no return value. The progress bar is shown and the worker starts. A missing subject model or bird-eye model starts a download instead.
         Uses: opening and rescanning a folder.
-        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes.
+        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. The subject model is downloaded before the bird-eye model when both are missing.
         """
         if self._folder is None:
             return
         if self.controls.prefer_subject() and not self._model_ready():
             self._begin_download(then_scan=True)
+            return
+        if self.controls.eye_scoring() and not self._bird_eye_ready():
+            self._begin_bird_eye_download(then_scan=True)
             return
         if self._downloading:
             self._download_then_scan = True
@@ -660,6 +666,7 @@ class MainWindow(QMainWindow):
         self._scan_id += 1
         scan_id = self._scan_id
         subject_model = self._model_path if self.controls.prefer_subject() else None
+        eye_on = self.controls.eye_scoring()
         worker = AnalyzeWorker(
             self._folder,
             recursive=self.controls.recursive(),
@@ -667,7 +674,8 @@ class MainWindow(QMainWindow):
             weights=self.controls.weights(),
             cache_dir=self._cache_dir,
             subject_model=subject_model,
-            eye_scoring=self.controls.eye_scoring(),
+            eye_scoring=eye_on,
+            eye_model=self._eye_model_path if eye_on else None,
         )
         worker.progress.connect(self._on_progress)
         worker.succeeded.connect(lambda library, ident=scan_id: self._on_success(ident, library))
@@ -869,6 +877,22 @@ class MainWindow(QMainWindow):
         self._model_path = None
         return False
 
+    def _bird_eye_ready(self) -> bool:
+        """
+        Remember the bird-eye weights path when that file is already in the models folder.
+
+        Inputs: none.
+        Output: True when eye_pose_v0.pt is ready. The stored path is set, or cleared when it is not.
+        Uses: deciding whether a scan can run bird eye detection without a download.
+        Limitations: this does not download the file and does not load the network.
+        """
+        path = model_path(BIRD_EYE_OPTION)
+        if model_is_ready(path):
+            self._eye_model_path = path
+            return True
+        self._eye_model_path = None
+        return False
+
     def _begin_download(self, then_scan: bool) -> None:
         """
         Download the selected subject model, then scan when asked.
@@ -892,10 +916,54 @@ class MainWindow(QMainWindow):
                 self._download_then_scan = self._download_then_scan or then_scan
                 return
             self._replace_download = True
+            self._download_role = "subject"
             self._download_then_scan = then_scan
             if self._download_worker is not None:
                 self._download_worker.abort()
             return
+        self._download_role = "subject"
+        self._download_then_scan = then_scan
+        self._download_model_id = option.id
+        self._downloading = True
+        worker = ModelFetchWorker(option.id, models_dir())
+        worker.progress.connect(self._on_download_progress)
+        worker.succeeded.connect(self._on_download_succeeded)
+        worker.failed.connect(self._on_download_failed)
+        worker.cancelled.connect(self._on_download_cancelled)
+        self._download_worker = worker
+        self.controls.set_model_enabled(False)
+        self._sync_actions()
+        self.progress.setRange(0, 0)
+        self.statusBar().showMessage(f"Downloading {option.label}…")
+        worker.start()
+
+    def _begin_bird_eye_download(self, then_scan: bool) -> None:
+        """
+        Download the bird-eye pose weights, then scan when asked.
+
+        Inputs: then_scan, whether a scan should start after the download ends.
+        Output: no return value. The model combo is disabled and the status names Bird eye detection.
+        Uses: turning Bird eye detection on when eye_pose_v0.pt is not in the models folder.
+        Limitations: a headless process turns bird eye detection off, says the model is missing, and scans without it when then_scan is set and a folder is open. Photos are not uploaded. The weights are AGPL-3.0, separate from Outburst.
+        """
+        if os.environ.get("OUTBURST_HEADLESS") == "1":
+            self.controls.set_eye_scoring(False)
+            self.statusBar().showMessage("Bird eye model is not in the models folder")
+            if then_scan and self._folder is not None:
+                self._start_worker()
+            return
+        option = BIRD_EYE_OPTION
+        if self._downloading:
+            if self._download_model_id == option.id:
+                self._download_then_scan = self._download_then_scan or then_scan
+                return
+            self._replace_download = True
+            self._download_role = "bird-eye"
+            self._download_then_scan = then_scan
+            if self._download_worker is not None:
+                self._download_worker.abort()
+            return
+        self._download_role = "bird-eye"
         self._download_then_scan = then_scan
         self._download_model_id = option.id
         self._downloading = True
@@ -937,10 +1005,19 @@ class MainWindow(QMainWindow):
         Limitations: without a following scan, the status names the saved file and no scan starts.
         """
         then_scan = self._download_then_scan
+        role = self._download_role
         self._finish_download_ui()
-        self._model_path = Path(path)
-        self.controls.refresh_models()
-        if then_scan and self.controls.prefer_subject() and self._folder is not None:
+        if role == "bird-eye":
+            self._eye_model_path = Path(path)
+        else:
+            self._model_path = Path(path)
+            self.controls.refresh_models()
+        wants_scan = then_scan and self._folder is not None
+        if role == "bird-eye":
+            wants_scan = wants_scan and self.controls.eye_scoring()
+        else:
+            wants_scan = wants_scan and self.controls.prefer_subject()
+        if wants_scan:
             self._start_worker()
             return
         self.statusBar().showMessage(f"Saved {Path(path).name} in the models folder")
@@ -955,9 +1032,13 @@ class MainWindow(QMainWindow):
         Limitations: subject scoring is cleared only when it is still checked. The scan then runs without the model.
         """
         then_scan = self._download_then_scan
+        role = self._download_role
         self._finish_download_ui()
         self._notify("Could not download the model", message, "warning")
-        if self.controls.prefer_subject():
+        if role == "bird-eye":
+            if self.controls.eye_scoring():
+                self.controls.set_eye_scoring(False)
+        elif self.controls.prefer_subject():
             self.controls.set_subject_checked(False)
         if then_scan and self._folder is not None:
             self._start_worker()
@@ -972,14 +1053,21 @@ class MainWindow(QMainWindow):
         Limitations: a replacement download returns before the cancelled status is shown.
         """
         replace = self._replace_download
+        role = self._download_role
         then_scan = self._download_then_scan
         self._replace_download = False
         self._finish_download_ui()
         if replace:
-            self._begin_download(then_scan)
+            if role == "bird-eye":
+                self._begin_bird_eye_download(then_scan)
+            else:
+                self._begin_download(then_scan)
             return
         self.statusBar().showMessage("Model download cancelled")
-        if self.controls.prefer_subject():
+        if role == "bird-eye":
+            if self.controls.eye_scoring():
+                self.controls.set_eye_scoring(False)
+        elif self.controls.prefer_subject():
             self.controls.set_subject_checked(False)
         if then_scan and self._folder is not None:
             self._start_worker()
@@ -1033,7 +1121,7 @@ class MainWindow(QMainWindow):
         Summarize the open library for the status bar.
 
         Inputs: none.
-        Output: an empty string before a library is loaded. Otherwise file and visible-burst counts, hidden bursts, note count, eye scoring, and compare, zoom, or peaking when those are on.
+        Output: an empty string before a library is loaded. Otherwise file and visible-burst counts, hidden bursts, note count, bird eye detection, and compare, zoom, or peaking when those are on.
         Uses: the status bar.
         Limitations: hidden bursts are counted and not named. A zoom of 1 is shown as 1:1. Any other zoom is shown as an integer ratio.
         """
@@ -1061,7 +1149,7 @@ class MainWindow(QMainWindow):
         if self._peaking:
             modes.append("focus peaking")
         if library.eye_active:
-            message += " · eye scoring"
+            message += " · bird eye detection"
         if modes:
             message += " · " + " · ".join(modes)
         return message
@@ -1875,26 +1963,32 @@ class MainWindow(QMainWindow):
 
     def _on_eye_toggled(self, enabled: bool) -> None:
         """
-        Rescan after eye sharpness is turned on or off.
+        Rescan after bird eye detection is turned on or off.
 
-        Inputs: enabled, the new checkbox state. The argument is unused.
-        Output: no return value. Automatic keepers are cleared. An open folder is rescanned.
-        Uses: the Eye sharpness checkbox.
-        Limitations: with no folder open, only the automatic keepers are cleared. The new checkbox value is not read here.
+        Inputs: enabled, whether the checkbox is now checked.
+        Output: no return value. Automatic keepers are cleared. Turning it off rescans. Turning it on rescans when the weights are ready, or downloads them first.
+        Uses: the Bird eye detection checkbox.
+        Limitations: with no folder open, a missing model still downloads, and no scan follows. A ready model with no folder does not scan.
         """
-        del enabled
         self._clear_automatic_keepers()
-        if self._folder is not None:
-            self.rescan()
+        if not enabled:
+            if self._folder is not None:
+                self.rescan()
+            return
+        if self._bird_eye_ready():
+            if self._folder is not None:
+                self.rescan()
+            return
+        self._begin_bird_eye_download(then_scan=self._folder is not None)
 
     def _eye_circle(self, analysis: FrameAnalysis) -> tuple[int, int, int] | None:
         """
         Return the eye circle to draw on a preview.
 
         Inputs: analysis, the frame measurement.
-        Output: center x, center y, and radius as integers, or None when eye scoring is off or this frame has no eye center or radius.
+        Output: center x, center y, and radius as integers, or None when bird eye detection is off or this frame has no eye center or radius.
         Uses: the eye mark on the preview and the compare pane.
-        Limitations: the circle is in embedded-preview pixels. A missing library, or eye scoring that is not active on the library, returns None.
+        Limitations: the circle is in embedded-preview pixels. A missing library, or a library scanned without bird eye detection, returns None.
         """
         if self._library is None or not self._library.eye_active:
             return None
@@ -1910,7 +2004,7 @@ class MainWindow(QMainWindow):
 
         Inputs: none.
         Output: no return value. Keep marks whose origin is automatic are cleared.
-        Uses: a burst-gap change and turning eye scoring on or off.
+        Uses: a burst-gap change and turning bird eye detection on or off.
         Limitations: a photographer's keep or reject is left in place. Original files are not modified.
         """
 

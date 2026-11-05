@@ -1,6 +1,6 @@
 """Background threads so the window stays responsive.
 
-``AnalyzeWorker`` scans a folder and can be aborted. ``ModelFetchWorker`` downloads one weights file. ``ExportWorker`` copies keepers two at a time. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
+``AnalyzeWorker`` scans a folder and can be aborted. It can pass a bird-eye weights path. ``ModelFetchWorker`` downloads one weights file, including the bird-eye pose model. ``ExportWorker`` copies keepers two at a time. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
 """
 
 from __future__ import annotations
@@ -34,11 +34,12 @@ class AnalyzeWorker(QThread):
         cache_dir: Path,
         subject_model: Path | None,
         eye_scoring: bool = False,
+        eye_model: Path | None = None,
     ) -> None:
         """
         Store the folder and scoring options for a background scan.
 
-        Inputs: folder; recursive; threshold, the burst gap in seconds; weights; cache_dir; subject_model, or None; eye_scoring.
+        Inputs: folder; recursive; threshold, the burst gap in seconds; weights; cache_dir; subject_model, or None; eye_scoring; eye_model, the bird-eye weights, or None.
         Output: no return value. The worker is ready and its abort flag is clear.
         Uses: the scan that fills the review window.
         Limitations: storing the options does not start the scan. The thread runs when start is called.
@@ -51,6 +52,7 @@ class AnalyzeWorker(QThread):
         self._cache_dir = cache_dir
         self._subject_model = subject_model
         self._eye_scoring = eye_scoring
+        self._eye_model = eye_model
         self._abort = False
 
     def abort(self) -> None:
@@ -82,6 +84,7 @@ class AnalyzeWorker(QThread):
                 cache_dir=self._cache_dir,
                 subject_model=self._subject_model,
                 eye_scoring=self._eye_scoring,
+                eye_model=self._eye_model,
                 progress=self._on_progress,
                 should_cancel=lambda: self._abort,
             )
@@ -123,8 +126,8 @@ class ModelFetchWorker(QThread):
 
         Inputs: model_id, a subject-model identifier; directory, the models folder.
         Output: no return value. The worker is ready and its abort flag is clear.
-        Uses: subject scoring setup before a scan.
-        Limitations: an unknown model id is reported later, when run executes.
+        Uses: subject scoring setup, and the bird-eye download, before a scan.
+        Limitations: an unknown model id is reported later, when run executes. The bird-eye id is eye-pose-v0.
         """
         super().__init__()
         self._model_id = model_id

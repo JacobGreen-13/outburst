@@ -236,16 +236,16 @@ def _eye_line(metrics: Metrics) -> str:
 
     Inputs: metrics that may include an eye center, radius, and sharpness.
     Output: an HTML div for no eye, an eye too small to rate, or an eye sharpness number.
-    Uses: frame_info_html when eye scoring is on.
-    Limitations: a missing center or radius is reported as no eye found.
+    Uses: frame_info_html when bird eye detection is on.
+    Limitations: a missing center or radius is reported as no bird eye found.
     """
 
     if metrics.eye_radius is None or metrics.eye_center is None:
-        return '<div style="color:#9a9a9a; margin-top:4px;">No eye found</div>'
+        return '<div style="color:#9a9a9a; margin-top:4px;">No bird eye found</div>'
     if metrics.eye_sharpness is None:
-        return '<div style="color:#9a9a9a; margin-top:4px;">Eye is too small to rate</div>'
+        return '<div style="color:#9a9a9a; margin-top:4px;">Bird eye is too small to rate</div>'
     return (
-        f'<div style="color:#e6c15a; margin-top:4px;">Eye sharpness {metrics.eye_sharpness:.0f}</div>'
+        f'<div style="color:#e6c15a; margin-top:4px;">Bird eye {metrics.eye_sharpness:.0f}</div>'
     )
 
 

@@ -290,7 +290,7 @@ def _rated_eye_sharpness(item: Rankable | None) -> float | None:
     Inputs: item, a frame analysis, or None.
     Output: the eye sharpness as a float, or None when metrics are missing or eye_sharpness is None.
     Uses: eye_chooses_best and the eye ranking key.
-    Limitations: eye scoring is classical. An eye smaller than MIN_RATED_DIAMETER (16 px) is stored with sharpness None and is not rated here.
+    Limitations: the eye comes from the bird-eye pose model. An eye smaller than 16 px is stored with sharpness None and is not rated here.
     """
 
     if item is None or item.metrics is None or item.metrics.eye_sharpness is None:
