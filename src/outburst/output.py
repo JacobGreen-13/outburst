@@ -177,15 +177,18 @@ def review_xmp_fields(decision: str | None, stars: int | None) -> dict[str, str 
     }
 
 
-def write_library_sidecars(
+def frames_for_sidecars(
     library: Library,
     decisions: Mapping[Path, str],
     *,
     stars: Mapping[Path, int] | None = None,
     minimum_frames: int = 2,
-    progress: Callable[[int, int, str], None] | None = None,
-) -> tuple[list[Path], list[str]]:
-    """Write one XMP sidecar per frame. Returns written paths and warning strings."""
+) -> list[Path]:
+    """Keepers that would be saved, plus every frame that has a star rating.
+
+    A star rating is enough on its own. The frame does not also have to be a
+    keeper. A reject with no stars is omitted, and so is every other frame.
+    """
 
     by_path = {item.frame.path: item for item in library.analyses}
     keepers = {
@@ -197,6 +200,46 @@ def write_library_sidecars(
             minimum_frames=minimum_frames,
         )
     }
+    star_ratings = {} if stars is None else stars
+    return [
+        analysis.frame.path
+        for analysis in library.analyses
+        if analysis.frame.path in keepers or star_ratings.get(analysis.frame.path) is not None
+    ]
+
+
+def write_library_sidecars(
+    library: Library,
+    decisions: Mapping[Path, str],
+    *,
+    stars: Mapping[Path, int] | None = None,
+    minimum_frames: int = 2,
+    progress: Callable[[int, int, str], None] | None = None,
+) -> tuple[list[Path], list[str]]:
+    """Write XMP sidecars for keepers and star-rated frames.
+
+    Returns written paths and warning strings. Frames outside that set are
+    left alone, including any sidecar already beside them.
+    """
+
+    by_path = {item.frame.path: item for item in library.analyses}
+    keepers = {
+        choice.path
+        for choice in choose_keepers(
+            library.bursts,
+            by_path,
+            decisions,
+            minimum_frames=minimum_frames,
+        )
+    }
+    selected = set(
+        frames_for_sidecars(
+            library,
+            decisions,
+            stars=stars,
+            minimum_frames=minimum_frames,
+        )
+    )
     recommended: set[Path] = set()
     burst_of: dict[Path, str] = {}
     for burst in library.bursts:
@@ -211,6 +254,8 @@ def write_library_sidecars(
     jobs: list[tuple[Path, dict[str, str | None]]] = []
     for analysis in library.analyses:
         frame = analysis.frame
+        if frame.path not in selected:
+            continue
         decision = decisions.get(frame.path)
         # A keeper in a hidden short burst is not saved, so the sidecar does not flag it as a pick.
         exported = None if frame.path not in keepers and decision == "keep" else decision

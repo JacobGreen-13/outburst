@@ -303,7 +303,7 @@ class ImageViewer(QFrame):
         self.reject_button.setObjectName("rejectButton")
         self.reject_button.setCheckable(True)
         self.reject_button.setToolTip(
-            "Flag this frame as a reject. The XMP sidecar records the reject. Keyboard: X"
+            "Flag this frame as a reject. A star rating on this frame is still written to a sidecar. Keyboard: X"
         )
         self.reject_button.clicked.connect(lambda _checked=False: self.reject_clicked.emit())
         marks = QHBoxLayout()

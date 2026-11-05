@@ -62,6 +62,7 @@ def test_xmp_does_not_touch_the_photograph(tmp_path: Path) -> None:
     assert "outburst:Score" in text
     assert "Outburst" in text
     assert (_digest(photo), photo.stat().st_mtime_ns) == before
+    assert not partner.with_suffix(".xmp").exists()
 
 
 def test_existing_xmp_keeps_unrelated_fields(tmp_path: Path) -> None:
@@ -199,10 +200,58 @@ def test_unmarked_frame_is_not_rated_as_a_keeper(tmp_path: Path) -> None:
     library = _library(tmp_path, [(frame, analysis)])
     written, warnings = write_library_sidecars(library, {})
     assert warnings == []
-    text = written[0].read_text(encoding="utf-8")
-    assert 'xmp:Rating="0"' in text
-    assert 'outburst:Recommended="True"' in text
+    assert written == []
+    assert not photo.with_suffix(".xmp").exists()
     assert _digest(photo) == hashlib.sha256(b"jpeg").digest()
+
+
+def test_sidecars_cover_keepers_and_star_ratings_only(tmp_path: Path) -> None:
+    keeper = tmp_path / "keep.CR3"
+    starred = tmp_path / "stars.CR3"
+    rejected = tmp_path / "reject.CR3"
+    plain = tmp_path / "plain.CR3"
+    for path, body in ((keeper, b"k"), (starred, b"s"), (rejected, b"r"), (plain, b"p")):
+        path.write_bytes(body)
+    library = _library(
+        tmp_path,
+        [_frame(keeper, 0.9), _frame(starred, 0.5), _frame(rejected, 0.4), _frame(plain, 0.2)],
+    )
+    plain_xmp = plain.with_suffix(".xmp")
+    plain_xmp.write_text("camera notes", encoding="utf-8")
+    written, warnings = write_library_sidecars(
+        library,
+        {keeper: "keep", rejected: "reject"},
+        stars={starred: 2},
+    )
+    assert warnings == []
+    assert {path.name for path in written} == {"keep.xmp", "stars.xmp"}
+    assert not rejected.with_suffix(".xmp").exists()
+    assert plain_xmp.read_text(encoding="utf-8") == "camera notes"
+    starred_text = starred.with_suffix(".xmp").read_text(encoding="utf-8")
+    assert 'xmp:Rating="2"' in starred_text
+    assert 'xmpDM:pick="0"' in starred_text
+    assert "xmpDM:good" not in starred_text
+    assert _digest(keeper) == hashlib.sha256(b"k").digest()
+
+
+def test_short_burst_stars_are_written_without_a_pick(tmp_path: Path) -> None:
+    photo = tmp_path / "solo.CR3"
+    photo.write_bytes(b"raw")
+    library = _library(tmp_path, [_frame(photo, 0.8)])
+    written, warnings = write_library_sidecars(library, {photo: "keep"}, minimum_frames=2)
+    assert warnings == []
+    assert written == []
+    assert not photo.with_suffix(".xmp").exists()
+    written, warnings = write_library_sidecars(
+        library,
+        {photo: "keep"},
+        stars={photo: 1},
+        minimum_frames=2,
+    )
+    assert warnings == []
+    text = written[0].read_text(encoding="utf-8")
+    assert 'xmp:Rating="1"' in text
+    assert 'xmpDM:pick="0"' in text
 
 
 def test_report_lists_the_recommended_frame(tmp_path: Path) -> None:
