@@ -2,7 +2,7 @@
 
 The checkbox is Bird eye detection. It downloads ``eye_pose_v0.pt`` (synthet/eye-pose-v0, YOLO11n-pose trained on CUB-200-2011) and reads the left-eye and right-eye keypoints. A keypoint below 0.35 confidence is ignored. Sharpness is the Laplacian variance inside a disk sized from the bird box, and it is stored only when that disk is at least 16 px across. This is birds only. It does not judge a blink or a catchlight, and it does not look for mammal eyes.
 
-``measure_eye`` scores a disk the caller already located. ``eye_from_pose`` reads one pose result. ``load_bird_eye_detector`` opens weights that are already on disk. ``BirdEyeDetector.find_many`` runs a batch on one thread.
+``measure_eye`` scores a disk the caller already located. ``eye_from_pose`` reads one pose result. ``pose_device`` keeps this model off MPS. ``load_bird_eye_detector`` opens weights that are already on disk. ``BirdEyeDetector.find_many`` runs a batch on one thread: the whole preview first, then overlapping regions when that preview has no eye.
 """
 
 from __future__ import annotations
@@ -23,6 +23,11 @@ MIN_RATED_DIAMETER = 16
 LEFT_EYE_INDEX = 1
 RIGHT_EYE_INDEX = 2
 MIN_KEYPOINT_CONFIDENCE = 0.35
+# A bird that is clear but small in a 1024 px preview is missed at imgsz 640.
+# Overlapping windows of this size make that bird a larger part of the frame.
+TILE_EDGE = 512
+# Appended to the weights cache key so an older scan that stored no eye is not reused.
+EYE_CACHE_TOKEN = "eye-v2"
 
 
 @dataclass(frozen=True)
@@ -136,13 +141,30 @@ def eye_from_pose(result: object, image: np.ndarray) -> Eye | None:
     return best[1]
 
 
+def pose_device(requested: str | None = None) -> str:
+    """Choose the torch device for the bird-eye pose model.
+
+    Inputs: requested, `mps`, `cuda`, `cpu`, or None. None uses the subject detector's device order.
+    Output: `cuda` or `cpu`. An MPS request is returned as cpu.
+    Uses: load_bird_eye_detector.
+    Limitations: this does not load weights. Pose coordinates from MPS have come back unusable, so this model stays on the CPU even when a subject model uses MPS. A missing torch install yields cpu through the subject device order.
+    """
+
+    from outburst.subject import preferred_device
+
+    chosen = requested or preferred_device()
+    if chosen == "mps":
+        return "cpu"
+    return chosen
+
+
 def load_bird_eye_detector(model_path: Path, device: str | None = None) -> BirdEyeDetector:
     """Load bird-eye pose weights that are already on disk. This does not download them.
 
-    Inputs: model_path, the .pt file; device, an optional torch device. The subject detector's device order is used when device is omitted.
+    Inputs: model_path, the .pt file; device, an optional torch device. The subject detector's device order is used when device is omitted, except that MPS becomes cpu.
     Output: a BirdEyeDetector bound to that file and device.
     Uses: analyze_folder when Bird eye detection is on and no finder was passed in.
-    Limitations: a missing file raises FileNotFoundError, and a missing ultralytics install raises ImportError. The weights are AGPL-3.0, separate from Outburst, and were trained on CUB-200 bird photos. The returned detector must stay on one thread.
+    Limitations: a missing file raises FileNotFoundError, and a missing ultralytics install raises ImportError. The weights are AGPL-3.0, separate from Outburst, and were trained on CUB-200 bird photos. The returned detector must stay on one thread. It does not run on MPS.
     """
 
     if not model_path.is_file():
@@ -153,9 +175,13 @@ def load_bird_eye_detector(model_path: Path, device: str | None = None) -> BirdE
         raise ImportError(
             "Bird eye detection needs the optional extra: pip install 'outburst[subject]'"
         ) from exc
+
     from outburst.subject import preferred_device
 
-    chosen = device or preferred_device()
+    resolved = preferred_device() if device is None else device
+    chosen = pose_device(resolved)
+    if resolved == "mps":
+        log.info("Bird eye detection is using the CPU so eye coordinates stay intact")
     log.info("Loading bird eye model %s on %s", model_path, chosen)
     return BirdEyeDetector(YOLO(str(model_path)), chosen)
 
@@ -181,24 +207,119 @@ class BirdEyeDetector:
         Inputs: images, BGR previews in batch order.
         Output: one Eye or None per image. An empty input returns an empty list.
         Uses: the scan pipeline, on the coordinating thread.
-        Limitations: the model is not shared across threads. Images are converted to RGB and predicted at imgsz 640. A short result list is padded with None. A prediction error returns None for every image in the batch.
+        Limitations: the model is not shared across threads. Arrays are passed through as BGR. Ultralytics treats a NumPy frame as BGR and swaps channels itself, so this method does not convert to RGB. Each frame is predicted at imgsz 640. A frame with no eye is searched again in overlapping 512 px windows, and the eye is mapped back onto the full preview. A short result list is padded with None. A prediction error on the full frames leaves those frames empty, and the window search still runs. A prediction error on the windows leaves those frames without an eye.
         """
 
         if not images:
             return []
-        rgb = [cv2.cvtColor(image, cv2.COLOR_BGR2RGB) for image in images]
+        prepared = [np.ascontiguousarray(image) for image in images]
+        results = self._predict(prepared)
+        parsed = [
+            eye_from_pose(result, image) if result is not None else None
+            for result, image in zip(results, prepared, strict=False)
+        ]
+        if len(parsed) < len(prepared):
+            parsed.extend([None] * (len(prepared) - len(parsed)))
+        parsed = parsed[: len(prepared)]
+        self._fill_from_tiles(prepared, parsed)
+        return parsed
+
+    def _predict(self, images: list[np.ndarray]) -> list[object | None]:
+        """Run one pose prediction and align the results with the input list.
+
+        Inputs: images, BGR arrays in batch order.
+        Output: one result or None per image. A prediction error returns None for every image.
+        Uses: find_many for the full preview and for the overlap windows.
+        Limitations: the model is not shared across threads. This does not convert color. A short result list is padded with None.
+        """
+
         predict = getattr(self._model, "predict")
         try:
-            results = predict(rgb, verbose=False, device=self.device, imgsz=640)
+            results = predict(images, verbose=False, device=self.device, imgsz=640)
         except Exception:
             log.warning("Bird eye detection failed for %d frame(s)", len(images), exc_info=True)
             return [None] * len(images)
         if not results:
             return [None] * len(images)
-        parsed = [eye_from_pose(result, image) for result, image in zip(results, images, strict=False)]
-        if len(parsed) < len(images):
-            parsed.extend([None] * (len(images) - len(parsed)))
-        return parsed[: len(images)]
+        aligned = list(results)
+        if len(aligned) < len(images):
+            aligned.extend([None] * (len(images) - len(aligned)))
+        return aligned[: len(images)]
+
+    def _fill_from_tiles(self, images: list[np.ndarray], parsed: list[Eye | None]) -> None:
+        """Search overlapping windows for frames that still have no eye.
+
+        Inputs: images, the BGR previews; parsed, the full-frame eyes, updated in place.
+        Output: none. A window eye is written into parsed at that frame.
+        Uses: find_many after the full-frame pass.
+        Limitations: windows are skipped when every frame already has an eye, and when the preview is already 512 px or smaller on both sides. The window prediction runs on this same thread. A prediction error leaves the missing frames empty. Sharpness is measured on the full preview, not on the window.
+        """
+
+        tiles: list[np.ndarray] = []
+        owners: list[tuple[int, int, int]] = []
+        for index, eye in enumerate(parsed):
+            if eye is not None:
+                continue
+            for origin_x, origin_y, crop in _tiles(images[index]):
+                tiles.append(np.ascontiguousarray(crop))
+                owners.append((index, origin_x, origin_y))
+        if not tiles:
+            return
+        found = self._predict(tiles)
+        best: dict[int, tuple[tuple[float, float], Eye]] = {}
+        for (index, origin_x, origin_y), result in zip(owners, found, strict=False):
+            if result is None:
+                continue
+            eye = eye_from_pose(result, crop)
+            if eye is None:
+                continue
+            moved = measure_eye(images[index], eye.x + origin_x, eye.y + origin_y, eye.radius)
+            if moved is None:
+                continue
+            rank = (1.0 if moved.sharpness is not None else 0.0, moved.sharpness or 0.0)
+            current = best.get(index)
+            if current is None or rank > current[0]:
+                best[index] = (rank, moved)
+        for index, (_rank, eye) in best.items():
+            parsed[index] = eye
+
+
+def _tiles(image: np.ndarray) -> list[tuple[int, int, np.ndarray]]:
+    """Cut a preview into overlapping squares when it is larger than one pose window.
+
+    Inputs: image, a BGR preview.
+    Output: origin x, origin y, and the window array. An empty list when both sides are already within TILE_EDGE.
+    Uses: BirdEyeDetector._fill_from_tiles.
+    Limitations: each window is at most 512 px on a side and steps by half that, so neighboring windows overlap. A preview that already fits in one window is not cut. The windows are views of the preview, not copies, and they are not resized.
+    """
+
+    height, width = image.shape[:2]
+    if height <= TILE_EDGE and width <= TILE_EDGE:
+        return []
+    crops: list[tuple[int, int, np.ndarray]] = []
+    for origin_y in _origins(height, TILE_EDGE):
+        for origin_x in _origins(width, TILE_EDGE):
+            crops.append((origin_x, origin_y, image[origin_y : origin_y + TILE_EDGE, origin_x : origin_x + TILE_EDGE]))
+    return crops
+
+
+def _origins(length: int, tile: int) -> list[int]:
+    """Starting positions that cover one side of a preview with overlapping windows.
+
+    Inputs: length, the preview side in pixels; tile, the window size.
+    Output: a list of origins. A side that already fits returns one origin at 0.
+    Uses: _tiles.
+    Limitations: the step is half the window. The last origin is pulled back so the window stays inside the preview.
+    """
+
+    if length <= tile:
+        return [0]
+    step = max(1, tile // 2)
+    origins = list(range(0, length - tile + 1, step))
+    last = length - tile
+    if origins[-1] != last:
+        origins.append(last)
+    return origins
 
 
 def _choose_eye(found: list[tuple[float, Eye]]) -> tuple[float, Eye] | None:
@@ -268,6 +389,9 @@ def _as_numpy(value: object) -> np.ndarray | None:
 
     if value is None:
         return None
+    detach = getattr(value, "detach", None)
+    if callable(detach):
+        value = detach()
     cpu = getattr(value, "cpu", None)
     if callable(cpu):
         value = cpu()
