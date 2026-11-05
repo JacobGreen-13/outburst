@@ -2,6 +2,8 @@
 
 Outburst never opens a photograph for writing. Sidecars are separate files.
 Keeper export copies or hard-links the chosen frames into a folder you pick.
+
+``choose_keepers`` and ``export_keepers`` save marked frames from bursts that meet the minimum length. ``frames_for_sidecars``, ``review_xmp_fields``, ``sidecar_rating``, and ``write_library_sidecars`` write XMP for those keepers and for any star-rated frame. ``write_xmp_sidecar``, ``fresh_xmp``, and ``upsert_xmp`` create or update one sidecar. ``write_reports`` and ``build_report`` write JSON and CSV.
 """
 
 from __future__ import annotations

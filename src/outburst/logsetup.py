@@ -1,4 +1,7 @@
-"""Logging for the desktop app. Library code only emits records."""
+"""Logging for the desktop app. Library code only emits records.
+
+``configure_logging`` sends records to stderr and, when the cache folder can be created, to a rotating ``outburst.log``.
+"""
 
 from __future__ import annotations
 

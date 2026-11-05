@@ -1,10 +1,6 @@
 """Small thread pools for work that waits on disk or OpenCV.
 
-The window stays on its own thread. These helpers run a bounded pool and
-hand results back in input order, on the thread that asked for the work.
-SQLite writes stay on that thread. Two to four workers is the cap for
-preview scoring, because OpenCV already threads inside a measurement.
-Keeper copies and XMP writes use two workers so they do not fight the disk.
+``preview_workers`` returns 1 for a single task and otherwise 2 to 4 workers. ``run_ordered`` runs indexed jobs, delivers results in input order on the caller thread, and can cancel between completions. SQLite writes stay on the caller. The pool does not share a YOLO model across threads.
 """
 
 from __future__ import annotations

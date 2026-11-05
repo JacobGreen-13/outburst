@@ -1,4 +1,7 @@
-"""Launch the Outburst review window."""
+"""Launch the Outburst review window.
+
+``main`` parses an optional folder and ``--version``. ``_run_gui`` applies the theme, shows ``MainWindow``, and opens that folder when one was given. A missing PySide6 install returns status 1.
+"""
 
 from __future__ import annotations
 

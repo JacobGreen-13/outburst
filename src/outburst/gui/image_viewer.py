@@ -1,4 +1,7 @@
-"""Large preview of the frame currently under review."""
+"""Large preview of the frame currently under review.
+
+``next_zoom`` steps through fit, 1:1, 2:1, and 4:1. ``PreviewLabel`` pans and crops the embedded preview. ``ImageViewer.set_frame`` shows one frame, ``set_partner`` the compare frame, and ``set_view_mode`` applies zoom and focus peaking to both. ``_draw_box``, ``_draw_circle``, and ``_draw_badge`` mark the subject, the eye, and the keeper on the preview. Zoom does not demosaic the RAW file.
+"""
 
 from __future__ import annotations
 

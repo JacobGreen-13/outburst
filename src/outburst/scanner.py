@@ -1,4 +1,7 @@
-"""Find RAW and JPEG photographs in a folder without touching their contents."""
+"""Find RAW and JPEG photographs in a folder without touching their contents.
+
+``scan_folder`` lists RAW files and JPEGs that are not paired with a same-stem RAW. ``_iter_files`` skips hidden names and, unless recursive, stays in the top folder. ``_describe`` records size and modification time, or skips a file that cannot be stated.
+"""
 
 from __future__ import annotations
 

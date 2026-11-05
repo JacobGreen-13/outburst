@@ -1,4 +1,7 @@
-"""Burst list helpers and the horizontal filmstrip."""
+"""Burst list helpers and the horizontal filmstrip.
+
+``Thumb`` is one card's data, including the burst frame index. ``ThumbCard`` draws it and emits a click with the Shift state. ``Filmstrip.set_cards``, ``mark_selected``, and ``mark_compared`` show the row. ``refresh_flags`` updates badges, or rebuilds the row when the order changed. The wheel scrolls the strip and does not zoom the preview.
+"""
 
 from __future__ import annotations
 

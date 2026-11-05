@@ -1,4 +1,7 @@
-"""Dark review theme. A dim surround makes it easier to judge a photograph."""
+"""Dark review theme. A dim surround makes it easier to judge a photograph.
+
+``apply_theme`` sets the Fusion palette and the stylesheet for the rail, preview, and filmstrip. ``build_app_icon`` draws the stacked-frame icon in memory so the repo has no icon file.
+"""
 
 from __future__ import annotations
 

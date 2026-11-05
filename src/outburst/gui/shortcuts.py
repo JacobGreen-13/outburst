@@ -1,4 +1,7 @@
-"""Keyboard shortcuts shown in the Help menu and the README."""
+"""Keyboard shortcuts shown in the Help menu and the README.
+
+``shortcuts_html`` turns the ``SHORTCUTS`` table into the Help dialog. The window handles the keys itself so a focused slider is left alone.
+"""
 
 from __future__ import annotations
 

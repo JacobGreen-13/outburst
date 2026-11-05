@@ -1,6 +1,8 @@
 """Plain-text and HTML snippets for the review window.
 
 Kept outside the Qt layer so the wording can be tested without a display.
+
+``filmstrip_order`` and ``visible_bursts`` choose which frames appear and in what order. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``star_glyphs``, ``frame_info_html``, and ``format_captured`` build the labels. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
 """
 
 from __future__ import annotations

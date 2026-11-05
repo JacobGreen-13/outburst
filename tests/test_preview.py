@@ -1,4 +1,7 @@
-"""Embedded preview extraction."""
+"""Embedded preview extraction.
+
+``_jpeg_bytes`` builds a tiny JPEG. The tests check a header scan, a rawpy thumbnail, a bitmap thumbnail, a paired JPEG, and a file with no preview.
+"""
 
 from __future__ import annotations
 

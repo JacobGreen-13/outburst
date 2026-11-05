@@ -4,6 +4,8 @@ exiftool is used when it is installed because it understands the most camera
 formats, including CR3. Otherwise Outburst tries the exifread library, then
 parses TIFF-based EXIF and JPEG APP1 segments itself, then looks for a date
 string in the file header.
+
+``read_capture_info`` tries those readers in that order. ``exiftool_available``, ``exifread_available``, and ``timestamp_reader_warning`` say which reader will be used. ``parse_exif_datetime`` reads a clock string. ``build_exif_app1`` and ``inject_exif`` write a clock into synthetic JPEGs for tests. The private helpers parse exiftool JSON, exifread tags, TIFF, and JPEG. Photograph files are opened for reading.
 """
 
 from __future__ import annotations

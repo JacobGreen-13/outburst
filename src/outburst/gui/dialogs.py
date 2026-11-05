@@ -1,4 +1,7 @@
-"""Small dialogs and message boxes for the review window."""
+"""Small dialogs and message boxes for the review window.
+
+``headless`` is true when ``OUTBURST_HEADLESS`` is 1. ``notify`` shows a message, and ``ask`` returns False in that mode. ``ExportKeepersDialog.ask`` collects a folder and copy or hard-link mode. ``show_shortcuts`` and ``show_warnings`` open the help and scan-note dialogs.
+"""
 
 from __future__ import annotations
 

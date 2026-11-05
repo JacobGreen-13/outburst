@@ -1,4 +1,7 @@
-"""Threshold, weights, and the optional subject-detection toggle."""
+"""Threshold, weights, and the optional subject-detection toggle.
+
+``ControlPanel`` is the Grouping and Scoring sections. The getters read burst gap, sharpness, center, minimum frames, subfolders, subject, eye, and the model id. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark.
+"""
 
 from __future__ import annotations
 

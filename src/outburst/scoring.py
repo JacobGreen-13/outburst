@@ -5,6 +5,8 @@ fine detail. A center crop is blended in because wildlife subjects are often
 near the middle of the frame. Exposure penalizes clipped highlights more than
 crushed shadows. The composite score is cached as raw measurements plus weights,
 so photographers can retune the balance without reading the RAW files again.
+
+``score_bgr`` measures one preview. ``laplacian_variance``, ``tenengrad``, ``exposure_parts``, ``peak_window_sharpness``, and ``composite_score`` are the pieces of that measurement. ``recommended_offset`` and ``eye_chooses_best`` pick the best frame. ``compare_partner_offset`` picks the other frame for compare. ``focus_peak_bgr`` paints the strongest edges. ``center_crop`` and ``crop_box`` cut regions. Scores use the preview, not a demosaic.
 """
 
 from __future__ import annotations

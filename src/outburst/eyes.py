@@ -3,6 +3,8 @@
 Eye scoring is optional. A dark, round spot counts as an eye. It is rated only
 when the spot is large enough on the preview to measure. Smaller eyes are
 reported and left out of the rank.
+
+``locate_eye`` returns one eye, or none. ``Eye.rated`` is true only when the disk is at least 16 px across. ``_candidates``, ``_contrast``, and ``_masked_sharpness`` search contours and measure the disk. This is not a blink or catchlight test.
 """
 
 from __future__ import annotations

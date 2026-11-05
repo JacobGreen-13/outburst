@@ -2,6 +2,8 @@
 
 This is the part the window calls. It reads photographs and writes only inside
 the cache directory. Original files are opened for reading.
+
+``analyze_folder`` lists, scores, and groups a folder. ``with_weights`` recomputes composites from cached measurements. ``with_threshold`` regroups without rereading files. ``_score_all`` and ``_measure_with_detector`` run the worker pools. The other helpers decode one preview, detect a subject batch, score it, and store the cache row on the coordinating thread.
 """
 
 from __future__ import annotations

@@ -3,6 +3,8 @@
 RAW files are never demosaiced. Outburst asks rawpy for the embedded JPEG
 and, if that is missing, scans the file header for an embedded JPEG. A JPEG
 that shares the RAW file's name is preferred when the camera wrote one.
+
+``extract_preview_bytes`` prefers the paired JPEG, then rawpy's thumbnail, then a header scan. ``decode_image`` and ``resize_max_edge`` turn those bytes into a BGR image no wider than the analysis edge. ``encode_jpeg`` stores the cache preview. Nothing here demosaics a RAW file.
 """
 
 from __future__ import annotations

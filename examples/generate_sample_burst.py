@@ -1,9 +1,6 @@
 """Write a tiny JPEG burst so you can try Outburst without RAW files.
 
-Run from the repository root after installing Outburst:
-
-    python examples/generate_sample_burst.py
-    outburst examples/sample_burst
+``scene`` draws one synthetic frame. ``main`` writes six JPEGs in two bursts under ``examples/sample_burst``. Run ``python examples/generate_sample_burst.py``, then ``outburst examples/sample_burst``.
 """
 
 from __future__ import annotations

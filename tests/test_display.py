@@ -1,4 +1,7 @@
-"""Review-window wording."""
+"""Review-window wording.
+
+``test_filmstrip_order_keeps_time_and_ranks_score`` checks Time and Score order. The other tests check hidden short bursts, escaped filenames, badges, score captions, and obvious misses.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,7 @@
-"""Data objects shared by the culling pipeline and the review window."""
+"""Data objects shared by the culling pipeline and the review window.
+
+``Burst.count`` and ``Burst.started_at`` describe one burst. ``Weights.clamped`` keeps sharpness, exposure, and center mix in a usable range. ``Frame``, ``Metrics``, ``FrameAnalysis``, and ``Library`` are data only.
+"""
 
 from __future__ import annotations
 

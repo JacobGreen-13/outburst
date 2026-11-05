@@ -1,4 +1,7 @@
-"""Background scan so the window stays responsive while previews are scored."""
+"""Background threads so the window stays responsive.
+
+``AnalyzeWorker`` scans a folder and can be aborted. ``ModelFetchWorker`` downloads one weights file. ``ExportWorker`` copies keepers two at a time. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
+"""
 
 from __future__ import annotations
 

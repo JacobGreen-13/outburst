@@ -4,6 +4,8 @@ The cache lives in the user cache directory, never beside the photographs.
 Rows are keyed by path, size, modification time, score version, and subject
 model so a retake or a formula change is scored again and an unchanged file
 is not.
+
+``default_cache_dir`` picks the user cache folder. ``Cache.get`` and ``Cache.put`` store measurements and preview paths. ``decisions_for``, ``decision_origins``, and ``set_decision`` store picks and rejects. ``stars_for`` and ``set_stars`` store ratings. ``forget_folder`` and ``clear`` drop measurements and leave decisions and ratings. The remaining helpers migrate columns and resolve preview paths.
 """
 
 from __future__ import annotations

@@ -1,4 +1,7 @@
-"""End-to-end scoring on synthetic bursts. Original bytes stay put."""
+"""End-to-end scoring on synthetic bursts. Original bytes stay put.
+
+``_digest`` hashes a file. The tests check grouping, the cache, a threshold change that does not reread files, a corrupt RAW, preview threads, subject detection on the caller thread, cancel, and scoring with no detector.
+"""
 
 from __future__ import annotations
 

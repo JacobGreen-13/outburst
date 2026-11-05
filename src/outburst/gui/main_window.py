@@ -1,4 +1,7 @@
-"""The Outburst review window."""
+"""The Outburst review window.
+
+``MainWindow.open_path`` and ``rescan`` scan a folder. ``present`` shows a finished library. ``_select_frame``, ``_step_frame``, and ``_show_burst`` move through the filmstrip order. ``_toggle_decision``, ``_set_stars``, and ``_reject_obvious`` record picks, stars, and rejects. ``_export_keepers``, ``_export_report``, and ``_write_xmp`` write copies, a report, and sidecars. ``_load_settings`` and ``_save_settings`` remember the controls, including filmstrip order. Keyboard handling ignores a focused slider or text box.
+"""
 
 from __future__ import annotations
 
