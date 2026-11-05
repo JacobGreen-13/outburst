@@ -11,10 +11,12 @@ import pytest
 from outburst.models import Frame, Metrics, Weights
 from outburst.scoring import (
     SHARPNESS_SCALE,
+    compare_partner_offset,
     composite_score,
     crop_box,
     effective_sharpness,
     exposure_parts,
+    focus_peak_bgr,
     laplacian_variance,
     normalize_sharpness,
     recommended_offset,
@@ -107,3 +109,57 @@ def test_recommended_frame_breaks_ties_by_filename() -> None:
 def test_score_rejects_a_grayscale_array() -> None:
     with pytest.raises(ValueError):
         score_bgr(np.zeros((8, 8), dtype=np.uint8))
+
+
+def test_sharpest_center_patch_outranks_an_even_soft_frame() -> None:
+    image = np.full((180, 180, 3), 40, dtype=np.uint8)
+    rng = np.random.default_rng(1)
+    image += rng.integers(0, 4, size=image.shape, dtype=np.uint8)
+    patch = np.indices((28, 28)).sum(axis=0)
+    checker = ((patch // 2) % 2) * 255
+    image[76:104, 76:104] = checker[:, :, None]
+    metrics = score_bgr(image)
+    assert metrics.critical_sharpness is not None
+    assert metrics.critical_sharpness > metrics.center_sharpness * 2
+    weights = Weights()
+    averaged = weights.center_mix * metrics.center_sharpness + (1 - weights.center_mix) * metrics.sharpness
+    assert effective_sharpness(metrics, weights) > averaged
+
+
+def test_subject_score_uses_the_sharpest_patch_on_the_animal() -> None:
+    image = np.full((160, 160, 3), 30, dtype=np.uint8)
+    patch = np.indices((24, 24)).sum(axis=0)
+    checker = ((patch // 2) % 2) * 255
+    image[20:44, 20:44] = checker[:, :, None]
+    metrics = score_bgr(image, subject_box=(16, 16, 40, 40), subject_label="bird", subject_confidence=0.9)
+    assert metrics.subject_sharpness is not None
+    assert metrics.critical_sharpness is not None
+    assert effective_sharpness(metrics, Weights(prefer_subject=True)) == pytest.approx(metrics.subject_sharpness)
+    assert metrics.subject_sharpness > metrics.critical_sharpness
+
+
+def test_focus_peak_paints_edges_on_a_sharp_pattern() -> None:
+    image = np.zeros((80, 80, 3), dtype=np.uint8)
+    image[:, ::4, :] = 255
+    peaked = focus_peak_bgr(image)
+    assert peaked.shape == image.shape
+    green = np.all(peaked == (80, 255, 120), axis=2)
+    assert int(green.sum()) > 10
+
+
+def test_compare_partner_is_the_other_top_frame() -> None:
+    class Row:
+        def __init__(self, composite: float) -> None:
+            self.composite = composite
+            self.metrics = Metrics(1, 1, 1, 1, 0, 0)
+
+    frames = [
+        Frame(Path("soft.jpg"), "jpeg", None, "missing", None, 1, 1),
+        Frame(Path("best.jpg"), "jpeg", None, "missing", None, 1, 1),
+        Frame(Path("mid.jpg"), "jpeg", None, "missing", None, 1, 1),
+    ]
+    by_path = {frames[0].path: Row(0.2), frames[1].path: Row(0.9), frames[2].path: Row(0.5)}
+    assert recommended_offset(frames, by_path) == 1
+    assert compare_partner_offset(frames, by_path, 1) == 2
+    assert compare_partner_offset(frames, by_path, 0) == 1
+    assert compare_partner_offset(frames[:1], by_path, 0) is None
