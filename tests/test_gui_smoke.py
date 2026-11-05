@@ -162,6 +162,10 @@ def test_recommended_frame_starts_marked_and_save_uses_that_mark(qt_app, tmp_pat
     qt_app.processEvents()
 
     assert window.export_action.text().startswith("Save keepers")
+    assert window.report_action.text() == "Save manifest…"
+    assert window.report_action.iconText() == "Save manifest"
+    assert "outburst-report.json" in window.report_action.toolTip()
+    assert "keeper marks" in window.report_action.toolTip()
     assert window.clear_cache_action.text() == "Clear cache…"
     burst = library.bursts[0]
     recommended = burst.frames[recommended_offset(burst.frames, {item.frame.path: item for item in library.analyses})]

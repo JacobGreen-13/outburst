@@ -542,7 +542,7 @@ class MainWindow(QMainWindow):
         self.open_action = self._action("Open folder…", self._open_folder_dialog, "Ctrl+O", open_icon)
         self.rescan_action = self._action("Rescan", self.rescan, "F5", refresh_icon)
         self.export_action = self._action("Save keepers…", self._export_keepers, "Ctrl+E", save_icon)
-        self.report_action = self._action("Export report…", self._export_report, "Ctrl+Shift+E")
+        self.report_action = self._action("Save manifest…", self._export_report, "Ctrl+Shift+E")
         self.xmp_action = self._action("Write XMP sidecars…", self._write_xmp, "Ctrl+Shift+X")
         self.cancel_action = self._action("Cancel scan", self._cancel_scan, "Esc")
         quit_action = self._action("Quit", self.close, "Ctrl+Q")
@@ -564,7 +564,11 @@ class MainWindow(QMainWindow):
         )
         self.export_action.setIconText("Save")
         self.export_action.setToolTip("Save the frames marked as keepers. Originals stay where they are.")
-        self.report_action.setIconText("Report")
+        self.report_action.setIconText("Save manifest")
+        self.report_action.setToolTip(
+            "Save a manifest of this folder as outburst-report.json and outburst-report.csv. "
+            "It lists every frame, its score, and the keeper marks. Photos are not changed."
+        )
         self.xmp_action.setIconText("XMP")
         for action in (
             self.open_action,
@@ -2071,18 +2075,18 @@ class MainWindow(QMainWindow):
 
     def _export_report(self) -> None:
         """
-        Write a JSON report and a CSV report for the open library into a chosen folder.
+        Write a JSON manifest and a CSV manifest for the open library into a chosen folder.
 
         Inputs: none.
         Output: no return value. The status bar names the two files. A write error shows a warning.
-        Uses: the Export report action.
+        Uses: the Save manifest action.
         Limitations: a headless process, or no library, returns without a dialog. Cancelling the dialog does nothing. The report is given the current stars and Minimum frames.
         """
         if self._library is None or os.environ.get("OUTBURST_HEADLESS") == "1":
             return
         chosen = QFileDialog.getExistingDirectory(
             self,
-            "Export a report",
+            "Save a manifest",
             str(self._folder or self._dialog_start),
         )
         if not chosen:
@@ -2096,7 +2100,7 @@ class MainWindow(QMainWindow):
                 minimum_frames=self.controls.minimum_frames(),
             )
         except OSError as exc:
-            self._notify("Report failed", str(exc), "warning")
+            self._notify("Could not save the manifest", str(exc), "warning")
             return
         self.statusBar().showMessage(f"Wrote {json_path.name} and {csv_path.name}")
 

@@ -447,7 +447,7 @@ def write_reports(
 
     Inputs: library, the scanned folder; decisions, path to keep or reject; dest_dir, the folder the photographer picked; stars, optional ratings; minimum_frames, the shortest burst whose keepers are listed as saved.
     Output: the JSON path and the CSV path.
-    Uses: the Report action.
+    Uses: the Save manifest action.
     Limitations: the files are created in dest_dir. Photographs are not modified. Keepers follow the same minimum-length rule as Save keepers.
     """
 

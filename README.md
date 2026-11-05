@@ -135,7 +135,7 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 | Ctrl+O | Open a folder |
 | F5 | Clear cached measurements for this folder and scan it again |
 | Ctrl+E | Save the frames marked as keepers |
-| Ctrl+Shift+E | Export a JSON and CSV report |
+| Ctrl+Shift+E | Save a JSON and CSV manifest of every frame, its score, and the keeper marks |
 | Ctrl+Shift+X | Write XMP sidecars for keepers and star-rated frames |
 | Esc | Cancel the scan |
 
@@ -171,7 +171,7 @@ Delete that folder if you want Outburst to measure everything again. A log file,
 
 A burst shorter than the minimum is not saved, so a pick on one of those frames is not written. Stars on that frame are still written. A reject with no stars is left without a sidecar. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing, and the count is those frames. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it. In Lightroom, choose Metadata → Read Metadata from Files. In Capture One, choose Load Metadata.
 
-**Report** writes `outburst-report.json` and `outburst-report.csv`. `examples/sample_output` shows the shape of both, plus a sample sidecar. Reports you export use full file paths.
+**Save manifest** writes `outburst-report.json` and `outburst-report.csv`. The files list every frame, its score, and the keeper marks. `examples/sample_output` shows the shape of both, plus a sample sidecar. Manifests use full file paths. Photos are not changed.
 
 ## Subject detection
 
