@@ -1,6 +1,6 @@
 """The review window can load a folder and move between frames.
 
-``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, automatic keepers, rescan, a blank preview while scoring, model download, zoom, filmstrip order, compare, stars, bird eye detection, a hidden single-frame folder that still reports detected eyes, and a save that stays disabled until the copy finishes.
+``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, automatic keepers, rescan, a blank preview while scoring, model download, installing Ultralytics before subject or bird eye detection, zoom, filmstrip order, compare, stars, bird eye detection, a hidden single-frame folder that still reports detected eyes, and a save that stays disabled until the copy finishes.
 """
 
 from __future__ import annotations
@@ -434,6 +434,128 @@ def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monke
     assert window.controls.eye_scoring() is False
     assert "Bird eye model" in window.statusBar().currentMessage()
     window.close()
+
+
+def test_a_missing_subject_runtime_installs_before_the_scan(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import QThread
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker, RuntimeInstallWorker
+
+    monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    installs: list[str] = []
+    scans: list[str] = []
+
+    class Spy(RuntimeInstallWorker):
+        def start(self, priority: QThread.Priority = QThread.Priority.InheritPriority) -> None:
+            installs.append("runtime")
+
+    monkeypatch.setattr("outburst.gui.main_window.RuntimeInstallWorker", Spy)
+    monkeypatch.setattr(AnalyzeWorker, "start", lambda *_args, **_kwargs: scans.append("scan"))
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window._folder = tmp_path / "photos"
+    window.controls.set_eye_scoring(True)
+    window.controls.set_subject_checked(True)
+    window._start_worker()
+    qt_app.processEvents()
+    assert installs == ["runtime"]
+    assert scans == []
+    assert "PyTorch" in window.statusBar().currentMessage()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_headless_missing_runtime_still_scans(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker, RuntimeInstallWorker
+
+    installs: list[str] = []
+    scans: list[str] = []
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    monkeypatch.setattr(MainWindow, "_model_ready", lambda _self: True)
+    monkeypatch.setattr(MainWindow, "_bird_eye_ready", lambda _self: True)
+    monkeypatch.setattr(
+        RuntimeInstallWorker,
+        "start",
+        lambda *_args, **_kwargs: installs.append("runtime"),
+    )
+    monkeypatch.setattr(AnalyzeWorker, "start", lambda *_args, **_kwargs: scans.append("scan"))
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window._folder = tmp_path / "photos"
+    window.controls.set_eye_scoring(True)
+    window.controls.set_subject_checked(True)
+    window._start_worker()
+    qt_app.processEvents()
+    assert installs == []
+    assert scans == ["scan"]
+    window.close()
+    qt_app.processEvents()
+
+
+def test_a_finished_runtime_install_starts_the_scan(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
+
+    ready = {"ok": False}
+    scans: list[str] = []
+    monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: ready["ok"])
+    monkeypatch.setattr(MainWindow, "_model_ready", lambda _self: True)
+    monkeypatch.setattr(MainWindow, "_bird_eye_ready", lambda _self: True)
+    monkeypatch.setattr(AnalyzeWorker, "start", lambda *_args, **_kwargs: scans.append("scan"))
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window._folder = tmp_path / "photos"
+    window.controls.set_eye_scoring(True)
+    window._download_then_scan = True
+    window._downloading = True
+    ready["ok"] = True
+    window._on_runtime_installed()
+    qt_app.processEvents()
+    assert scans == ["scan"]
+    assert window.controls.eye_scoring() is True
+    window.close()
+    qt_app.processEvents()
+
+
+def test_a_failed_runtime_install_leaves_detection_off(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
+
+    notes: list[str] = []
+    scans: list[str] = []
+    monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
+    monkeypatch.setattr(
+        "outburst.gui.main_window.notify",
+        lambda *_args, **_kwargs: notes.append(str(_args[1])),
+    )
+    monkeypatch.setattr(AnalyzeWorker, "start", lambda *_args, **_kwargs: scans.append("scan"))
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window._folder = tmp_path / "photos"
+    window.controls.set_eye_scoring(True)
+    window.controls.set_subject_checked(True)
+    window._downloading = True
+    window._download_then_scan = True
+    window._on_runtime_install_failed("no network")
+    qt_app.processEvents()
+    assert window.controls.eye_scoring() is False
+    assert window.controls.prefer_subject() is False
+    assert notes == ["Subject detection"]
+    assert scans == ["scan"]
+    window.close()
+    qt_app.processEvents()
 
 
 def test_zoom_steps() -> None:
