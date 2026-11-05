@@ -40,6 +40,7 @@ from outburst import __version__
 from outburst.cache import Cache, default_cache_dir
 from outburst.display import (
     burst_list_text,
+    detected_eye_count,
     filmstrip_order,
     frame_info_html,
     obvious_misses,
@@ -83,19 +84,24 @@ _SCANNING_PREVIEW = (
 )
 
 
-def _short_bursts_hidden(minimum: int) -> str:
+def _short_bursts_hidden(minimum: int, *, eyes: int = 0) -> str:
     """
     Explain that every burst is shorter than the minimum and therefore hidden.
 
-    Inputs: minimum, the Minimum frames setting.
-    Output: placeholder text that names the minimum and tells the photographer to lower it.
+    Inputs: minimum, the Minimum frames setting; eyes, how many frames have a detected bird eye.
+    Output: placeholder text that names the minimum and tells the photographer to lower it. A nonzero eye count is included.
     Uses: the preview when a scanned folder has no visible burst.
-    Limitations: the text describes the minimum. It does not change the control.
+    Limitations: the text describes the minimum. It does not change the control. An eye too small to rate is still counted.
     """
-    return (
+    text = (
         f"Every burst in this folder has fewer than {minimum} frames.\n\n"
         "Lower Minimum frames to review them."
     )
+    if eyes == 1:
+        text += "\n\nBird eye detection found an eye on 1 frame."
+    elif eyes > 1:
+        text += f"\n\nBird eye detection found an eye on {eyes} frames."
+    return text
 
 
 class MainWindow(QMainWindow):
@@ -1138,7 +1144,7 @@ class MainWindow(QMainWindow):
         Summarize the open library for the status bar.
 
         Inputs: none.
-        Output: an empty string before a library is loaded. Otherwise file and visible-burst counts, hidden bursts, note count, bird eye detection, and compare, zoom, or peaking when those are on.
+        Output: an empty string before a library is loaded. Otherwise file and visible-burst counts, hidden bursts, note count, bird eye detection and how many eyes were found, and compare, zoom, or peaking when those are on.
         Uses: the status bar.
         Limitations: hidden bursts are counted and not named. A zoom of 1 is shown as 1:1. Any other zoom is shown as an integer ratio.
         """
@@ -1166,7 +1172,9 @@ class MainWindow(QMainWindow):
         if self._peaking:
             modes.append("focus peaking")
         if library.eye_active:
-            message += " · bird eye detection"
+            eyes = detected_eye_count(library.analyses)
+            noun = "bird eye" if eyes == 1 else "bird eyes"
+            message += f" · bird eye detection · {eyes} {noun}"
         if modes:
             message += " · " + " · ".join(modes)
         return message
@@ -1218,7 +1226,12 @@ class MainWindow(QMainWindow):
         self._frame_index = 0
         self.filmstrip.set_cards([])
         if library.bursts:
-            self.viewer.set_placeholder(_short_bursts_hidden(self.controls.minimum_frames()))
+            self.viewer.set_placeholder(
+                _short_bursts_hidden(
+                    self.controls.minimum_frames(),
+                    eyes=detected_eye_count(library.analyses) if library.eye_active else 0,
+                )
+            )
         else:
             self.viewer.set_placeholder(_WELCOME)
 

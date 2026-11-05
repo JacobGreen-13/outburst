@@ -10,6 +10,7 @@ from pathlib import Path
 
 from outburst.display import (
     burst_list_text,
+    detected_eye_count,
     filmstrip_order,
     frame_info_html,
     obvious_misses,
@@ -148,3 +149,29 @@ def test_score_caption_and_obvious_misses() -> None:
     }
     misses = obvious_misses(burst_frames, by_path, {kept.path: "keep"})
     assert misses == (soft.path,)
+
+
+def test_a_detected_eye_is_named_on_the_burst_and_the_card() -> None:
+    path = Path("bird.jpg")
+    frame = Frame(path, "jpeg", None, "missing", None, 1, 1)
+    metrics = Metrics(1, 1, 1, 1, 0, 0, eye_sharpness=40.0, eye_center=(20, 30), eye_radius=12)
+    analysis = FrameAnalysis(frame, metrics, 0.7, None, None, None)
+    text = burst_list_text(Burst("burst-003", (frame,)), {path: analysis}, {})
+    assert "1 eye" in text
+    assert score_caption(0.7, metrics, best_composite=None) == "70  EYE"
+    assert detected_eye_count((analysis, FrameAnalysis(frame, Metrics(1, 1, 1, 1, 0, 0), 0.2, None, None, None))) == 1
+    html = frame_info_html(
+        filename=frame.path.name,
+        frame_number=1,
+        frame_count=1,
+        burst_id="burst-003",
+        captured_at=None,
+        camera=None,
+        analysis=analysis,
+        weights=Weights(),
+        recommended=False,
+        decision=None,
+        subject_active=False,
+        eye_active=True,
+    )
+    assert "Bird eye detected" in html

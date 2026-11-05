@@ -741,19 +741,40 @@ def _draw_circle(pixmap: QPixmap, circle: tuple[int, int, int]) -> QPixmap:
     Draw the eye circle onto a copy of the preview.
 
     Inputs: pixmap, the source; circle, center x, center y, and radius.
-    Output: a new pixmap with a gold ellipse. The painter is closed before the pixmap is returned.
+    Output: a new pixmap with a gold ring and the word EYE. The painter is closed before the pixmap is returned.
     Uses: the eye mark on the preview.
-    Limitations: the source pixmap is copied and left unchanged. The pen width grows with the image width, with a minimum of 2.
+    Limitations: the source pixmap is copied and left unchanged. The pen width and the label size grow with the preview. The label moves to the left of the ring when it would leave the frame.
     """
     painted = pixmap.copy()
     painter = QPainter(painted)
     try:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#e6c15a"))
-        pen.setWidth(max(2, painted.width() // 280))
-        painter.setPen(pen)
         x, y, radius = circle
+        radius = max(1, int(radius))
+        halo = QPen(QColor("#1a1206"))
+        halo.setWidth(max(4, painted.width() // 140))
+        painter.setPen(halo)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
+        pen = QPen(QColor("#ffe08a"))
+        pen.setWidth(max(2, painted.width() // 240))
+        painter.setPen(pen)
+        painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
+        font = QFont()
+        font.setPixelSize(max(16, radius))
+        font.setBold(True)
+        painter.setFont(font)
+        label = "EYE"
+        label_width = max(radius * 2, 36)
+        label_x = x + radius + max(8, radius // 4)
+        if label_x + label_width > painted.width():
+            label_x = max(4, x - radius - label_width)
+        label_y = y + font.pixelSize() // 3
+        painter.setPen(QColor("#1a1206"))
+        for offset_x, offset_y in ((2, 0), (-2, 0), (0, 2), (0, -2)):
+            painter.drawText(label_x + offset_x, label_y + offset_y, label)
+        painter.setPen(QColor("#ffe08a"))
+        painter.drawText(label_x, label_y, label)
     finally:
         painter.end()
     return painted

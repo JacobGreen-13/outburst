@@ -2,7 +2,7 @@
 
 Kept outside the Qt layer so the wording can be tested without a display.
 
-``filmstrip_order`` and ``visible_bursts`` choose which frames appear and in what order. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``star_glyphs``, ``frame_info_html``, and ``format_captured`` build the labels. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
+``filmstrip_order`` and ``visible_bursts`` choose which frames appear and in what order. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``star_glyphs``, ``frame_info_html``, and ``format_captured`` build the labels. ``detected_eye_count`` counts frames with a bird eye. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from html import escape
 from pathlib import Path
 
 from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
-from outburst.scoring import effective_sharpness, eye_chooses_best, recommended_offset, score_percent
+from outburst.scoring import effective_sharpness, recommended_offset, score_percent
 
 # A frame this far below the best score is called soft in the filmstrip.
 SOFT_SCORE_GAP = 0.15
@@ -96,7 +96,7 @@ def burst_list_text(
     Inputs: a burst, analyses keyed by path, and keep or reject marks.
     Output: a name, frame count, capture time, best score, and optional eye or keeper text.
     Uses: the review window burst list.
-    Limitations: an empty burst is labeled Empty, and a missing analysis shows an em dash for the score.
+    Limitations: an empty burst is labeled Empty, and a missing analysis shows an em dash for the score. The eye count is every frame with a stored eye center, including an eye too small to rate.
     """
 
     when = format_captured(burst.started_at)
@@ -106,7 +106,17 @@ def burst_list_text(
     score = score_percent(None if best is None else best.composite)
     state = burst_state(burst, decisions)
     suffix = f"  ·  {state}" if state else ""
-    eye = "  ·  eye" if eye_chooses_best(burst.frames, by_path) else ""
+    found = detected_eye_count(
+        analysis
+        for frame in burst.frames
+        if (analysis := by_path.get(frame.path)) is not None
+    )
+    if found == 1:
+        eye = "  ·  1 eye"
+    elif found > 1:
+        eye = f"  ·  {found} eyes"
+    else:
+        eye = ""
     noun = "frame" if burst.count == 1 else "frames"
     return f"{human_burst_name(burst.id)}  ·  {burst.count} {noun}\n{when}  ·  best {score}{eye}{suffix}"
 
@@ -134,13 +144,15 @@ def score_caption(
     """Score for a filmstrip card, with CLIP or SOFT when the frame needs a look.
 
     Inputs: this frame's score, its metrics, the burst's best score, and an optional star count.
-    Output: a short caption such as a percent, CLIP, SOFT, and a star count.
+    Output: a short caption such as a percent, EYE, CLIP, SOFT, and a star count.
     Uses: the review window filmstrip cards.
-    Limitations: a None score or missing metrics omits the matching note.
+    Limitations: a None score or missing metrics omits the matching note. EYE is shown when an eye center was stored, including an eye too small to rate.
     """
 
     text = score_percent(composite)
     notes: list[str] = []
+    if metrics is not None and metrics.eye_center is not None and metrics.eye_radius is not None:
+        notes.append("EYE")
     if metrics is not None and (metrics.highlight_clip >= 0.02 or metrics.shadow_clip >= 0.05):
         notes.append("CLIP")
     if (
@@ -154,6 +166,23 @@ def score_caption(
     if stars:
         text = f"{text}  ★{stars}"
     return text
+
+
+def detected_eye_count(analyses: Sequence[FrameAnalysis]) -> int:
+    """Count frames that have a stored bird-eye center.
+
+    Inputs: analyses, the scored frames.
+    Output: how many of those frames have an eye center and radius.
+    Uses: the burst list, the status bar, and the hidden-burst message.
+    Limitations: an eye too small to rate still counts. A frame with no metrics does not.
+    """
+
+    total = 0
+    for analysis in analyses:
+        metrics = analysis.metrics
+        if metrics is not None and metrics.eye_center is not None and metrics.eye_radius is not None:
+            total += 1
+    return total
 
 
 def obvious_misses(
@@ -243,9 +272,10 @@ def _eye_line(metrics: Metrics) -> str:
     if metrics.eye_radius is None or metrics.eye_center is None:
         return '<div style="color:#9a9a9a; margin-top:4px;">No bird eye found</div>'
     if metrics.eye_sharpness is None:
-        return '<div style="color:#9a9a9a; margin-top:4px;">Bird eye is too small to rate</div>'
+        return '<div style="color:#ffe08a; margin-top:4px; font-weight:600;">Bird eye detected · too small to rate</div>'
     return (
-        f'<div style="color:#e6c15a; margin-top:4px;">Bird eye {metrics.eye_sharpness:.0f}</div>'
+        f'<div style="color:#ffe08a; margin-top:4px; font-weight:600;">'
+        f"Bird eye detected · sharpness {metrics.eye_sharpness:.0f}</div>"
     )
 
 
