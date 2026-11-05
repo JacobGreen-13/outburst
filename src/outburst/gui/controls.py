@@ -1,6 +1,6 @@
 """Threshold, weights, and the optional subject-detection toggle.
 
-``ControlPanel`` is the Grouping and Scoring sections. The getters read burst gap, sharpness, center, minimum frames, subfolders, subject, bird eye detection, and the model id. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark.
+``ControlPanel`` is the Grouping and Scoring sections. The getters read burst gap, sharpness, center, minimum frames, minimum score, subfolders, subject, bird eye detection, and the model id. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark.
 """
 
 from __future__ import annotations
@@ -38,13 +38,14 @@ class ControlPanel(QWidget):
     eye_toggled = Signal(bool)
     model_changed = Signal(str)
     minimum_changed = Signal(int)
+    minimum_score_changed = Signal()
 
     def __init__(self) -> None:
         """
         Build the grouping and scoring controls with their default values.
 
         Inputs: none.
-        Output: no return value. Burst gap starts at 1.0 seconds, minimum at 2 frames, sharpness at 75, and center at 65.
+        Output: no return value. Burst gap starts at 1.0 seconds, minimum at 2 frames, sharpness at 75, center at 65, and minimum score off at 50.
         Uses: the control panel beside the burst list.
         Limitations: the panel emits signals when those controls change and does not scan or rescore by itself. The model list is filled from the models folder during construction.
         """
@@ -76,6 +77,19 @@ class ControlPanel(QWidget):
             "Bursts with fewer frames than this stay off the list and are left out when you save keepers."
         )
         self._minimum.valueChanged.connect(lambda value: self.minimum_changed.emit(int(value)))
+        self._score_filter = QCheckBox("Minimum score")
+        self._score_filter.setToolTip(
+            "Hide frames whose score is below this number. "
+            "A burst with no frame at or above it leaves the list. "
+            "Keeper and star marks on hidden frames stay, and Save keepers still writes them."
+        )
+        self._score_minimum = QSpinBox()
+        self._score_minimum.setRange(0, 100)
+        self._score_minimum.setValue(50)
+        self._score_minimum.setEnabled(False)
+        self._score_minimum.setToolTip("The same 0 to 100 score shown on the filmstrip. A frame labeled 50 stays visible at 50.")
+        self._score_filter.toggled.connect(self._on_score_filter_toggled)
+        self._score_minimum.valueChanged.connect(lambda _value: self.minimum_score_changed.emit())
         self._recursive = QCheckBox("Include subfolders on the next scan")
         self._subject = QCheckBox("Subject-aware sharpness")
         self._subject.setToolTip(
@@ -117,6 +131,7 @@ class ControlPanel(QWidget):
         scoring_layout.setSpacing(6)
         scoring_layout.addWidget(self._slider_row(self._sharpness_label, self._sharpness))
         scoring_layout.addWidget(self._slider_row(self._center_label, self._center))
+        scoring_layout.addWidget(self._score_row())
         scoring_layout.addWidget(self._subject)
         scoring_layout.addWidget(self._eye)
         scoring_layout.addWidget(self._model)
@@ -149,6 +164,35 @@ class ControlPanel(QWidget):
         layout.addWidget(name)
         layout.addWidget(widget, 1)
         return row
+
+    def _score_row(self) -> QWidget:
+        """
+        Place the minimum-score checkbox and its number on one row.
+
+        Inputs: none. The checkbox and spin box were created with the panel.
+        Output: a row widget with the toggle and the 0 to 100 cutoff.
+        Uses: Minimum score in the Scoring section.
+        Limitations: the number stays disabled until the checkbox is on.
+        """
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self._score_filter, 1)
+        layout.addWidget(self._score_minimum)
+        return row
+
+    def _on_score_filter_toggled(self, checked: bool) -> None:
+        """
+        Enable the score cutoff and tell the window the filter changed.
+
+        Inputs: checked, whether Minimum score is now on.
+        Output: no return value. The spin box follows the checkbox, and minimum_score_changed is emitted.
+        Uses: the Minimum score checkbox.
+        Limitations: the spin box value is kept while the filter is off, and this method does not hide frames itself.
+        """
+        self._score_minimum.setEnabled(checked)
+        self.minimum_score_changed.emit()
 
     def _slider_row(self, label: QLabel, slider: QSlider) -> QWidget:
         """
@@ -225,6 +269,68 @@ class ControlPanel(QWidget):
         self._minimum.blockSignals(True)
         self._minimum.setValue(max(1, int(value)))
         self._minimum.blockSignals(False)
+
+    def minimum_score_enabled(self) -> bool:
+        """
+        Read whether frames below the minimum score are hidden.
+
+        Inputs: none.
+        Output: True when Minimum score is checked.
+        Uses: the Scoring section and the review window.
+        Limitations: a checked box with a cutoff of 0 still hides a frame that has no score.
+        """
+        return self._score_filter.isChecked()
+
+    def minimum_score(self) -> int:
+        """
+        Read the minimum score cutoff.
+
+        Inputs: none.
+        Output: an integer from 0 to 100, even when the filter is off.
+        Uses: the Minimum score spin box.
+        Limitations: the spin box accepts 0 through 100. The filter uses this number only while the checkbox is on.
+        """
+        return int(self._score_minimum.value())
+
+    def score_floor(self) -> int | None:
+        """
+        Read the active score cutoff.
+
+        Inputs: none.
+        Output: the minimum score when the checkbox is on, otherwise None.
+        Uses: deciding which frames stay on the filmstrip.
+        Limitations: None means every frame stays visible. The returned number is the display score from 0 to 100.
+        """
+        if not self._score_filter.isChecked():
+            return None
+        return self.minimum_score()
+
+    def set_minimum_score_enabled(self, checked: bool) -> None:
+        """
+        Set the minimum-score checkbox without emitting a change.
+
+        Inputs: checked, whether frames below the cutoff are hidden.
+        Output: no return value. The checkbox matches checked, and the spin box is enabled only when checked is true.
+        Uses: restoring the saved Minimum score setting.
+        Limitations: signals are blocked, so the burst list is not refreshed by this call.
+        """
+        self._score_filter.blockSignals(True)
+        self._score_filter.setChecked(bool(checked))
+        self._score_minimum.setEnabled(bool(checked))
+        self._score_filter.blockSignals(False)
+
+    def set_minimum_score(self, value: int) -> None:
+        """
+        Set the minimum score without emitting a change.
+
+        Inputs: value, a score from 0 to 100. Values outside that range are clamped.
+        Output: no return value. The spin box shows the clamped value.
+        Uses: restoring the saved Minimum score setting.
+        Limitations: signals are blocked, so the burst list is not refreshed by this call. This does not turn the filter on.
+        """
+        self._score_minimum.blockSignals(True)
+        self._score_minimum.setValue(max(0, min(100, int(value))))
+        self._score_minimum.blockSignals(False)
 
     def recursive(self) -> bool:
         """

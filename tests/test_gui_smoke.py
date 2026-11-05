@@ -1,6 +1,6 @@
 """The review window can load a folder and move between frames.
 
-``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, automatic keepers, rescan, a blank preview while scoring, model download, installing Ultralytics before subject or bird eye detection, zoom, filmstrip order, compare, stars, bird eye detection, a hidden single-frame folder that still reports detected eyes, and a save that stays disabled until the copy finishes.
+``qt_app`` and ``_isolate_settings`` start offscreen Qt with a private settings file. The tests cover scanning, minimum length, minimum score, automatic keepers, rescan, a blank preview while scoring, model download, installing Ultralytics before subject or bird eye detection, zoom, filmstrip order, compare, stars, bird eye detection, a hidden single-frame folder that still reports detected eyes, and a save that stays disabled until the copy finishes.
 """
 
 from __future__ import annotations
@@ -911,6 +911,75 @@ def test_save_keepers_disables_save_until_the_copy_finishes(
     assert window.export_action.isEnabled() is True
     assert (destination / written["sharp"].name).is_file()
     assert (destination / written["second_sharp"].name).is_file()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_minimum_score_hides_weaker_frames_and_keeps_marks(qt_app, tmp_path: Path) -> None:
+    from datetime import datetime
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.models import Burst, Frame, FrameAnalysis, Library, Metrics, Weights
+    from outburst.output import choose_keepers
+
+    _isolate_settings(tmp_path / "settings")
+    when = datetime(2024, 6, 1, 12, 0, 0)
+    folder = tmp_path / "photos"
+    folder.mkdir()
+
+    def frame(name: str, score: float) -> tuple[Frame, FrameAnalysis]:
+        path = folder / name
+        item = Frame(path, "jpeg", when, "exif", None, 1, 1)
+        analysis = FrameAnalysis(item, Metrics(1, 1, 1, 0.5, 0.0, 0.0), score, None, None, None)
+        return item, analysis
+
+    strong, strong_analysis = frame("strong.jpg", 0.80)
+    mid, mid_analysis = frame("mid.jpg", 0.40)
+    low, low_analysis = frame("low.jpg", 0.20)
+    soft, soft_analysis = frame("soft-a.jpg", 0.30)
+    softer, softer_analysis = frame("soft-b.jpg", 0.10)
+    library = Library(
+        folder,
+        (strong_analysis, mid_analysis, low_analysis, soft_analysis, softer_analysis),
+        (
+            Burst("burst-001", (strong, mid, low)),
+            Burst("burst-002", (soft, softer)),
+        ),
+        (),
+        1.0,
+        Weights(),
+    )
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+    assert window.burst_list.count() == 2
+    assert len(window.filmstrip._cards) == 3
+    assert len(choose_keepers(library.bursts, window._by_path, window._decisions, minimum_frames=2)) == 2
+
+    window.controls.set_minimum_score(50)
+    window.controls._score_filter.setChecked(True)
+    qt_app.processEvents()
+    assert window.controls.score_floor() == 50
+    assert window.burst_list.count() == 1
+    assert "1 of 3 frames" in window.burst_list.item(0).text()
+    assert [card.index for card in window.filmstrip._cards] == [0]
+    assert "under 50" in window.statusBar().currentMessage()
+    window._step_frame(1)
+    qt_app.processEvents()
+    assert window.current_frame_index == 0
+    assert len(choose_keepers(library.bursts, window._by_path, window._decisions, minimum_frames=2)) == 2
+
+    window.controls._score_minimum.setValue(90)
+    qt_app.processEvents()
+    assert window.burst_list.count() == 0
+    assert "Minimum score" in window.viewer.preview.text()
+
+    window.controls._score_filter.setChecked(False)
+    qt_app.processEvents()
+    assert window.burst_list.count() == 2
+    assert len(window.filmstrip._cards) == 3
     window.close()
     qt_app.processEvents()
 

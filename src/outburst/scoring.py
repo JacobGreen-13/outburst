@@ -6,7 +6,7 @@ near the middle of the frame. Exposure penalizes clipped highlights more than
 crushed shadows. The composite score is cached as raw measurements plus weights,
 so photographers can retune the balance without reading the RAW files again.
 
-``score_bgr`` measures one preview. ``laplacian_variance``, ``tenengrad``, ``exposure_parts``, ``peak_window_sharpness``, and ``composite_score`` are the pieces of that measurement. ``recommended_offset`` and ``eye_chooses_best`` pick the best frame. ``compare_partner_offset`` picks the other frame for compare. ``focus_peak_bgr`` paints the strongest edges. ``center_crop`` and ``crop_box`` cut regions. Scores use the preview, not a demosaic.
+``score_bgr`` measures one preview. ``laplacian_variance``, ``tenengrad``, ``exposure_parts``, ``peak_window_sharpness``, and ``composite_score`` are the pieces of that measurement. ``displayed_score`` and ``score_percent`` turn that composite into the 0..100 number on screen. ``recommended_offset`` and ``eye_chooses_best`` pick the best frame. ``compare_partner_offset`` picks the other frame for compare. ``focus_peak_bgr`` paints the strongest edges. ``center_crop`` and ``crop_box`` cut regions. Scores use the preview, not a demosaic.
 """
 
 from __future__ import annotations
@@ -247,18 +247,33 @@ def composite_score(metrics: Metrics, weights: Weights) -> float:
     return (weights.sharpness * sharpness + weights.exposure * metrics.exposure) / total
 
 
+def displayed_score(composite: float | None) -> int | None:
+    """Turn a composite score into the whole number shown in the review window.
+
+    Inputs: composite, a 0..1 score, or None.
+    Output: the clamped score times 100, rounded to an integer, or None when composite is None.
+    Uses: the filmstrip caption and the minimum-score filter, so both use the same number.
+    Limitations: this is the display number. It does not measure the frame again.
+    """
+
+    if composite is None:
+        return None
+    return int(round(max(0.0, min(1.0, composite)) * 100))
+
+
 def score_percent(composite: float | None) -> str:
     """Show a composite score as a whole number from 0 to 100.
 
     Inputs: composite, a 0..1 score, or None.
-    Output: the clamped score times 100, rounded to an integer string, or an em dash when composite is None.
+    Output: the display score as text, or an em dash when composite is None.
     Uses: the filmstrip and the score label.
     Limitations: this is display text. It does not measure the frame again.
     """
 
-    if composite is None:
+    score = displayed_score(composite)
+    if score is None:
         return "—"
-    return str(int(round(max(0.0, min(1.0, composite)) * 100)))
+    return str(score)
 
 
 def _rank_key(frames: Sequence[Frame], by_path: Mapping[Path, Rankable], index: int) -> tuple[float, float, str, str]:

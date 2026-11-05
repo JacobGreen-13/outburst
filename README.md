@@ -9,7 +9,7 @@ Nothing is uploaded. There is no account and no subscription. Outburst never mod
 ## What you can do
 
 - Open a folder of RAW bursts, or JPEGs if that is what the camera wrote.
-- See the bursts in a list, and the frames in a filmstrip. **Minimum frames** hides shorter bursts. The default is 2, so a single frame stays off the list.
+- See the bursts in a list, and the frames in a filmstrip. **Minimum frames** hides shorter bursts. The default is 2, so a single frame stays off the list. **Minimum score**, in Scoring, hides frames below the number you set. A burst with no frame at that score leaves the list. Marks on hidden frames stay, and Save keepers still writes them.
 - Compare scores and open a larger preview. The recommended frame starts as a keeper: a green **KEEPER** stamp, a green outline, and the **Marked keeper** button pressed.
 - Change keepers with that button, or with the keyboard. Those marks are remembered on this computer.
 - Save the marked keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV report.
