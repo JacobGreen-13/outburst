@@ -7,7 +7,7 @@ subject scoring needs it. Loading a detector never fetches weights by itself.
 If detection is unavailable or finds no animal, scoring falls back to the
 full frame.
 
-``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
+``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics imports. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
 """
 
 from __future__ import annotations
@@ -370,6 +370,83 @@ def make_subject_key(model_path: Path) -> str:
 
     stat = model_path.stat()
     return f"{model_path.resolve()}|{stat.st_mtime_ns}|{stat.st_size}"
+
+
+SUBJECT_PIP_SPEC = "ultralytics>=8.3"
+
+
+class SubjectRuntimeCancelled(Exception):
+    """The Ultralytics install was cancelled before pip finished."""
+
+
+def subject_runtime_ready() -> bool:
+    """
+    Report whether Ultralytics can be imported in this process.
+
+    Inputs: none.
+    Output: True when ``import ultralytics`` succeeds, otherwise False.
+    Uses: deciding whether subject detection and bird eye detection can load.
+    Limitations: a failed import is treated as missing. This does not install anything and does not check that a weights file is present.
+    """
+
+    try:
+        import ultralytics  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def subject_runtime_install_command() -> list[str]:
+    """
+    Build the pip command that installs Ultralytics into this interpreter.
+
+    Inputs: none.
+    Output: the argument list, starting with this process's Python and ending with the ultralytics requirement.
+    Uses: the review window and tests that check the install command.
+    Limitations: the command installs the library only. It does not download YOLO weights.
+    """
+
+    import sys
+
+    return [sys.executable, "-m", "pip", "install", SUBJECT_PIP_SPEC]
+
+
+def install_subject_runtime(should_cancel: Callable[[], bool] | None = None) -> None:
+    """
+    Install Ultralytics into the Python that is running Outburst.
+
+    Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels.
+    Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when pip exits with an error.
+    Uses: the review window the first time subject or bird eye detection is turned on without Ultralytics.
+    Limitations: this downloads PyTorch and can take several minutes. It does not download model weights. The caller should stay off the window thread.
+    """
+
+    import subprocess
+
+    process = subprocess.Popen(
+        subject_runtime_install_command(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    while process.poll() is None:
+        if should_cancel is not None and should_cancel():
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
+            raise SubjectRuntimeCancelled()
+        try:
+            process.wait(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            continue
+        break
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        detail = (stderr or stdout or "pip install failed").strip()
+        raise RuntimeError(detail[-800:])
 
 
 def load_yolo_detector(model_path: Path, device: str | None = None) -> SubjectDetector:

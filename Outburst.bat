@@ -6,10 +6,9 @@ if /I "%~1"=="-h" goto :help
 if /I "%~1"=="--help" goto :help
 if /I "%~1"=="/?" goto :help
 
-set "EXTRAS="
-set "WANT_SUBJECT=0"
+set "EXTRAS=[subject]"
+rem "subject" remains accepted so an older shortcut still opens a folder.
 if /I "%~1"=="subject" (
-  set "WANT_SUBJECT=1"
   shift
 )
 set "FOLDER="
@@ -36,11 +35,7 @@ exit /b 1
 :have_python
 if "%OUTBURST_DRY_RUN%"=="1" (
   echo python=!PYTHON!
-  if "!WANT_SUBJECT!"=="1" (
-    echo extras=[subject]
-  ) else (
-    echo extras=
-  )
+  echo extras=[subject]
   echo folder=!FOLDER!
   exit /b 0
 )
@@ -58,20 +53,20 @@ if errorlevel 1 (
   goto :failed
 )
 
-if exist ".venv\.outburst-subject" set "WANT_SUBJECT=1"
-if "!WANT_SUBJECT!"=="1" set "EXTRAS=[subject]"
-
 set "NEED_INSTALL=0"
 if not exist ".venv\Scripts\outburst.exe" set "NEED_INSTALL=1"
 if not exist ".venv\.outburst-stamp" set "NEED_INSTALL=1"
-if "!WANT_SUBJECT!"=="1" if not exist ".venv\.outburst-subject" set "NEED_INSTALL=1"
+if not exist ".venv\.outburst-subject" set "NEED_INSTALL=1"
 if exist ".venv\.outburst-stamp" (
   ".venv\Scripts\python.exe" -c "import sys; from pathlib import Path; stamp=Path(r'.venv/.outburst-stamp'); src=Path('pyproject.toml'); sys.exit(0 if stamp.stat().st_mtime >= src.stat().st_mtime else 1)"
   if errorlevel 1 set "NEED_INSTALL=1"
 )
+".venv\Scripts\python.exe" -c "import ultralytics" >nul 2>&1
+if errorlevel 1 set "NEED_INSTALL=1"
 
 if "!NEED_INSTALL!"=="1" (
-  echo Installing Outburst. The first run downloads the libraries and can take a few minutes.
+  echo Installing Outburst. Subject and bird eye detection are included.
+  echo This downloads PyTorch and can take several minutes.
   ".venv\Scripts\python.exe" -m pip install --upgrade pip
   if errorlevel 1 goto :failed
   ".venv\Scripts\python.exe" -m pip install -e ".!EXTRAS!"
@@ -108,8 +103,9 @@ echo Usage: Outburst.bat [folder]
 echo        Outburst.bat subject [folder]
 echo.
 echo The first run creates .venv, installs Outburst, and opens the window.
-echo Later runs open the window. Pass subject once to also install the
-echo optional YOLO extra ^(a large download^).
+echo Later runs open the window. Subject detection and bird eye detection
+echo are included. The first run downloads PyTorch and can take several
+echo minutes. The subject argument is still accepted.
 exit /b 0
 
 :failed

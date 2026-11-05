@@ -16,8 +16,9 @@ Usage: ./outburst.sh [folder]
        ./outburst.sh subject [folder]
 
 The first run creates .venv, installs Outburst, and opens the window.
-Later runs open the window. Pass subject once to also install the
-optional YOLO extra (a large download).
+Later runs open the window. Subject detection and bird eye detection
+are included. The first run downloads PyTorch and can take several
+minutes. The subject argument is still accepted.
 EOF
 }
 
@@ -86,9 +87,8 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-WANT_SUBJECT=0
+# "subject" remains accepted so an older shortcut still opens a folder.
 if [[ "${1:-}" == "subject" ]]; then
-  WANT_SUBJECT=1
   shift
 fi
 
@@ -101,11 +101,7 @@ fi
 
 if [[ "${OUTBURST_DRY_RUN:-}" == "1" ]]; then
   printf 'python=%s\n' "$PYTHON"
-  if [[ "$WANT_SUBJECT" == "1" ]]; then
-    printf 'extras=[subject]\n'
-  else
-    printf 'extras=\n'
-  fi
+  printf 'extras=[subject]\n'
   if [[ $# -gt 0 ]]; then
     printf 'folder=%s\n' "$1"
   else
@@ -127,24 +123,23 @@ fi
 "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' \
   || die "The environment in .venv is older than Python 3.11. Delete .venv and run this script again."
 
-EXTRAS=""
-if [[ -f "$SUBJECT_STAMP" || "$WANT_SUBJECT" == "1" ]]; then
-  EXTRAS="[subject]"
-fi
+EXTRAS="[subject]"
 
 NEED_INSTALL=0
 if [[ ! -x "$VENV/bin/outburst" || ! -f "$STAMP" ]]; then
   NEED_INSTALL=1
 elif [[ "$ROOT/pyproject.toml" -nt "$STAMP" ]]; then
   NEED_INSTALL=1
-elif [[ "$WANT_SUBJECT" == "1" && ! -f "$SUBJECT_STAMP" ]]; then
+elif [[ ! -f "$SUBJECT_STAMP" ]]; then
+  NEED_INSTALL=1
+elif ! "$PY" -c "import ultralytics" >/dev/null 2>&1; then
   NEED_INSTALL=1
 fi
 
 if [[ "$NEED_INSTALL" == "1" ]]; then
   version="$("$PYTHON" -c 'import platform, sys; print(sys.version.split()[0], platform.machine())')"
   log "Installing Outburst with Python ${version}."
-  log "The first run downloads the libraries and can take a few minutes."
+  log "Subject and bird eye detection are included. This downloads PyTorch and can take several minutes."
   "$PY" -m pip install --upgrade pip || log "Continuing with the current pip."
   "$PY" -m pip install -e ".${EXTRAS}" || die "Installation failed. Check the messages above and run this script again."
   touch "$STAMP"

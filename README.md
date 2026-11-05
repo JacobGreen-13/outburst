@@ -40,7 +40,7 @@ Open a folder straight away:
 Outburst.bat examples\sample_burst
 ```
 
-Subject detection is a larger optional install because it includes PyTorch. Run the launcher with `subject` once, for example `./outburst.sh subject` or `Outburst.bat subject`.
+Subject detection and bird eye detection are included. The first run downloads PyTorch and can take several minutes. An older environment that does not have them yet installs them the next time you start the launcher, or the first time you turn either feature on. `./outburst.sh subject` and `Outburst.bat subject` still work.
 
 ### Install by hand
 
@@ -49,7 +49,7 @@ macOS and Linux:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[subject]"
 outburst
 ```
 
@@ -58,7 +58,7 @@ Windows:
 ```bat
 py -3 -m venv .venv
 .venv\Scripts\activate
-pip install -e .
+pip install -e ".[subject]"
 outburst
 ```
 
@@ -175,7 +175,9 @@ A burst shorter than the minimum is not saved, so a pick on one of those frames 
 
 ## Subject detection
 
-This part is optional and stays off until you turn it on. The scoring panel has a model dropdown: YOLO11 Nano (the default), YOLO11 Small, YOLOv8 Nano, and YOLOv8 Small. These are the official Ultralytics weights.
+This part stays off until you turn it on. The scoring panel has a model dropdown: YOLO11 Nano (the default), YOLO11 Small, YOLOv8 Nano, and YOLOv8 Small. These are the official Ultralytics weights.
+
+The launcher installs Ultralytics with Outburst. If you are in an older environment and turn **Subject-aware sharpness** or **Bird eye detection** on, the window installs it before the scan and the status bar says that PyTorch is downloading. You can also install it yourself:
 
 ```bash
 pip install "outburst[subject]"
@@ -189,7 +191,7 @@ On Apple Silicon the subject detector uses MPS when PyTorch provides it. On NVID
 
 ## Bird eye detection
 
-This is optional and stays off until you check **Bird eye detection** on the scoring panel. The first time you turn it on, Outburst downloads `eye_pose_v0.pt` (about 6 MB) into the models folder. That file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. It finds a bird and the left and right eye. The same `outburst[subject]` install that provides Ultralytics is required. The weights are AGPL-3.0, separate from Outburst. Photos are not uploaded.
+This stays off until you check **Bird eye detection** on the scoring panel. The first time you turn it on, Outburst installs Ultralytics when that library is missing, then downloads `eye_pose_v0.pt` (about 6 MB) into the models folder. That file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. It finds a bird and the left and right eye. The weights are AGPL-3.0, separate from Outburst. Photos are not uploaded.
 
 The model is birds only. It was trained on studio and Flickr-style bird photos, so a distant or unusual field frame may have no eye. Outburst hands it the analysis preview as OpenCV BGR. Ultralytics converts that to RGB. The whole preview is checked first. When that finds no eye, overlapping 512 pixel windows are checked and the strongest eye is mapped back onto the preview, so a bird that is clear but does not fill the frame can still be marked. A keypoint below 0.35 confidence is ignored. An eye is rated only when the disk drawn around it is at least 16 pixels across on the analysis preview. A smaller eye is noted and left out of the ranking. If the model finds nothing, the frame says no bird eye was found. A scan from before this reading is scored again the next time bird eye detection is on.
 
