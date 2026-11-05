@@ -108,7 +108,7 @@ The left rail has three groups: **Bursts**, **Grouping**, and **Scoring**. The o
 
 **Subject-aware sharpness** is off unless you turn it on. See below.
 
-**Eye sharpness** is off unless you turn it on. It looks for a dark, round eye in the preview and rates it only when the eye is large enough to measure. In a burst with two or more rated eyes, the sharpest eye becomes the best frame and is marked a keeper. A burst with no rated eye, or only one, keeps the usual sharpness ranking. Turning the checkbox on or off clears the keeper Outburst chose and scans the folder again. Keepers you marked stay.
+**Bird eye detection** is off unless you turn it on. It uses an open-weight bird eye model, not a guess at a dark spot. In a burst with two or more rated eyes, the sharpest eye becomes the best frame and is marked a keeper. A burst with no rated eye, or only one, keeps the usual sharpness ranking. Turning the checkbox on or off clears the keeper Outburst chose and scans the folder again. Keepers you marked stay.
 
 ### Keyboard
 
@@ -187,13 +187,15 @@ When you run Outburst from this project, the folder is `models` next to this REA
 
 On Apple Silicon the detector uses MPS when PyTorch provides it. On NVIDIA it uses CUDA. Otherwise it uses the CPU. The rest of Outburst does not need a GPU.
 
-## Eye sharpness
+## Bird eye detection
 
-This is optional and stays off until you check **Eye sharpness** on the scoring panel. Outburst looks for a dark round spot in the preview. With subject scoring on, that search stays inside the animal. An eye is rated only when it is large enough on the preview (about 16 pixels across on the 1024 px analysis image). A smaller eye is noted as too small and left out of the ranking. If nothing round and dark is found, the frame says no eye was found.
+This is optional and stays off until you check **Bird eye detection** on the scoring panel. The first time you turn it on, Outburst downloads `eye_pose_v0.pt` (about 6 MB) into the models folder. That file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. It finds a bird and the left and right eye. The same `outburst[subject]` install that provides Ultralytics is required. The weights are AGPL-3.0, separate from Outburst. Photos are not uploaded.
+
+The model is birds only. It was trained on studio and Flickr-style bird photos, so a distant or unusual field frame may have no eye. A keypoint below 0.35 confidence is ignored. An eye is rated only when the disk drawn around it is at least 16 pixels across on the analysis preview. A smaller eye is noted and left out of the ranking. If the model finds nothing, the frame says no bird eye was found.
 
 When a burst has two or more frames with a rated eye, the sharpest of those eyes is the best frame and Outburst marks it as a keeper. A reject on that frame stays rejected. A keeper you already set stays yours. Other automatic keepers in that burst are cleared. A burst with fewer than two rated eyes uses the usual sharpness rank, and Outburst marks a keeper only when the burst does not already have one.
 
-The eye is drawn as an amber circle on the preview. Turning the checkbox off scans the folder again with the usual sharpness ranking. Eye scoring stays on this computer and does not download a model.
+The eye is drawn as an amber circle on the preview. Turning the checkbox off scans the folder again with the usual sharpness ranking.
 
 ## Apple Silicon
 

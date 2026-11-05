@@ -1,6 +1,6 @@
-"""Eye finder: a large dark eye is rated, a small one is not, and blur lowers the score.
+"""Bird eye keypoints and sharpness. The pose model is not downloaded here.
 
-``_portrait`` draws a synthetic eye. The tests check size, blur, a frame with no eye, a limited search box, and a burst whose sharpest rated eye becomes the keeper.
+``_portrait`` draws a synthetic eye. ``PortraitEyeFinder`` stands in for the pose model in pipeline tests. The other tests check disk size, blur, a low-confidence keypoint, and a burst whose sharpest rated eye becomes the keeper.
 """
 
 from __future__ import annotations
@@ -11,7 +11,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from outburst.eyes import MIN_RATED_DIAMETER, locate_eye
+from outburst.eyes import MIN_KEYPOINT_CONFIDENCE, MIN_RATED_DIAMETER, eye_from_pose, measure_eye
+from outburst.subject import BIRD_EYE_OPTION, MODEL_OPTIONS, option_by_id
 from outburst.pipeline import analyze_folder
 from outburst.scoring import recommended_offset
 from tests.helpers import sharp_frame, write_jpeg
@@ -30,38 +31,130 @@ def _portrait(diameter: int, *, blur: int = 0, seed: int = 1) -> np.ndarray:
     return image
 
 
-def test_a_large_eye_is_rated_and_a_small_one_is_not() -> None:
-    large = locate_eye(_portrait(MIN_RATED_DIAMETER + 12))
-    assert large is not None
-    assert large.rated
-    assert large.sharpness is not None
-    assert large.sharpness > 0
-    small = locate_eye(_portrait(MIN_RATED_DIAMETER - 6))
-    assert small is not None
-    assert small.rated is False
-    assert small.sharpness is None
+class PortraitEyeFinder:
+    """Test double. A compact dark disk is an eye. A busy frame is not."""
+
+    def find_many(self, images: list[np.ndarray]) -> list[object]:
+        return [_portrait_eye(image) for image in images]
 
 
-def test_a_sharp_eye_outranks_a_blurred_copy() -> None:
-    sharp = locate_eye(_portrait(36))
-    soft = locate_eye(_portrait(36, blur=21))
+def _portrait_eye(image: np.ndarray) -> object | None:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    dark = gray < 45
+    fraction = float(dark.mean())
+    if not (0.0008 <= fraction <= 0.08):
+        return None
+    ys, xs = np.nonzero(dark)
+    radius = max(1, int(round(np.sqrt(len(xs) / np.pi))))
+    return measure_eye(image, int(round(float(xs.mean()))), int(round(float(ys.mean()))), radius)
+
+
+def _pose(xy: list[list[float]], conf: list[float], box: list[float] | None = None) -> object:
+    class Result:
+        keypoints = type("Keypoints", (), {"xy": np.asarray([xy]), "conf": np.asarray([conf])})()
+        boxes = None
+
+    result = Result()
+    if box is not None:
+        result.boxes = type(
+            "Boxes",
+            (),
+            {"xyxy": np.asarray([box]), "conf": np.asarray([0.9]), "__len__": lambda self: 1},
+        )()
+    return result
+
+
+def test_a_large_disk_is_rated_and_a_small_one_is_not() -> None:
+    image = _portrait(36)
+    large = measure_eye(image, 150, 100, (MIN_RATED_DIAMETER + 12) // 2)
+    assert large is not None and large.rated and large.sharpness is not None and large.sharpness > 0
+    small = measure_eye(image, 150, 100, (MIN_RATED_DIAMETER - 6) // 2)
+    assert small is not None and small.rated is False and small.sharpness is None
+
+
+def test_a_sharp_disk_outranks_a_blurred_copy() -> None:
+    sharp = measure_eye(_portrait(36), 150, 100, 18)
+    soft = measure_eye(_portrait(36, blur=21), 150, 100, 18)
     assert sharp is not None and sharp.sharpness is not None
     assert soft is not None and soft.sharpness is not None
     assert sharp.sharpness > soft.sharpness * 2
 
 
-def test_a_plain_frame_has_no_eye() -> None:
-    rng = np.random.default_rng(4)
-    image = rng.integers(80, 160, size=(180, 200, 3), dtype=np.uint8)
-    assert locate_eye(image) is None
-
-
-def test_search_can_be_limited_to_a_box() -> None:
+def test_pose_keeps_the_confident_eye_and_ignores_a_dim_keypoint() -> None:
     image = _portrait(36)
-    eye = locate_eye(image, (120, 70, 60, 60))
+    blank = [0.0, 0.0]
+    sharp = _pose(
+        [blank, [150.0, 100.0], [40.0, 40.0], blank, blank, blank],
+        [0.1, 0.9, 0.1, 0.1, 0.1, 0.1],
+        [20.0, 20.0, 240.0, 200.0],
+    )
+    eye = eye_from_pose(sharp, image)
     assert eye is not None and eye.rated
-    missed = locate_eye(image, (0, 0, 40, 40))
-    assert missed is None
+    assert abs(eye.x - 150) <= 2 and abs(eye.y - 100) <= 2
+
+    dim = _pose(
+        [blank, [150.0, 100.0], blank, blank, blank, blank],
+        [0.1, MIN_KEYPOINT_CONFIDENCE - 0.05, 0.1, 0.1, 0.1, 0.1],
+        [20.0, 20.0, 240.0, 200.0],
+    )
+    assert eye_from_pose(dim, image) is None
+    assert eye_from_pose(type("Empty", (), {"keypoints": None})(), image) is None
+
+
+def test_pose_prefers_the_sharper_of_two_confident_eyes() -> None:
+    image = _portrait(36)
+    blank = [0.0, 0.0]
+    result = _pose(
+        [blank, [150.0, 100.0], [30.0, 30.0], blank, blank, blank],
+        [0.2, 0.8, 0.95, 0.2, 0.2, 0.2],
+        [10.0, 10.0, 250.0, 210.0],
+    )
+    eye = eye_from_pose(result, image)
+    assert eye is not None
+    assert abs(eye.x - 150) <= 2
+
+
+def test_bird_eye_option_is_separate_from_the_subject_models() -> None:
+    assert option_by_id("eye-pose-v0") == BIRD_EYE_OPTION
+    assert BIRD_EYE_OPTION.label == "Bird eye detection"
+    assert "huggingface.co/synthet/eye-pose-v0" in BIRD_EYE_OPTION.url
+    assert all(item.id != BIRD_EYE_OPTION.id for item in MODEL_OPTIONS)
+
+
+def test_bird_eye_finder_stays_on_the_calling_thread(tmp_path: Path) -> None:
+    import threading
+
+    folder = tmp_path / "batch"
+    folder.mkdir()
+    moment = datetime(2024, 7, 2, 9, 0, 0)
+    for index in range(5):
+        write_jpeg(folder / f"IMG_{index}.jpg", _portrait(36, seed=index + 2), moment)
+    idents: set[int] = set()
+
+    class RecordingFinder:
+        def find_many(self, images: list[np.ndarray]) -> list[object]:
+            idents.add(threading.get_ident())
+            return [measure_eye(image, image.shape[1] // 2, image.shape[0] // 2, 12) for image in images]
+
+    library = analyze_folder(
+        folder,
+        cache_dir=tmp_path / "cache",
+        threshold=1.0,
+        eye_scoring=True,
+        eye_finder=RecordingFinder(),
+    )
+    assert len(library.analyses) == 5
+    assert idents == {threading.get_ident()}
+    assert all(item.metrics is not None and item.metrics.eye_sharpness is not None for item in library.analyses)
+
+
+def test_bird_eye_without_weights_stays_off(tmp_path: Path) -> None:
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    write_jpeg(folder / "bird.jpg", sharp_frame(), datetime(2024, 7, 2, 9, 0, 0))
+    library = analyze_folder(folder, cache_dir=tmp_path / "cache", threshold=1.0, eye_scoring=True)
+    assert library.eye_active is False
+    assert any("Bird eye detection stayed off" in note for note in library.warnings)
 
 
 def test_a_burst_with_two_rated_eyes_keeps_the_sharpest(tmp_path: Path) -> None:
@@ -77,7 +170,13 @@ def test_a_burst_with_two_rated_eyes_keeps_the_sharpest(tmp_path: Path) -> None:
     write_jpeg(texture_path, sharp_frame(seed=9), moment + timedelta(milliseconds=400))
     write_jpeg(tiny_path, _portrait(MIN_RATED_DIAMETER - 6), moment + timedelta(milliseconds=600))
 
-    library = analyze_folder(folder, cache_dir=tmp_path / "cache", threshold=1.0, eye_scoring=True)
+    library = analyze_folder(
+        folder,
+        cache_dir=tmp_path / "cache",
+        threshold=1.0,
+        eye_scoring=True,
+        eye_finder=PortraitEyeFinder(),
+    )
     assert library.eye_active
     assert len(library.bursts) == 1
     by_path = {item.frame.path: item for item in library.analyses}
