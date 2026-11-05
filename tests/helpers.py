@@ -1,4 +1,7 @@
-"""Synthetic photographs for pipeline tests."""
+"""Synthetic photographs for pipeline tests.
+
+``write_jpeg`` stores a BGR image with an EXIF clock. ``sharp_frame``, ``blurry_frame``, and ``clipped_frame`` build the patterns. ``write_burst_folder`` writes a three-frame burst and a two-frame burst.
+"""
 
 from __future__ import annotations
 

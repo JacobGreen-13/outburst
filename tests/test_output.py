@@ -1,4 +1,7 @@
-"""Sidecars, keeper export, and reports leave the originals alone."""
+"""Sidecars, keeper export, and reports leave the originals alone.
+
+``_frame`` and ``_library`` build a tiny library. The tests check that XMP does not touch the photograph, existing fields survive, a non-XMP sidecar is refused, keepers copy and hard-link, sidecars are limited to keepers and star ratings, and the report names the recommended frame.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,7 @@
-"""The one-click launcher finds Python and does not install during a dry run."""
+"""The one-click launcher finds Python and does not install during a dry run.
+
+``_run`` invokes ``outburst.sh``. The tests check script syntax, help, a dry run that selects Python 3.11 or newer, the subject extra, and rejection of an older Python.
+"""
 
 from __future__ import annotations
 

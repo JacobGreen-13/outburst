@@ -1,4 +1,7 @@
-"""SQLite cache round trips."""
+"""SQLite cache round trips.
+
+The tests put measurements, decisions, stars, and eye columns, then read them back. ``test_forget_folder_drops_measurements_and_keeps_decisions`` checks that a folder clear leaves picks. ``test_missing_preview_file_is_a_cache_miss`` checks a deleted thumbnail. ``test_legacy_decisions_without_origin_count_as_user_marks`` covers old rows.
+"""
 
 from __future__ import annotations
 

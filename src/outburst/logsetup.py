@@ -1,4 +1,7 @@
-"""Logging for the desktop app. Library code only emits records."""
+"""Logging for the desktop app. Library code only emits records.
+
+``configure_logging`` sends records to stderr and, when the cache folder can be created, to a rotating ``outburst.log``.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +13,13 @@ _configured = False
 
 
 def configure_logging(cache_dir: Path | None = None) -> None:
-    """Send logs to stderr and, when possible, a rotating file in the cache directory."""
+    """Send logs to stderr and, when possible, a rotating file in the cache directory.
+
+    Inputs: an optional cache directory for outburst.log.
+    Output: none.
+    Uses: desktop startup before the window opens.
+    Limitations: a second call does nothing, and a file that cannot be opened is logged to stderr only.
+    """
 
     global _configured
     if _configured:

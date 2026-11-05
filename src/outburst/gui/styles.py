@@ -1,4 +1,7 @@
-"""Dark review theme. A dim surround makes it easier to judge a photograph."""
+"""Dark review theme. A dim surround makes it easier to judge a photograph.
+
+``apply_theme`` sets the Fusion palette and the stylesheet for the rail, preview, and filmstrip. ``build_app_icon`` draws the stacked-frame icon in memory so the repo has no icon file.
+"""
 
 from __future__ import annotations
 
@@ -29,9 +32,24 @@ QLabel#title {
     font-weight: 650;
     background: transparent;
 }
-QLabel#subtitle, QLabel#folderLabel, QLabel#hint {
+QLabel#subtitle, QLabel#folderLabel, QLabel#hint, QLabel#fieldLabel {
     color: #a3a3a3;
     background: transparent;
+}
+QLabel#folderLabel {
+    padding-right: 8px;
+}
+QWidget#sidePanel {
+    background: transparent;
+}
+QWidget#filmstripFrame {
+    background: #1a1a1a;
+    border: 1px solid #333333;
+    border-radius: 8px;
+}
+QScrollArea#filmstrip {
+    background: transparent;
+    border: none;
 }
 QListWidget {
     background: #1e1e1e;
@@ -58,8 +76,12 @@ QGroupBox {
     border: 1px solid #333333;
     border-radius: 8px;
     margin-top: 12px;
-    padding: 10px 8px 8px 8px;
+    padding: 8px;
     background: #1c1c1c;
+}
+QGroupBox#sectionBox {
+    margin-top: 14px;
+    padding: 8px;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
@@ -118,7 +140,7 @@ QSlider::handle:horizontal {
     background: #3dbe86;
     border-radius: 7px;
 }
-QDoubleSpinBox, QLineEdit, QComboBox {
+QDoubleSpinBox, QSpinBox, QLineEdit, QComboBox {
     background: #242424;
     color: #f2f2f2;
     border: 1px solid #3a3a3a;
@@ -153,7 +175,12 @@ QProgressBar::chunk {
     background: #1f8a5b;
     border-radius: 3px;
 }
-QSplitter::handle {
+QSplitter::handle:horizontal {
+    width: 8px;
+    background: #161616;
+}
+QSplitter::handle:vertical {
+    height: 8px;
     background: #161616;
 }
 QStatusBar {
@@ -172,6 +199,14 @@ QLabel#infoPanel {
 
 
 def apply_theme(app: QApplication) -> None:
+    """
+    Apply the dark Fusion palette and stylesheet to the application.
+
+    Inputs: app, the Qt application.
+    Output: no return value. The style, palette, and stylesheet are set on app.
+    Uses: the review window theme.
+    Limitations: rules in the stylesheet override the palette for the widgets they name.
+    """
     app.setStyle("Fusion")
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor("#161616"))
@@ -191,7 +226,14 @@ def apply_theme(app: QApplication) -> None:
 
 
 def build_app_icon() -> QIcon:
-    """A small stacked-frame mark, drawn in code so the repo stays free of binary assets."""
+    """
+    A small stacked-frame mark, drawn in code so the repo stays free of binary assets.
+
+    Inputs: none.
+    Output: a QIcon painted at 256 pixels.
+    Uses: the review window icon and the application icon set at startup.
+    Limitations: the mark is drawn in memory and is not loaded from an image file.
+    """
 
     size = 256
     pixmap = QPixmap(size, size)

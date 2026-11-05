@@ -1,10 +1,6 @@
 """Small thread pools for work that waits on disk or OpenCV.
 
-The window stays on its own thread. These helpers run a bounded pool and
-hand results back in input order, on the thread that asked for the work.
-SQLite writes stay on that thread. Two to four workers is the cap for
-preview scoring, because OpenCV already threads inside a measurement.
-Keeper copies and XMP writes use two workers so they do not fight the disk.
+``preview_workers`` returns 1 for a single task and otherwise 2 to 4 workers. ``run_ordered`` runs indexed jobs, delivers results in input order on the caller thread, and can cancel between completions. SQLite writes stay on the caller. The pool does not share a YOLO model across threads.
 """
 
 from __future__ import annotations
@@ -24,7 +20,13 @@ T = TypeVar("T")
 
 
 def preview_workers(task_count: int) -> int:
-    """How many preview tasks to run at once. One task needs no pool."""
+    """How many preview tasks to run at once. One task needs no pool.
+
+    Inputs: how many preview tasks are waiting.
+    Output: a worker count from 1 through 4.
+    Uses: the scan pipeline when it scores pending previews.
+    Limitations: one or fewer tasks returns 1, and two or more tasks use at most four workers and never more workers than tasks.
+    """
 
     if task_count <= 1:
         return 1
@@ -46,6 +48,11 @@ def run_ordered(
     thread, in order, as soon as that prefix is done. A failure is raised
     when its index is reached, after earlier results have been delivered.
     ``cancel`` runs on this thread between completions and may raise.
+
+    Inputs: a task count, a function of an index, a worker cap, and optional cancel and completion callbacks.
+    Output: results in index order.
+    Uses: preview scoring, keeper copies, and XMP writes.
+    Limitations: a non-positive count returns an empty list, and shutdown cancels futures that have not started.
     """
 
     if count <= 0:

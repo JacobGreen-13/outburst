@@ -1,4 +1,7 @@
-"""Sharpness, exposure, and the composite score."""
+"""Sharpness, exposure, and the composite score.
+
+The tests check blur, clipped exposure, the default weights, subject crops, eye ranking, filename ties, the sharpest patch, focus peaking, and the compare partner.
+"""
 
 from __future__ import annotations
 

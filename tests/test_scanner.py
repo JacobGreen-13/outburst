@@ -1,4 +1,7 @@
-"""Folder scanning and RAW/JPEG pairing."""
+"""Folder scanning and RAW/JPEG pairing.
+
+The tests check that a same-stem JPEG is paired and hidden files are skipped, that a recursive scan sees a nested RAW, and that a missing folder raises.
+"""
 
 from __future__ import annotations
 
