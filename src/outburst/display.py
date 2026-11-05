@@ -213,7 +213,7 @@ def frame_info_html(
     if stars is None and decision == "keep":
         star_note = "sidecar writes 5 stars with this pick"
     elif stars is None and decision == "reject":
-        star_note = "sidecar writes the reject flag"
+        star_note = "kept in this review"
     elif stars is None:
         star_note = "no star rating"
     else:

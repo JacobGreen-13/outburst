@@ -136,7 +136,7 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 | F5 | Clear cached measurements for this folder and scan it again |
 | Ctrl+E | Save the frames marked as keepers |
 | Ctrl+Shift+E | Export a JSON and CSV report |
-| Ctrl+Shift+X | Write XMP sidecars |
+| Ctrl+Shift+X | Write XMP sidecars for keepers and star-rated frames |
 | Esc | Cancel the scan |
 
 ## How a frame gets its score
@@ -163,13 +163,13 @@ Delete that folder if you want Outburst to measure everything again. A log file,
 
 **Save keepers** copies the frames you marked as keepers into a folder you pick. When a scan finishes, each burst's recommended frame is marked for you if that burst has no keeper yet. Clear that mark, or mark more frames, with the button under the preview. **G** rejects the other frames that are much softer than that best frame, or heavily clipped, and leaves anything you marked as a keeper. Press **G** again to bring those frames back. Changing **Burst gap** keeps the frames you marked, drops the automatic mark, and marks the best frame of each new burst. A burst with no keeper is skipped. A burst shorter than **Minimum frames** is hidden and is not saved, even if you marked a frame in it. Lower the minimum to review and save those bursts. Hard links are offered when you want a second name for the same file without using more disk space. If a link cannot be created, Outburst copies the file instead. Deleting the file in the keepers folder leaves the original in place.
 
-**XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension. Lightroom, Capture One, Darktable, and digiKam can read it.
+**XMP** writes a sidecar named like the photo, with `.xmp` instead of the photo extension, for each keeper and for each frame with a star rating. A frame you rated and did not mark as a keeper still gets a sidecar. Lightroom, Capture One, Darktable, and digiKam can read it.
 
 - Stars are `xmp:Rating` from 0 to 5, and `MicrosoftPhoto:Rating` as the matching percent. Keys **1** through **5** set them. **0**, or the same number again, clears them.
 - A pick (the keeper mark, key **A**) is `xmpDM:pick="1"` and `xmpDM:good="true"`. digiKam reads that as PickLabel 3. A pick with no star rating of its own is also written as 5 stars, which is what older catalogs expect.
 - A reject (key **X**) is `xmpDM:pick="-1"` and `xmpDM:good="false"`. digiKam reads that as PickLabel 1. With no stars of its own, `xmp:Rating` is -1 so a catalog that only reads the rating still sees the reject. Stars you set stay in `xmp:Rating` beside that flag.
 
-A burst shorter than the minimum is not saved, so a pick on one of those frames is not written as a pick. A reject on it still is. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it. In Lightroom, choose Metadata → Read Metadata from Files. In Capture One, choose Load Metadata.
+A burst shorter than the minimum is not saved, so a pick on one of those frames is not written. Stars on that frame are still written. A reject with no stars is left without a sidecar. The sidecar also stores `outburst:Score`, the burst id, and whether the frame was the recommendation. Outburst asks before writing, and the count is those frames. If a sidecar is already there and is real XMP, Outburst updates its own fields and leaves the rest. If the file is not XMP, Outburst does not overwrite it. In Lightroom, choose Metadata → Read Metadata from Files. In Capture One, choose Load Metadata.
 
 **Report** writes `outburst-report.json` and `outburst-report.csv`. `examples/sample_output` shows the shape of both, plus a sample sidecar. Reports you export use full file paths.
 

@@ -47,7 +47,7 @@ from outburst.gui.image_viewer import ImageViewer, next_zoom
 from outburst.gui.styles import build_app_icon
 from outburst.gui.worker import AnalyzeWorker, ExportWorker, ModelFetchWorker, SidecarWorker
 from outburst.models import Burst, FrameAnalysis, Library
-from outburst.output import choose_keepers, write_reports
+from outburst.output import choose_keepers, frames_for_sidecars, write_reports
 from outburst.pipeline import with_threshold, with_weights
 from outburst.scoring import compare_partner_offset, eye_chooses_best, recommended_offset
 from outburst.subject import (
@@ -1113,13 +1113,29 @@ class MainWindow(QMainWindow):
     def _write_xmp(self) -> None:
         if self._library is None:
             return
-        count = len(self._library.analyses)
+        count = len(
+            frames_for_sidecars(
+                self._library,
+                self._decisions,
+                stars=self._stars,
+                minimum_frames=self.controls.minimum_frames(),
+            )
+        )
+        if count == 0:
+            self._notify(
+                "No sidecars to write",
+                "Mark a keeper or set a star rating first. A starred frame is written even when it is not a keeper.",
+                "info",
+            )
+            return
+        noun = "file" if count == 1 else "files"
         if not ask(
             self,
             "Write XMP sidecars",
-            f"Write sidecars next to {count} files?\n\n"
-            "Each sidecar stores the star rating and the pick or reject flag for Lightroom, "
-            "Capture One, Darktable, and digiKam. Original RAW and JPEG files stay unchanged.",
+            f"Write sidecars next to {count} {noun}?\n\n"
+            "Outburst writes one sidecar for each keeper, and for each frame with a star rating, "
+            "including a frame you rated and left unpicked. Other frames are left alone. "
+            "Original RAW and JPEG files stay unchanged.",
         ):
             return
         self._start_save(
@@ -1129,7 +1145,7 @@ class MainWindow(QMainWindow):
                 dict(self._stars),
                 self.controls.minimum_frames(),
             ),
-            f"Writing sidecars for {count} files…",
+            f"Writing sidecars for {count} {noun}…",
         )
 
     def _show_warnings(self) -> None:
