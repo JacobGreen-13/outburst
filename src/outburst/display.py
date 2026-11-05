@@ -2,7 +2,7 @@
 
 Kept outside the Qt layer so the wording can be tested without a display.
 
-``filmstrip_order`` and ``visible_bursts`` choose which frames appear and in what order. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``star_glyphs``, ``frame_info_html``, and ``format_captured`` build the labels. ``detected_eye_count`` counts frames with a bird eye. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
+``filmstrip_order``, ``visible_bursts``, and ``visible_frame_indexes`` choose which frames appear and in what order. ``frame_meets_minimum_score`` compares a frame with the minimum score using the number on the filmstrip. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``star_glyphs``, ``frame_info_html``, and ``format_captured`` build the labels. ``detected_eye_count`` counts frames with a bird eye. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from html import escape
 from pathlib import Path
 
 from outburst.models import Burst, Frame, FrameAnalysis, Metrics, Weights
-from outburst.scoring import effective_sharpness, recommended_offset, score_percent
+from outburst.scoring import displayed_score, effective_sharpness, recommended_offset, score_percent
 
 # A frame this far below the best score is called soft in the filmstrip.
 SOFT_SCORE_GAP = 0.15
@@ -41,17 +41,75 @@ def filmstrip_order(scores: Sequence[float | None], mode: str) -> list[int]:
     return sorted(order, key=lambda index: (scores[index] is None, -(scores[index] or 0.0), index))
 
 
-def visible_bursts(bursts: Sequence[Burst], *, minimum_frames: int) -> tuple[Burst, ...]:
+def frame_meets_minimum_score(composite: float | None, minimum: int) -> bool:
+    """Report whether a frame's on-screen score meets the minimum.
+
+    Inputs: composite, a 0..1 score or None; minimum, the cutoff from 0 to 100.
+    Output: True when the number shown on the filmstrip is at least the cutoff.
+    Uses: hiding frames and bursts below Minimum score.
+    Limitations: a missing score does not meet the cutoff. The cutoff is clamped to 0..100. The comparison uses the rounded display number, so a frame labeled 50 stays visible at a minimum of 50.
+    """
+
+    score = displayed_score(composite)
+    if score is None:
+        return False
+    return score >= max(0, min(100, int(minimum)))
+
+
+def visible_frame_indexes(
+    frames: Sequence[Frame],
+    by_path: dict[Path, FrameAnalysis],
+    *,
+    minimum_score: int | None,
+) -> list[int]:
+    """Indexes of frames that stay on the filmstrip.
+
+    Inputs: frames, one burst in shooting order; by_path, analyses keyed by path; minimum_score, the cutoff, or None when the filter is off.
+    Output: shooting-order indexes. None returns every index. A cutoff returns the frames whose display score meets it.
+    Uses: the filmstrip and the burst list while Minimum score is on.
+    Limitations: a frame with no analysis is hidden while the filter is on. This does not change keeper marks or the files on disk.
+    """
+
+    indexes = list(range(len(frames)))
+    if minimum_score is None:
+        return indexes
+    return [
+        index
+        for index in indexes
+        if frame_meets_minimum_score(
+            None if (analysis := by_path.get(frames[index].path)) is None else analysis.composite,
+            minimum_score,
+        )
+    ]
+
+
+def visible_bursts(
+    bursts: Sequence[Burst],
+    *,
+    minimum_frames: int,
+    by_path: dict[Path, FrameAnalysis] | None = None,
+    minimum_score: int | None = None,
+) -> tuple[Burst, ...]:
     """Bursts long enough to list. Shorter bursts stay hidden and are not saved.
 
-    Inputs: bursts and a minimum frame count.
-    Output: the bursts whose count meets the minimum, in the same order.
+    Inputs: bursts; minimum_frames, the shortest burst that stays listed; by_path, analyses keyed by path; minimum_score, the score cutoff, or None when that filter is off.
+    Output: the bursts that meet the length and, when a cutoff is set, still have a frame at that score, in the same order.
     Uses: the review window burst list.
-    Limitations: a minimum below 1 is treated as 1, and this function does not save files.
+    Limitations: a minimum below 1 is treated as 1. A cutoff with no analyses hides every burst. This function does not save files. A burst hidden by the score can still contain a marked keeper.
     """
 
     minimum = max(1, int(minimum_frames))
-    return tuple(burst for burst in bursts if burst.count >= minimum)
+    chosen: list[Burst] = []
+    for burst in bursts:
+        if burst.count < minimum:
+            continue
+        if minimum_score is not None:
+            if by_path is None or not visible_frame_indexes(
+                burst.frames, by_path, minimum_score=minimum_score
+            ):
+                continue
+        chosen.append(burst)
+    return tuple(chosen)
 
 
 def human_burst_name(burst_id: str) -> str:
@@ -90,13 +148,15 @@ def burst_list_text(
     burst: Burst,
     by_path: dict[Path, FrameAnalysis],
     decisions: dict[Path, str],
+    *,
+    shown_frames: int | None = None,
 ) -> str:
     """Two lines for one row of the burst list.
 
-    Inputs: a burst, analyses keyed by path, and keep or reject marks.
-    Output: a name, frame count, capture time, best score, and optional eye or keeper text.
+    Inputs: a burst, analyses keyed by path, keep or reject marks, and shown_frames, how many frames remain after Minimum score, or None when that filter is off.
+    Output: a name, frame count, capture time, best score, and optional eye or keeper text. A shown count below the burst length reads as that many of the total.
     Uses: the review window burst list.
-    Limitations: an empty burst is labeled Empty, and a missing analysis shows an em dash for the score. The eye count is every frame with a stored eye center, including an eye too small to rate.
+    Limitations: an empty burst is labeled Empty, and a missing analysis shows an em dash for the score. The eye count is every frame with a stored eye center, including an eye too small to rate. A shown count equal to the burst length uses the plain frame count.
     """
 
     when = format_captured(burst.started_at)
@@ -117,8 +177,12 @@ def burst_list_text(
         eye = f"  ·  {found} eyes"
     else:
         eye = ""
-    noun = "frame" if burst.count == 1 else "frames"
-    return f"{human_burst_name(burst.id)}  ·  {burst.count} {noun}\n{when}  ·  best {score}{eye}{suffix}"
+    if shown_frames is not None and shown_frames != burst.count:
+        count = f"{shown_frames} of {burst.count} frames"
+    else:
+        noun = "frame" if burst.count == 1 else "frames"
+        count = f"{burst.count} {noun}"
+    return f"{human_burst_name(burst.id)}  ·  {count}\n{when}  ·  best {score}{eye}{suffix}"
 
 
 def star_glyphs(stars: int | None) -> str:

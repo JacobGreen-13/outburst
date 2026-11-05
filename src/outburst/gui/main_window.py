@@ -47,6 +47,7 @@ from outburst.display import (
     score_caption,
     thumb_badge,
     visible_bursts,
+    visible_frame_indexes,
 )
 from outburst.gui.burst_view import Filmstrip, Thumb
 from outburst.gui.controls import ControlPanel
@@ -434,6 +435,7 @@ class MainWindow(QMainWindow):
         self.controls.eye_toggled.connect(self._on_eye_toggled)
         self.controls.model_changed.connect(self._on_model_changed)
         self.controls.minimum_changed.connect(self._on_minimum_changed)
+        self.controls.minimum_score_changed.connect(self._on_minimum_score_changed)
         bursts = QGroupBox("Bursts")
         bursts.setObjectName("sectionBox")
         bursts_layout = QVBoxLayout(bursts)
@@ -847,12 +849,15 @@ class MainWindow(QMainWindow):
         Inputs: none. Weights are read from the control panel.
         Output: no return value. The analysis map, burst labels, filmstrip scores, and preview refresh.
         Uses: the Sharp and Center sliders, and turning subject scoring off.
-        Limitations: nothing happens before a library is loaded or while the review is cleared for a scan. This rescores cached measurements and does not scan the files again.
+        Limitations: nothing happens before a library is loaded or while the review is cleared for a scan. This rescores cached measurements and does not scan the files again. While Minimum score is on, the burst list is rebuilt because a new score can hide or show a frame.
         """
         if self._library is None or self._review_suspended:
             return
         self._library = with_weights(self._library, self.controls.weights())
         self._by_path = {item.frame.path: item for item in self._library.analyses}
+        if self.controls.score_floor() is not None:
+            self._refresh_burst_list(prefer_path=self._selected_path())
+            return
         self._refresh_burst_labels()
         self.filmstrip.refresh_flags(self._thumbs())
         self._update_viewer()
@@ -1254,40 +1259,132 @@ class MainWindow(QMainWindow):
         if self._library is not None:
             self.statusBar().showMessage(self._status_summary())
 
+    def _on_minimum_score_changed(self) -> None:
+        """
+        Hide or show frames after Minimum score changes.
+
+        Inputs: none. The checkbox and cutoff are read from the control panel.
+        Output: no return value. The burst list and filmstrip refresh and keep the current file when it still meets the cutoff. An open library also refreshes the status summary.
+        Uses: the Minimum score checkbox and its number.
+        Limitations: with the checkbox off, every frame stays visible. A frame with no score stays hidden while the checkbox is on. Marks on a hidden frame are kept.
+        """
+        self._refresh_burst_list(prefer_path=self._selected_path())
+        if self._library is not None:
+            self.statusBar().showMessage(self._status_summary())
+
+    def _best_visible_index(self, burst: Burst) -> int | None:
+        """
+        Find the highest-scoring frame that meets Minimum score.
+
+        Inputs: burst, the burst to search.
+        Output: a shooting-order index, or None when no frame meets the cutoff.
+        Uses: opening a burst whose recommended frame is hidden, and the recommended-frame shortcut.
+        Limitations: with Minimum score off, every frame is eligible and the highest composite wins. A missing score sorts last.
+        """
+        visible = visible_frame_indexes(
+            burst.frames,
+            self._by_path,
+            minimum_score=self.controls.score_floor(),
+        )
+        if not visible:
+            return None
+
+        def rank(index: int) -> float:
+            analysis = self._by_path.get(burst.frames[index].path)
+            if analysis is None or analysis.composite is None:
+                return -1.0
+            return analysis.composite
+
+        return max(visible, key=rank)
+
+    def _nothing_visible_message(self) -> str:
+        """
+        Explain why the burst list is empty after a scan.
+
+        Inputs: none. Minimum frames, Minimum score, and the open library are read from the window.
+        Output: placeholder text. A folder whose long bursts all fall under Minimum score names that cutoff. Otherwise the text names Minimum frames.
+        Uses: the preview when a scanned folder has no visible burst.
+        Limitations: the text describes the controls. It does not change them. An eye too small to rate is still counted.
+        """
+        library = self._library
+        if library is None:
+            return _WELCOME
+        floor = self.controls.score_floor()
+        long_enough = [burst for burst in library.bursts if burst.count >= self.controls.minimum_frames()]
+        eyes = detected_eye_count(library.analyses) if library.eye_active else 0
+        if floor is not None and long_enough:
+            text = (
+                f"Every burst still long enough to review scores under {floor}.\n\n"
+                "Lower Minimum score, or turn it off, to see those frames."
+            )
+            short = len(library.bursts) - len(long_enough)
+            if short == 1:
+                text += "\n\n1 shorter burst stays hidden by Minimum frames."
+            elif short > 1:
+                text += f"\n\n{short} shorter bursts stay hidden by Minimum frames."
+            if eyes == 1:
+                text += "\n\nBird eye detection found an eye on 1 frame."
+            elif eyes > 1:
+                text += f"\n\nBird eye detection found an eye on {eyes} frames."
+            return text
+        return _short_bursts_hidden(self.controls.minimum_frames(), eyes=eyes)
+
     def _visible_bursts(self) -> tuple[Burst, ...]:
         """
         Return the bursts long enough to review.
 
         Inputs: none.
-        Output: the bursts whose frame count meets Minimum frames, in library order, or an empty tuple before a library is loaded.
+        Output: the bursts that meet Minimum frames and still have a frame at the minimum score, in library order, or an empty tuple before a library is loaded.
         Uses: the burst list, filmstrip, and status summary.
-        Limitations: shorter bursts stay hidden and are not returned.
+        Limitations: shorter bursts stay hidden. While Minimum score is on, a burst whose frames all fall below that score is not returned.
         """
         if self._library is None:
             return ()
-        return visible_bursts(self._library.bursts, minimum_frames=self.controls.minimum_frames())
+        return visible_bursts(
+            self._library.bursts,
+            minimum_frames=self.controls.minimum_frames(),
+            by_path=self._by_path,
+            minimum_score=self.controls.score_floor(),
+        )
 
     def _status_summary(self) -> str:
         """
         Summarize the open library for the status bar.
 
         Inputs: none.
-        Output: an empty string before a library is loaded. Otherwise file and visible-burst counts, hidden bursts, note count, bird eye detection and how many eyes were found, and compare, zoom, or peaking when those are on.
+        Output: an empty string before a library is loaded. Otherwise file and visible-burst counts, bursts hidden by length, frames and bursts hidden by Minimum score, note count, bird eye detection and how many eyes were found, and compare, zoom, or peaking when those are on.
         Uses: the status bar.
-        Limitations: hidden bursts are counted and not named. A zoom of 1 is shown as 1:1. Any other zoom is shown as an integer ratio.
+        Limitations: hidden bursts are counted and not named. A zoom of 1 is shown as 1:1. Any other zoom is shown as an integer ratio. Frames hidden by Minimum score are counted inside bursts that meet Minimum frames.
         """
         library = self._library
         if library is None:
             return ""
         shown = len(self._visible_bursts())
-        hidden = len(library.bursts) - shown
+        long_enough = [burst for burst in library.bursts if burst.count >= self.controls.minimum_frames()]
+        short_hidden = len(library.bursts) - len(long_enough)
         noun = "burst" if shown == 1 else "bursts"
         message = f"{len(library.analyses)} files · {shown} {noun}"
-        if hidden:
-            hidden_noun = "burst" if hidden == 1 else "bursts"
+        if short_hidden:
+            hidden_noun = "burst" if short_hidden == 1 else "bursts"
             message += (
-                f" · {hidden} {hidden_noun} under {self.controls.minimum_frames()} frames hidden"
+                f" · {short_hidden} {hidden_noun} under {self.controls.minimum_frames()} frames hidden"
             )
+        floor = self.controls.score_floor()
+        if floor is not None:
+            hidden_frames = 0
+            hidden_bursts = 0
+            for burst in long_enough:
+                kept = len(visible_frame_indexes(burst.frames, self._by_path, minimum_score=floor))
+                if kept == 0:
+                    hidden_bursts += 1
+                else:
+                    hidden_frames += burst.count - kept
+            if hidden_frames:
+                frame_noun = "frame" if hidden_frames == 1 else "frames"
+                message += f" · {hidden_frames} {frame_noun} under {floor} hidden"
+            if hidden_bursts:
+                burst_noun = "burst" if hidden_bursts == 1 else "bursts"
+                message += f" · {hidden_bursts} {burst_noun} under {floor} hidden"
         if library.warnings:
             message += f" · {len(library.warnings)} notes"
         modes: list[str] = []
@@ -1326,8 +1423,8 @@ class MainWindow(QMainWindow):
 
         Inputs: prefer_path, a file to keep selected, or None to select the first visible burst.
         Output: no return value. The list, filmstrip, and preview update. No visible bursts shows the short-burst message when the library has bursts, and the welcome message otherwise.
-        Uses: the burst list after a scan, a gap change, or a minimum change.
-        Limitations: bursts under Minimum frames stay off the list. List signals are blocked while the rows are rebuilt. Nothing is drawn while the review is cleared for a scan.
+        Uses: the burst list after a scan, a gap change, a minimum change, or a minimum-score change.
+        Limitations: bursts under Minimum frames stay off the list. Bursts whose frames all fall below Minimum score stay off the list while that filter is on. List signals are blocked while the rows are rebuilt. Nothing is drawn while the review is cleared for a scan.
         """
         if self._review_suspended:
             return
@@ -1338,8 +1435,17 @@ class MainWindow(QMainWindow):
             self.burst_list.blockSignals(False)
             self.viewer.set_placeholder(_WELCOME)
             return
+        floor = self.controls.score_floor()
         for burst in self._visible_bursts():
-            item = QListWidgetItem(burst_list_text(burst, self._by_path, self._decisions))
+            shown = len(visible_frame_indexes(burst.frames, self._by_path, minimum_score=floor))
+            item = QListWidgetItem(
+                burst_list_text(
+                    burst,
+                    self._by_path,
+                    self._decisions,
+                    shown_frames=None if floor is None else shown,
+                )
+            )
             item.setData(Qt.ItemDataRole.UserRole, burst.id)
             item.setSizeHint(QSize(240, 58))
             self.burst_list.addItem(item)
@@ -1354,12 +1460,7 @@ class MainWindow(QMainWindow):
         self._frame_index = 0
         self.filmstrip.set_cards([])
         if library.bursts:
-            self.viewer.set_placeholder(
-                _short_bursts_hidden(
-                    self.controls.minimum_frames(),
-                    eyes=detected_eye_count(library.analyses) if library.eye_active else 0,
-                )
-            )
+            self.viewer.set_placeholder(self._nothing_visible_message())
         else:
             self.viewer.set_placeholder(_WELCOME)
 
@@ -1374,10 +1475,19 @@ class MainWindow(QMainWindow):
         """
         if self._library is None:
             return
+        floor = self.controls.score_floor()
         for row, burst in enumerate(self._visible_bursts()):
             item = self.burst_list.item(row)
             if item is not None:
-                item.setText(burst_list_text(burst, self._by_path, self._decisions))
+                shown = len(visible_frame_indexes(burst.frames, self._by_path, minimum_score=floor))
+                item.setText(
+                    burst_list_text(
+                        burst,
+                        self._by_path,
+                        self._decisions,
+                        shown_frames=None if floor is None else shown,
+                    )
+                )
 
     def _show_burst(self, index: int, prefer_path: Path | None) -> None:
         """
@@ -1386,7 +1496,7 @@ class MainWindow(QMainWindow):
         Inputs: index, the visible-burst index; prefer_path, a file to select, or None for the recommended frame.
         Output: no return value. The compare partner is cleared, the filmstrip is rebuilt, and the preview updates.
         Uses: moving between bursts.
-        Limitations: an index outside the visible bursts returns immediately. A preferred path that is not in the burst falls back to the recommended frame. A scan in progress returns without drawing.
+        Limitations: an index outside the visible bursts returns immediately. A preferred path that is hidden or not in the burst falls back to the recommended frame when that frame is visible, and otherwise to the highest visible score. A scan in progress returns without drawing.
         """
         if self._review_suspended:
             return
@@ -1396,11 +1506,15 @@ class MainWindow(QMainWindow):
         self._burst_index = index
         burst = bursts[index]
         self._compare_index = None
+        visible = set(visible_frame_indexes(burst.frames, self._by_path, minimum_score=self.controls.score_floor()))
         frame_index = None
         if prefer_path is not None:
-            frame_index = next((i for i, frame in enumerate(burst.frames) if frame.path == prefer_path), None)
+            found = next((i for i, frame in enumerate(burst.frames) if frame.path == prefer_path), None)
+            if found in visible:
+                frame_index = found
         if frame_index is None and burst.frames:
-            frame_index = recommended_offset(burst.frames, self._by_path)
+            recommended = recommended_offset(burst.frames, self._by_path)
+            frame_index = recommended if recommended in visible else self._best_visible_index(burst)
         self._frame_index = frame_index or 0
         self.filmstrip.set_cards(self._thumbs())
         self._update_viewer()
@@ -1417,7 +1531,11 @@ class MainWindow(QMainWindow):
         burst = self._current_burst()
         if burst is None or not burst.frames:
             return
-        self._frame_index = max(0, min(index, len(burst.frames) - 1))
+        index = max(0, min(index, len(burst.frames) - 1))
+        visible = self._filmstrip_indexes()
+        if visible and index not in visible:
+            index = min(visible, key=lambda item: (abs(item - index), item))
+        self._frame_index = index
         if self._compare_index == self._frame_index:
             self._compare_index = self._adjacent_frame(self._frame_index, 1)
         self.filmstrip.mark_selected(self._frame_index)
@@ -1466,7 +1584,7 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: shooting-order indexes, or score order. An empty list when no burst is current.
         Uses: arrow keys, Home and End, compare movement, and the filmstrip cards.
-        Limitations: Time is shooting order and Score puts the highest composite first with ties in shooting order. A frame with no analysis contributes no score and stays at the right in score order.
+        Limitations: Time is shooting order and Score puts the highest composite first with ties in shooting order. A frame with no analysis contributes no score and stays at the right in score order. While Minimum score is on, a frame below that score is left out.
         """
         burst = self._current_burst()
         if burst is None:
@@ -1475,7 +1593,10 @@ class MainWindow(QMainWindow):
         for frame in burst.frames:
             analysis = self._by_path.get(frame.path)
             scores.append(None if analysis is None else analysis.composite)
-        return filmstrip_order(scores, self._filmstrip_sort)
+        visible = set(
+            visible_frame_indexes(burst.frames, self._by_path, minimum_score=self.controls.score_floor())
+        )
+        return [index for index in filmstrip_order(scores, self._filmstrip_sort) if index in visible]
 
     def _step_burst(self, delta: int) -> None:
         """
@@ -1499,12 +1620,18 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: no return value. The recommended frame becomes current.
         Uses: the Enter shortcut.
-        Limitations: a missing burst, or a burst with no frames, does nothing.
+        Limitations: a missing burst, or a burst with no frames, does nothing. When the recommended frame is below Minimum score, the highest visible score is selected instead.
         """
         burst = self._current_burst()
         if burst is None or not burst.frames:
             return
-        self._select_frame(recommended_offset(burst.frames, self._by_path))
+        recommended = recommended_offset(burst.frames, self._by_path)
+        if recommended in self._filmstrip_indexes():
+            self._select_frame(recommended)
+            return
+        best = self._best_visible_index(burst)
+        if best is not None:
+            self._select_frame(best)
 
     def _toggle_decision(self, kind: str) -> None:
         """
@@ -1830,9 +1957,14 @@ class MainWindow(QMainWindow):
         partner_index = self._compare_index
         if partner_index is None or partner_index == self._frame_index or not 0 <= partner_index < len(burst.frames):
             partner_index = compare_partner_offset(burst.frames, self._by_path, self._frame_index)
+        if partner_index not in self._filmstrip_indexes():
+            partner_index = self._adjacent_frame(self._frame_index, 1)
         self.filmstrip.mark_compared(partner_index)
         if partner_index is None:
-            self.viewer.set_partner_message("Compare", "This burst has one frame.")
+            if burst.count > 1 and self.controls.score_floor() is not None:
+                self.viewer.set_partner_message("Compare", "No other frame meets the minimum score.")
+            else:
+                self.viewer.set_partner_message("Compare", "This burst has one frame.")
             return
         partner_frame = burst.frames[partner_index]
         partner = self._by_path.get(partner_frame.path)
@@ -2575,7 +2707,7 @@ class MainWindow(QMainWindow):
         Restore the controls and the last folder from saved settings.
 
         Inputs: none.
-        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, subject, eye, filmstrip order, and model id are applied. A saved folder becomes the next dialog start.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, filmstrip order, and model id are applied. A saved folder becomes the next dialog start.
         Uses: opening the review window.
         Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise.
         """
@@ -2585,6 +2717,8 @@ class MainWindow(QMainWindow):
         self.controls.set_center_percent(_as_int(settings.value("center_mix"), 65))
         self.controls.set_recursive(_as_bool(settings.value("recursive"), False))
         self.controls.set_minimum_frames(_saved_minimum_frames(settings))
+        self.controls.set_minimum_score(_as_int(settings.value("minimum_score"), 50))
+        self.controls.set_minimum_score_enabled(_as_bool(settings.value("minimum_score_enabled"), False))
         self.controls.set_subject_checked(_as_bool(settings.value("prefer_subject"), False))
         self.controls.set_eye_scoring(_as_bool(settings.value("eye_scoring"), False))
         self._set_filmstrip_sort(str(settings.value("filmstrip_sort", "time") or "time"))
@@ -2599,7 +2733,7 @@ class MainWindow(QMainWindow):
         Store the controls and the open folder for the next launch.
 
         Inputs: none.
-        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, subject, eye, filmstrip order, and model id are written.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, filmstrip order, and model id are written.
         Uses: closing the review window.
         Limitations: the folder is saved only when one is open. The resolved model path is saved only when one is stored.
         """
@@ -2609,6 +2743,8 @@ class MainWindow(QMainWindow):
         settings.setValue("center_mix", self.controls.center_percent())
         settings.setValue("recursive", self.controls.recursive())
         settings.setValue("minimum_frames", self.controls.minimum_frames())
+        settings.setValue("minimum_score", self.controls.minimum_score())
+        settings.setValue("minimum_score_enabled", self.controls.minimum_score_enabled())
         settings.setValue("prefer_subject", self.controls.prefer_subject())
         settings.setValue("eye_scoring", self.controls.eye_scoring())
         settings.setValue("filmstrip_sort", self._filmstrip_sort)
