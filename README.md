@@ -98,7 +98,7 @@ A JPEG that sits next to a RAW file with the same name is used as the preview. I
 
 While the scan runs, the status bar shows progress. The first visit reads each file, with a few frames measured at the same time. The next visit is much faster, because measurements and thumbnails are cached on this computer. **Rescan** throws away the cached measurements for the open folder and reads it again. Keeper marks stay. **Clear cache** in the View menu does that for every folder. **Save keepers** and **Write XMP sidecars** also run in the background, two files at a time, so the window stays usable.
 
-The left column lists bursts. The large frame is the one you are reviewing. Under it, five stars set the rating, and **Mark as keeper** and **Reject** set the pick and reject flags. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
+The left column lists bursts. The large frame is the one you are reviewing. Under it, five stars set the rating, and **Mark as keeper** and **Reject** set the pick and reject flags. The strip along the bottom is every frame in the current burst, with a score from 0 to 100. **Time** and **Score** above the strip set its order. Time follows the shutter. Score puts the highest score on the left, and equal scores stay in the order they were shot. A frame with no score stays at the right. The choice is remembered. Left, right, Home, and End follow the order on screen. **CLIP** means the exposure is badly blown or crushed. **SOFT** means the score is well behind the best frame in that burst.
 
 **C** puts the frame you are on beside another frame in the burst. It starts with the best other frame, or the next sharpest when you are already on the best. **[** and **]** move that other frame, and Shift-click a thumbnail compares with that frame. Click the other side to review it. **Z** shows the embedded preview at 1:1. **+** and **−**, or the scroll wheel over the preview, zoom through fit, 1:1, 2:1, and 4:1. Drag to look around. **F** paints the strongest edges green. These use the same preview Outburst scored. They do not demosaic the RAW file.
 
@@ -116,12 +116,12 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 
 | Keys | Action |
 | --- | --- |
-| Right / Left | Next or previous frame |
+| Right / Left | Next or previous frame in the filmstrip order |
 | Down / Up | Next or previous burst |
-| Home / End | First or last frame in the burst |
+| Home / End | First or last frame in the filmstrip order |
 | Enter | Jump to the recommended frame |
 | C | Compare two frames. Starts beside the best other frame in the burst |
-| [ / ] | Previous or next frame on the other side of compare |
+| [ / ] | Move the other side of compare along the filmstrip |
 | Shift-click | Compare with that thumbnail |
 | Z | Zoom to 1:1. Press again to fit the frame |
 | + / − | Zoom in or out: fit, 1:1, 2:1, 4:1. Scroll does the same over the preview |

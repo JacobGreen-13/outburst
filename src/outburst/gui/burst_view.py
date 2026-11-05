@@ -27,6 +27,7 @@ class Thumb:
     best: bool
     decision: str | None
     tooltip: str
+    frame_index: int
     compared: bool = False
 
 
@@ -142,24 +143,28 @@ class Filmstrip(QScrollArea):
 
     def set_cards(self, cards: list[Thumb]) -> None:
         self._clear()
-        for index, thumb in enumerate(cards):
-            card = ThumbCard(index, thumb)
+        for thumb in cards:
+            card = ThumbCard(thumb.frame_index, thumb)
             card.clicked.connect(self._on_card)
             self._layout.insertWidget(self._layout.count() - 1, card)
             self._cards.append(card)
-        selected = next((index for index, thumb in enumerate(cards) if thumb.selected), None)
+        selected = next((thumb.frame_index for thumb in cards if thumb.selected), None)
         if selected is not None:
             self.mark_selected(selected)
 
     def mark_selected(self, index: int) -> None:
-        for card_index, card in enumerate(self._cards):
-            card.set_selected(card_index == index)
-        if 0 <= index < len(self._cards):
-            self.ensureWidgetVisible(self._cards[index], 24, 0)
+        chosen: ThumbCard | None = None
+        for card in self._cards:
+            selected = card.index == index
+            card.set_selected(selected)
+            if selected:
+                chosen = card
+        if chosen is not None:
+            self.ensureWidgetVisible(chosen, 24, 0)
 
     def mark_compared(self, index: int | None) -> None:
-        for card_index, card in enumerate(self._cards):
-            card.set_compared(index is not None and card_index == index)
+        for card in self._cards:
+            card.set_compared(index is not None and card.index == index)
 
     def _on_card(self, index: int, shift: bool) -> None:
         if shift:
@@ -168,7 +173,8 @@ class Filmstrip(QScrollArea):
         self.selected.emit(index)
 
     def refresh_flags(self, cards: list[Thumb]) -> None:
-        if len(cards) != len(self._cards):
+        incoming = [thumb.frame_index for thumb in cards]
+        if incoming != [card.index for card in self._cards]:
             self.set_cards(cards)
             return
         for card, thumb in zip(self._cards, cards, strict=True):

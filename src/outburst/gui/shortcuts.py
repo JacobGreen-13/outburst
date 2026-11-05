@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 SHORTCUTS: tuple[tuple[str, str], ...] = (
-    ("Right / Left", "Next or previous frame"),
+    ("Right / Left", "Next or previous frame in the filmstrip order"),
     ("Down / Up", "Next or previous burst"),
-    ("Home / End", "First or last frame in the burst"),
+    ("Home / End", "First or last frame in the filmstrip order"),
     ("Enter", "Jump to the recommended frame"),
     ("C", "Compare two frames. Starts beside the best other frame in the burst."),
-    ("[ / ]", "Choose the previous or next frame for the other side of compare."),
+    ("[ / ]", "Move the other side of compare along the filmstrip."),
     ("Shift-click", "Compare the current frame with that thumbnail."),
     ("Z", "Zoom the preview to 1:1. Press again to fit the frame."),
     ("+ / −", "Zoom in or out: fit, 1:1, 2:1, 4:1. The scroll wheel does the same over the preview."),
