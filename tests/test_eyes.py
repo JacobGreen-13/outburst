@@ -1,6 +1,6 @@
 """Bird eye keypoints and sharpness. The pose model is not downloaded here.
 
-``_portrait`` draws a synthetic eye. ``PortraitEyeFinder`` stands in for the pose model in pipeline tests. The other tests check disk size, blur, a low-confidence keypoint, and a burst whose sharpest rated eye becomes the keeper.
+``_portrait`` draws a synthetic eye. ``PortraitEyeFinder`` stands in for the pose model in pipeline tests. The other tests check disk size, blur, a low-confidence keypoint, a burst whose sharpest rated eye becomes the keeper, and that the detector keeps BGR order and can recover an eye from an overlapping window.
 """
 
 from __future__ import annotations
@@ -11,7 +11,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from outburst.eyes import MIN_KEYPOINT_CONFIDENCE, MIN_RATED_DIAMETER, eye_from_pose, measure_eye
+from outburst.eyes import (
+    MIN_KEYPOINT_CONFIDENCE,
+    MIN_RATED_DIAMETER,
+    BirdEyeDetector,
+    eye_from_pose,
+    measure_eye,
+    pose_device,
+)
 from outburst.subject import BIRD_EYE_OPTION, MODEL_OPTIONS, option_by_id
 from outburst.pipeline import analyze_folder
 from outburst.scoring import recommended_offset
@@ -200,3 +207,50 @@ def test_a_burst_with_two_rated_eyes_keeps_the_sharpest(tmp_path: Path) -> None:
     assert plain_by_path[sharp_path].metrics.eye_sharpness is None
     texture_best = library.bursts[0].frames[recommended_offset(library.bursts[0].frames, plain_by_path)]
     assert texture_best.path == texture_path
+
+
+def test_pose_device_keeps_the_bird_eye_model_off_mps() -> None:
+    assert pose_device("mps") == "cpu"
+    assert pose_device("cpu") == "cpu"
+    assert pose_device("cuda") == "cuda"
+
+
+def test_finder_keeps_bgr_and_reads_an_eye_from_a_window() -> None:
+    image = np.zeros((700, 1000, 3), dtype=np.uint8)
+    image[500, 800] = (255, 0, 0)
+
+    class Model:
+        def __init__(self) -> None:
+            self.seen: list[np.ndarray] = []
+
+        def predict(self, images, verbose, device, imgsz):  # type: ignore[no-untyped-def]
+            assert verbose is False
+            assert imgsz == 640
+            self.seen.extend(images)
+            results = []
+            for frame in images:
+                height, width = frame.shape[:2]
+                if height > 520 or width > 520 or not np.any(frame[:, :, 0] > 250):
+                    results.append(_pose([], []))
+                    continue
+                ys, xs = np.nonzero(frame[:, :, 0] > 250)
+                results.append(_pose_at(float(xs.mean()), float(ys.mean())))
+            return results
+
+    model = Model()
+    found = BirdEyeDetector(model, "cpu").find_many([image])
+    assert model.seen
+    assert int(model.seen[0][500, 800, 0]) == 255
+    assert int(model.seen[0][500, 800, 2]) == 0
+    assert found[0] is not None
+    assert abs(found[0].x - 800) <= 2
+    assert abs(found[0].y - 500) <= 2
+
+
+def _pose_at(x: float, y: float) -> object:
+    blank = [0.0, 0.0]
+    return _pose(
+        [blank, blank, [x, y], blank, blank, blank],
+        [0.0, 0.0, 0.95, 0.0, 0.0, 0.0],
+        [x - 80, y - 80, x + 80, y + 80],
+    )

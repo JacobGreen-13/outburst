@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from outburst.cache import Cache, default_cache_dir
-from outburst.eyes import load_bird_eye_detector
+from outburst.eyes import EYE_CACHE_TOKEN, load_bird_eye_detector
 from outburst.grouping import group_frames
 from outburst.metadata import read_capture_info, timestamp_reader_warning
 from outburst.models import Frame, FrameAnalysis, Library, Weights
@@ -66,7 +66,7 @@ def analyze_folder(
     Inputs: folder, the directory to scan; recursive, whether subfolders are included; threshold, the burst gap in seconds; weights, the sharpness blend; cache_dir, an optional cache location; subject_model, an optional weights path; detector, an optional already-loaded detector; eye_scoring, whether bird eyes are measured; eye_model, the pose weights to load when eye_scoring is on; eye_finder, an optional already-loaded finder; progress, an optional count callback; should_cancel, an optional cancel check.
     Output: a Library of analyses, bursts, and warnings.
     Uses: the window's scan.
-    Limitations: photographs are opened for reading only. Previews are an embedded JPEG or a paired JPEG, with the long edge resized to 1024 px, and there is no demosaic. The subject model and the bird-eye model stay on this coordinating thread. Cache rows are written on this thread. Consecutive frames share a burst only while the gap is strictly less than threshold. Cancel raises CancelledError. eye_scoring with no weights and no finder leaves bird eyes off and adds a warning.
+    Limitations: photographs are opened for reading only. Previews are an embedded JPEG or a paired JPEG, with the long edge resized to 1024 px, and there is no demosaic. The subject model and the bird-eye model stay on this coordinating thread. Cache rows are written on this thread. The bird-eye cache key includes a generation token, so a scan from before that token is scored again. Consecutive frames share a burst only while the gap is strictly less than threshold. Cancel raises CancelledError. eye_scoring with no weights and no finder leaves bird eyes off and adds a warning.
     """
 
     weights = (weights or Weights()).clamped()
@@ -94,7 +94,7 @@ def analyze_folder(
         elif eye_model is not None:
             try:
                 eye_finder = load_bird_eye_detector(eye_model)
-                eye_key = make_subject_key(eye_model)
+                eye_key = f"{make_subject_key(eye_model)}|{EYE_CACHE_TOKEN}"
                 subject_key = f"{subject_key}|{eye_key}" if subject_key else eye_key
                 eye_active = True
             except Exception as exc:

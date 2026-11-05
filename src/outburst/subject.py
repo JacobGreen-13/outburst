@@ -429,16 +429,14 @@ class YoloSubjectDetector:
         Inputs: images, BGR previews in batch order.
         Output: one Detection or None per image, in the same order. An empty input returns an empty list.
         Uses: the scan pipeline, which calls this on the coordinating thread.
-        Limitations: the model is not shared across threads. Images are converted to RGB and predicted at imgsz 640 on this detector's device. Only COCO animal and bird classes are kept. A short result list is padded with None.
+        Limitations: the model is not shared across threads. Arrays are passed through as BGR and predicted at imgsz 640 on this detector's device. Ultralytics treats a NumPy frame as BGR and swaps channels itself. Only COCO animal and bird classes are kept. A short result list is padded with None.
         """
 
         if not images:
             return []
-        import cv2
-
-        rgb = [cv2.cvtColor(image, cv2.COLOR_BGR2RGB) for image in images]
+        prepared = [np.ascontiguousarray(image) for image in images]
         predict = getattr(self._model, "predict")
-        results = predict(rgb, verbose=False, device=self.device, imgsz=640)
+        results = predict(prepared, verbose=False, device=self.device, imgsz=640)
         if not results:
             return [None] * len(images)
         parsed = [_best_animal(result) for result in results]

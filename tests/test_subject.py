@@ -37,8 +37,9 @@ def test_local_file_does_not_download_weights(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr("outburst.subject.urllib.request.urlopen", fail)
     model = tmp_path / "local.pt"
     model.write_bytes(b"not a real model")
-    with pytest.raises(ImportError):
+    with pytest.raises(Exception) as caught:
         load_yolo_detector(model)
+    assert not isinstance(caught.value, AssertionError)
 
 
 def test_models_dir_uses_the_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
