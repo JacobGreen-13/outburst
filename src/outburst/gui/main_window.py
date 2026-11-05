@@ -53,7 +53,13 @@ from outburst.gui.controls import ControlPanel
 from outburst.gui.dialogs import ExportKeepersDialog, ask, notify, show_shortcuts, show_warnings
 from outburst.gui.image_viewer import ImageViewer, next_zoom
 from outburst.gui.styles import build_app_icon
-from outburst.gui.worker import AnalyzeWorker, ExportWorker, ModelFetchWorker, SidecarWorker
+from outburst.gui.worker import (
+    AnalyzeWorker,
+    ExportWorker,
+    ModelFetchWorker,
+    RuntimeInstallWorker,
+    SidecarWorker,
+)
 from outburst.models import Burst, FrameAnalysis, Library
 from outburst.output import choose_keepers, frames_for_sidecars, write_reports
 from outburst.pipeline import with_threshold, with_weights
@@ -66,6 +72,7 @@ from outburst.subject import (
     model_path,
     models_dir,
     option_by_id,
+    subject_runtime_ready,
 )
 
 log = logging.getLogger(__name__)
@@ -269,7 +276,7 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: no return value. With no folder, nothing happens. Otherwise the preview and filmstrip are cleared, the folder cache is forgotten, and a scan starts, after a missing subject model or bird-eye model is downloaded when that option is on.
         Uses: the Rescan action.
-        Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not clear the review. The cleared frames stay hidden if the new scan is cancelled.
+        Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not clear the review. The cleared frames stay hidden if the new scan is cancelled. A missing Ultralytics install is installed before the scan when subject or bird eye detection is on.
         """
         if self._folder is None:
             return
@@ -669,11 +676,14 @@ class MainWindow(QMainWindow):
         Inputs: none. The folder, recursion, gap, weights, cache, subject model, and bird eye detection are read from the window.
         Output: no return value. The preview and filmstrip are cleared, the progress bar is shown, and the worker starts. A missing subject model or bird-eye model starts a download instead.
         Uses: opening and rescanning a folder.
-        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. The subject model is downloaded before the bird-eye model when both are missing.
+        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. The subject model is downloaded before the bird-eye model when both are missing. When Ultralytics is missing, that library is installed before either weights file.
         """
         if self._folder is None:
             return
         self._suspend_review()
+        if self._needs_subject_runtime():
+            self._begin_runtime_install(then_scan=True)
+            return
         if self.controls.prefer_subject() and not self._model_ready():
             self._begin_download(then_scan=True)
             return
@@ -741,7 +751,10 @@ class MainWindow(QMainWindow):
         """
         if self._downloading and self._download_worker is not None:
             self._download_worker.abort()
-            self.statusBar().showMessage("Cancelling download…")
+            if self._download_role == "runtime":
+                self.statusBar().showMessage("Cancelling install…")
+            else:
+                self.statusBar().showMessage("Cancelling download…")
             return
         if self._scanning:
             self._stop_worker()
@@ -851,11 +864,14 @@ class MainWindow(QMainWindow):
         Inputs: enabled, whether the checkbox is now checked.
         Output: no return value. Turning it off forgets a pending follow-up scan and rescores the open library. Turning it on rescans when the model is ready and a folder is open, or downloads a missing model.
         Uses: the Subject-aware sharpness checkbox.
-        Limitations: with no folder open, a ready model does not start a scan. A missing model downloads, and the scan follows only when a folder is open.
+        Limitations: with no folder open, a ready model does not start a scan. A missing Ultralytics install is installed first. A missing model downloads, and the scan follows only when a folder is open.
         """
         if not enabled:
             self._download_then_scan = False
             self._apply_weights()
+            return
+        if self._needs_subject_runtime():
+            self._begin_runtime_install(then_scan=self._folder is not None)
             return
         if self._model_ready():
             if self._folder is not None:
@@ -915,6 +931,118 @@ class MainWindow(QMainWindow):
             return True
         self._eye_model_path = None
         return False
+
+    def _needs_subject_runtime(self) -> bool:
+        """
+        Decide whether the window should install Ultralytics before continuing.
+
+        Inputs: none. Subject scoring, bird eye detection, and the current process are read.
+        Output: True when one of those features is on, Ultralytics does not import, and this is not a headless process.
+        Uses: the subject checkbox, the bird eye checkbox, and the start of a scan.
+        Limitations: a headless process returns False so tests and scripted scans keep the existing stayed-off warning. A feature that is off does not request an install.
+        """
+        if os.environ.get("OUTBURST_HEADLESS") == "1":
+            return False
+        if not (self.controls.prefer_subject() or self.controls.eye_scoring()):
+            return False
+        return not subject_runtime_ready()
+
+    def _begin_runtime_install(self, then_scan: bool) -> None:
+        """
+        Install Ultralytics, then continue the scan or model download when asked.
+
+        Inputs: then_scan, whether a scan should start after the install and any missing weights download.
+        Output: no return value. The progress bar is busy and the status says PyTorch is downloading.
+        Uses: turning on subject detection or bird eye detection when the optional library is missing.
+        Limitations: a download already in progress only remembers to scan afterward. Cancel stops pip the next time it is checked. Photos are not uploaded.
+        """
+        if self._downloading:
+            self._download_then_scan = self._download_then_scan or then_scan
+            return
+        self._download_role = "runtime"
+        self._download_then_scan = then_scan
+        self._download_model_id = ""
+        self._downloading = True
+        worker = RuntimeInstallWorker()
+        worker.succeeded.connect(self._on_runtime_installed)
+        worker.failed.connect(self._on_runtime_install_failed)
+        worker.cancelled.connect(self._on_runtime_install_cancelled)
+        self._download_worker = worker
+        self.controls.set_model_enabled(False)
+        self._sync_actions()
+        self.progress.setRange(0, 0)
+        self.progress.setVisible(True)
+        self.statusBar().showMessage(
+            "Installing subject and bird eye detection. This downloads PyTorch and can take several minutes."
+        )
+        worker.start()
+
+    def _on_runtime_installed(self) -> None:
+        """
+        Continue after Ultralytics is installed.
+
+        Inputs: none.
+        Output: no return value. The install UI is cleared. A missing subject model or bird-eye model downloads next. Otherwise a requested scan starts.
+        Uses: the end of a successful Ultralytics install.
+        Limitations: the scan starts only when one was requested and a folder is open. Weights are still downloaded when the file is not ready.
+        """
+        follow = self._download_then_scan
+        self._finish_download_ui()
+        self.statusBar().showMessage("Subject and bird eye detection are installed.")
+        if self.controls.prefer_subject() and not self._model_ready():
+            self._begin_download(then_scan=follow)
+            return
+        if self.controls.eye_scoring() and not self._bird_eye_ready():
+            self._begin_bird_eye_download(then_scan=follow)
+            return
+        if follow and self._folder is not None:
+            self._start_worker()
+
+    def _on_runtime_install_failed(self, message: str) -> None:
+        """
+        Leave subject and bird eye detection off when Ultralytics cannot be installed.
+
+        Inputs: message, the pip error text.
+        Output: no return value. Both features are unchecked, a warning is shown, and a requested scan continues without them.
+        Uses: a failed Ultralytics install.
+        Limitations: the checkboxes are changed without emitting their own scan. The following scan uses the usual sharpness score.
+        """
+        then_scan = self._download_then_scan
+        self._finish_download_ui()
+        if self.controls.eye_scoring():
+            self.controls.set_eye_scoring(False)
+        if self.controls.prefer_subject():
+            self.controls.set_subject_checked(False)
+        self.statusBar().showMessage("Subject and bird eye detection stayed off.")
+        self._notify(
+            "Subject detection",
+            "Subject and bird eye detection could not be installed.\n\n"
+            "From the Outburst folder, run:\n"
+            "pip install \"outburst[subject]\"\n\n"
+            f"{message}",
+            "warning",
+        )
+        if then_scan and self._folder is not None:
+            self._start_worker()
+
+    def _on_runtime_install_cancelled(self) -> None:
+        """
+        Stop after the photographer cancels the Ultralytics install.
+
+        Inputs: none.
+        Output: no return value. Both features are unchecked, the status says the install was cancelled, and a requested scan continues without them.
+        Uses: Escape and Cancel download during the install.
+        Limitations: pip may already have written part of the library before it was stopped. The following scan uses the usual sharpness score.
+        """
+        then_scan = self._download_then_scan
+        self._finish_download_ui()
+        self.statusBar().showMessage("Subject detection install cancelled")
+        if self.controls.eye_scoring():
+            self.controls.set_eye_scoring(False)
+        if self.controls.prefer_subject():
+            self.controls.set_subject_checked(False)
+        if then_scan and self._folder is not None:
+            self._start_worker()
 
     def _begin_download(self, then_scan: bool) -> None:
         """
@@ -2005,12 +2133,15 @@ class MainWindow(QMainWindow):
         Inputs: enabled, whether the checkbox is now checked.
         Output: no return value. Automatic keepers are cleared. Turning it off rescans. Turning it on rescans when the weights are ready, or downloads them first.
         Uses: the Bird eye detection checkbox.
-        Limitations: with no folder open, a missing model still downloads, and no scan follows. A ready model with no folder does not scan.
+        Limitations: with no folder open, a missing model still downloads, and no scan follows. A ready model with no folder does not scan. A missing Ultralytics install is installed before the weights download.
         """
         self._clear_automatic_keepers()
         if not enabled:
             if self._folder is not None:
                 self.rescan()
+            return
+        if self._needs_subject_runtime():
+            self._begin_runtime_install(then_scan=self._folder is not None)
             return
         if self._bird_eye_ready():
             if self._folder is not None:
@@ -2401,7 +2532,12 @@ class MainWindow(QMainWindow):
         self.rescan_action.setEnabled(self._folder is not None and not busy)
         self.cancel_action.setEnabled(self._scanning or self._downloading)
         self.cancel_action.setVisible(self._scanning or self._downloading)
-        self.cancel_action.setText("Cancel download" if self._downloading else "Cancel scan")
+        if self._downloading and self._download_role == "runtime":
+            self.cancel_action.setText("Cancel install")
+        elif self._downloading:
+            self.cancel_action.setText("Cancel download")
+        else:
+            self.cancel_action.setText("Cancel scan")
         self.warnings_action.setEnabled(bool(self._warnings))
         self.progress.setVisible(busy)
 

@@ -44,7 +44,7 @@ def test_launcher_dry_run_selects_python() -> None:
     result = _run(["bash", "outburst.sh"], {"OUTBURST_DRY_RUN": "1"})
     assert result.returncode == 0, result.stderr
     values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-    assert values["extras"] == ""
+    assert values["extras"] == "[subject]"
     assert values["folder"] == ""
     version = subprocess.run(
         [values["python"], "-c", "import sys; print(sys.version_info >= (3, 11))"],

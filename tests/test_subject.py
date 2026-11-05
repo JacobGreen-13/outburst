@@ -1,6 +1,6 @@
 """Subject detection stays optional, and weights download only through ensure_model.
 
-The tests check the device name, a missing or local weights file, the models folder, download, a cancelled or failed download, and ``detect_many`` on one batch. ``_weights_bytes``, ``_Body``, and ``_opener`` fake the download response.
+The tests check the device name, the Ultralytics install command, a missing or local weights file, the models folder, download, a cancelled or failed download, and ``detect_many`` on one batch. ``_weights_bytes``, ``_Body``, and ``_opener`` fake the download response. A fake pip process covers the install failure and cancel paths.
 """
 
 from __future__ import annotations
@@ -12,17 +12,80 @@ import pytest
 from outburst.subject import (
     MIN_MODEL_BYTES,
     ModelCancelled,
+    SubjectRuntimeCancelled,
     ensure_model,
+    install_subject_runtime,
     load_yolo_detector,
     model_is_ready,
     models_dir,
     option_by_id,
     preferred_device,
+    subject_runtime_install_command,
+    subject_runtime_ready,
 )
 
 
 def test_preferred_device_is_a_known_name() -> None:
     assert preferred_device() in {"cpu", "mps", "cuda"}
+
+
+def test_subject_runtime_install_command_targets_this_interpreter() -> None:
+    import sys
+
+    command = subject_runtime_install_command()
+    assert command[0] == sys.executable
+    assert command[1:3] == ["-m", "pip"]
+    assert command[-1] == "ultralytics>=8.3"
+
+
+def test_subject_runtime_ready_matches_the_import() -> None:
+    try:
+        import ultralytics  # noqa: F401
+
+        expected = True
+    except ImportError:
+        expected = False
+    assert subject_runtime_ready() is expected
+
+
+def test_install_subject_runtime_reports_a_pip_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Proc:
+        returncode = 1
+
+        def poll(self) -> int:
+            return self.returncode
+
+        def communicate(self) -> tuple[str, str]:
+            return "", "Could not find a version"
+
+    monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: Proc())
+    with pytest.raises(RuntimeError, match="Could not find a version"):
+        install_subject_runtime()
+
+
+def test_install_subject_runtime_stops_when_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Proc:
+        def __init__(self) -> None:
+            self.returncode: int | None = None
+            self.terminated = False
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.returncode = -15
+
+        def wait(self, timeout: float | None = None) -> int:
+            assert self.returncode is not None
+            return self.returncode
+
+        def communicate(self) -> tuple[str, str]:
+            raise AssertionError("cancelled install must not read pip output")
+
+    monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: Proc())
+    with pytest.raises(SubjectRuntimeCancelled):
+        install_subject_runtime(should_cancel=lambda: True)
 
 
 def test_missing_model_file_is_rejected(tmp_path: Path) -> None:

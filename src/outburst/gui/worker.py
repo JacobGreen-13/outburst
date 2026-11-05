@@ -1,6 +1,6 @@
 """Background threads so the window stays responsive.
 
-``AnalyzeWorker`` scans a folder and can be aborted. It can pass a bird-eye weights path. ``ModelFetchWorker`` downloads one weights file, including the bird-eye pose model. ``ExportWorker`` copies keepers two at a time. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
+``AnalyzeWorker`` scans a folder and can be aborted. It can pass a bird-eye weights path. ``ModelFetchWorker`` downloads one weights file, including the bird-eye pose model. ``RuntimeInstallWorker`` installs Ultralytics when subject or bird eye detection is turned on without that library. ``ExportWorker`` copies keepers two at a time. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
 """
 
 from __future__ import annotations
@@ -13,7 +13,14 @@ from PySide6.QtCore import QThread, Signal
 from outburst.models import Library, Weights
 from outburst.output import export_keepers, write_library_sidecars
 from outburst.pipeline import CancelledError, analyze_folder
-from outburst.subject import ModelCancelled, ensure_model, option_by_id
+from outburst.subject import (
+    ModelCancelled,
+    SubjectRuntimeCancelled,
+    ensure_model,
+    install_subject_runtime,
+    option_by_id,
+    subject_runtime_ready,
+)
 
 log = logging.getLogger(__name__)
 
@@ -176,6 +183,66 @@ class ModelFetchWorker(QThread):
             self.cancelled.emit()
             return
         self.succeeded.emit(str(path))
+
+
+class RuntimeInstallWorker(QThread):
+    """Install Ultralytics without blocking the window."""
+
+    succeeded = Signal()
+    failed = Signal(str)
+    cancelled = Signal()
+
+    def __init__(self) -> None:
+        """
+        Prepare a background install of the subject extra.
+
+        Inputs: none.
+        Output: no return value. The worker is ready and its abort flag is clear.
+        Uses: subject detection and bird eye detection when Ultralytics is not imported yet.
+        Limitations: constructing the worker does not start pip.
+        """
+        super().__init__()
+        self._abort = False
+
+    def abort(self) -> None:
+        """
+        Ask the Ultralytics install to stop.
+
+        Inputs: none.
+        Output: no return value. The abort flag is set for the installer's cancel check.
+        Uses: Cancel download and closing the review window during the install.
+        Limitations: pip stops the next time the installer checks the flag, then the process is terminated.
+        """
+        self._abort = True
+
+    def run(self) -> None:
+        """
+        Install Ultralytics and emit success, failure, or cancellation.
+
+        Inputs: none.
+        Output: no return value. Emits succeeded when the import works, failed with the pip error, or cancelled.
+        Uses: the review window before a scan that needs subject or bird eye detection.
+        Limitations: the download includes PyTorch and can take several minutes. Model weights are not downloaded here. An abort after a successful install emits cancelled and does not emit success.
+        """
+        try:
+            install_subject_runtime(should_cancel=lambda: self._abort)
+        except SubjectRuntimeCancelled:
+            self.cancelled.emit()
+            return
+        except Exception as exc:
+            log.exception("Subject runtime install failed")
+            self.failed.emit(str(exc))
+            return
+        if self._abort:
+            self.cancelled.emit()
+            return
+        if not subject_runtime_ready():
+            self.failed.emit(
+                "Ultralytics installed, but this window still cannot import it. "
+                "Quit Outburst and open it again."
+            )
+            return
+        self.succeeded.emit()
 
 
 class ExportWorker(QThread):
