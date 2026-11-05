@@ -1,6 +1,6 @@
 """Threshold, weights, and the optional subject-detection toggle.
 
-``ControlPanel`` is the Grouping and Scoring sections. The getters read burst gap, sharpness, center, minimum frames, subfolders, subject, eye, and the model id. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark.
+``ControlPanel`` is the Grouping and Scoring sections. The getters read burst gap, sharpness, center, minimum frames, subfolders, subject, bird eye detection, and the model id. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark.
 """
 
 from __future__ import annotations
@@ -83,12 +83,12 @@ class ControlPanel(QWidget):
             "Choosing a model turns this on. Rescan downloads that model if it is not in the models folder."
         )
         self._subject.toggled.connect(self.subject_toggled.emit)
-        self._eye = QCheckBox("Eye sharpness")
+        self._eye = QCheckBox("Bird eye detection")
         self._eye.setToolTip(
-            "Rate a dark, round eye when it is large enough in the preview. "
+            "Download the open-weight bird eye model (about 6 MB) and use the eye it finds. "
             "In a burst with two or more rated eyes, the sharpest eye becomes the best frame "
-            "and is marked a keeper. A smaller eye is noted and left out of the ranking. "
-            "With subject scoring on, the search stays inside the animal. Turning this on or off rescans."
+            "and is marked a keeper. The model is birds only. It stays on this computer. "
+            "Turning this on or off rescans."
         )
         self._eye.toggled.connect(self.eye_toggled.emit)
         self._model = QComboBox()
@@ -250,12 +250,12 @@ class ControlPanel(QWidget):
 
     def eye_scoring(self) -> bool:
         """
-        Read whether eye sharpness is requested.
+        Read whether bird eye detection is requested.
 
         Inputs: none.
-        Output: True when Eye sharpness is checked.
+        Output: True when Bird eye detection is checked.
         Uses: the Scoring section and the scan worker.
-        Limitations: the checkbox does not rescan by itself. The review window rescans when the toggle signal fires and a folder is open.
+        Limitations: the checkbox does not rescan by itself. The review window downloads the weights when they are missing, then rescans.
         """
         return self._eye.isChecked()
 
@@ -266,7 +266,7 @@ class ControlPanel(QWidget):
         Inputs: none.
         Output: a Weights value. Sharpness and center are fractions of the slider percents. Exposure is the share left after sharpness, and never below zero.
         Uses: rescoring an open library and the next scan.
-        Limitations: eye scoring is a separate checkbox and is not part of the returned Weights.
+        Limitations: bird eye detection is a separate checkbox and is not part of the returned Weights.
         """
         sharpness = self._sharpness.value() / 100.0
         return Weights(
@@ -343,12 +343,12 @@ class ControlPanel(QWidget):
 
     def set_eye_scoring(self, checked: bool) -> None:
         """
-        Set the eye-sharpness checkbox without emitting a change.
+        Set the bird-eye checkbox without emitting a change.
 
-        Inputs: checked, whether eye sharpness is on.
+        Inputs: checked, whether Bird eye detection is on.
         Output: no return value. The checkbox matches checked.
-        Uses: restoring the saved eye-scoring setting.
-        Limitations: signals are blocked, so this call does not rescan.
+        Uses: restoring the saved setting, and turning it off when the weights download fails or is cancelled.
+        Limitations: signals are blocked, so this call does not rescan or download.
         """
         self._eye.blockSignals(True)
         self._eye.setChecked(checked)

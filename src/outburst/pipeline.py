@@ -3,7 +3,7 @@
 This is the part the window calls. It reads photographs and writes only inside
 the cache directory. Original files are opened for reading.
 
-``analyze_folder`` lists, scores, and groups a folder. ``with_weights`` recomputes composites from cached measurements. ``with_threshold`` regroups without rereading files. ``_score_all`` and ``_measure_with_detector`` run the worker pools. The other helpers decode one preview, detect a subject batch, score it, and store the cache row on the coordinating thread.
+``analyze_folder`` lists, scores, and groups a folder. ``with_weights`` recomputes composites from cached measurements. ``with_threshold`` regroups without rereading files. ``_score_all`` and ``_measure_with_detector`` run the worker pools. The other helpers decode one preview, detect a subject batch, read bird eyes on the coordinating thread, score the preview, and store the cache row.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from outburst.cache import Cache, default_cache_dir
+from outburst.eyes import load_bird_eye_detector
 from outburst.grouping import group_frames
 from outburst.metadata import read_capture_info, timestamp_reader_warning
 from outburst.models import Frame, FrameAnalysis, Library, Weights
@@ -55,15 +56,17 @@ def analyze_folder(
     subject_model: Path | None = None,
     detector: SubjectDetector | None = None,
     eye_scoring: bool = False,
+    eye_model: Path | None = None,
+    eye_finder: object | None = None,
     progress: ProgressCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> Library:
     """Score every supported photograph in `folder` and group them into bursts.
 
-    Inputs: folder, the directory to scan; recursive, whether subfolders are included; threshold, the burst gap in seconds; weights, the sharpness blend; cache_dir, an optional cache location; subject_model, an optional weights path; detector, an optional already-loaded detector; eye_scoring, whether to measure eyes; progress, an optional count callback; should_cancel, an optional cancel check.
+    Inputs: folder, the directory to scan; recursive, whether subfolders are included; threshold, the burst gap in seconds; weights, the sharpness blend; cache_dir, an optional cache location; subject_model, an optional weights path; detector, an optional already-loaded detector; eye_scoring, whether bird eyes are measured; eye_model, the pose weights to load when eye_scoring is on; eye_finder, an optional already-loaded finder; progress, an optional count callback; should_cancel, an optional cancel check.
     Output: a Library of analyses, bursts, and warnings.
     Uses: the window's scan.
-    Limitations: photographs are opened for reading only. Previews are an embedded JPEG or a paired JPEG, with the long edge resized to 1024 px, and there is no demosaic. The subject model is not shared across threads. Cache rows are written on this coordinating thread. Consecutive frames share a burst only while the gap is strictly less than threshold. Cancel raises CancelledError.
+    Limitations: photographs are opened for reading only. Previews are an embedded JPEG or a paired JPEG, with the long edge resized to 1024 px, and there is no demosaic. The subject model and the bird-eye model stay on this coordinating thread. Cache rows are written on this thread. Consecutive frames share a burst only while the gap is strictly less than threshold. Cancel raises CancelledError. eye_scoring with no weights and no finder leaves bird eyes off and adds a warning.
     """
 
     weights = (weights or Weights()).clamped()
@@ -83,8 +86,23 @@ def analyze_folder(
             warnings.append(f"Subject detection stayed off: {exc}")
             detector = None
             subject_key = ""
+    eye_active = False
     if eye_scoring:
-        subject_key = f"{subject_key}|eye" if subject_key else "eye"
+        if eye_finder is not None:
+            eye_active = True
+            subject_key = f"{subject_key}|bird-eye" if subject_key else "bird-eye"
+        elif eye_model is not None:
+            try:
+                eye_finder = load_bird_eye_detector(eye_model)
+                eye_key = make_subject_key(eye_model)
+                subject_key = f"{subject_key}|{eye_key}" if subject_key else eye_key
+                eye_active = True
+            except Exception as exc:
+                warnings.append(f"Bird eye detection stayed off: {exc}")
+                eye_finder = None
+        else:
+            warnings.append("Bird eye detection stayed off: the weights are not in the models folder.")
+            eye_finder = None
 
     files = scan_folder(folder, recursive=recursive)
     log.info("Found %d file(s) in %s", len(files), folder)
@@ -98,7 +116,7 @@ def analyze_folder(
             threshold,
             weights,
             False,
-            eye_scoring,
+            eye_active,
         )
 
     reader_note = timestamp_reader_warning(item.path.suffix for item in files if item.kind == "raw")
@@ -120,7 +138,7 @@ def analyze_folder(
             weights=weights,
             detector=detector,
             subject_key=subject_key,
-            eye_scoring=eye_scoring,
+            eye_finder=eye_finder,
             progress=progress,
             should_cancel=should_cancel,
         )
@@ -156,7 +174,7 @@ def analyze_folder(
         threshold=threshold,
         weights=weights,
         subject_active=subject_active,
-        eye_active=eye_scoring,
+        eye_active=eye_active,
     )
 
 
@@ -194,16 +212,16 @@ def _score_all(
     weights: Weights,
     detector: SubjectDetector | None,
     subject_key: str,
-    eye_scoring: bool,
+    eye_finder: object | None,
     progress: ProgressCallback | None,
     should_cancel: Callable[[], bool] | None,
 ) -> tuple[list[FrameAnalysis], int]:
     """Reuse cache hits and measure the rest, preserving folder order.
 
-    Inputs: files, the scanned photographs; cache, the score cache or None; weights, the current blend; detector, an optional subject detector; subject_key, the cache identity for the model and eye setting; eye_scoring, whether eyes are measured; progress and should_cancel, optional callbacks.
+    Inputs: files, the scanned photographs; cache, the score cache or None; weights, the current blend; detector, an optional subject detector; subject_key, the cache identity for the models; eye_finder, an optional bird-eye model; progress and should_cancel, optional callbacks.
     Output: analyses in file order, and the count of frames whose subject detection failed.
     Uses: analyze_folder.
-    Limitations: cache rows are read here. New cache rows are written later on the coordinating thread, not on the preview workers. Photographs are not opened for writing.
+    Limitations: cache rows are read here. New cache rows are written later on the coordinating thread, not on the preview workers. Photographs are not opened for writing. The bird-eye model is not run on the preview workers.
     """
 
     cached_rows: dict[Path, FrameAnalysis] = {}
@@ -231,7 +249,7 @@ def _score_all(
             weights=weights,
             detector=detector,
             subject_key=subject_key,
-            eye_scoring=eye_scoring,
+            eye_finder=eye_finder,
             progress=progress,
             done_offset=seen,
             total=total,
@@ -259,7 +277,7 @@ def _measure_pending(
     weights: Weights,
     detector: SubjectDetector | None,
     subject_key: str,
-    eye_scoring: bool,
+    eye_finder: object | None,
     progress: ProgressCallback | None,
     done_offset: int,
     total: int,
@@ -267,10 +285,10 @@ def _measure_pending(
 ) -> dict[Path, tuple[FrameAnalysis, int]]:
     """Score cache misses. Preview work uses a small pool. The cache is written here.
 
-    Inputs: pending, the cache misses; capture_info, clocks keyed by path; cache, weights, detector, subject_key, and eye_scoring, the measurement settings; progress, done_offset, and total, the status line; should_cancel, an optional cancel check.
+    Inputs: pending, the cache misses; capture_info, clocks keyed by path; cache, weights, detector, subject_key, and eye_finder, the measurement settings; progress, done_offset, and total, the status line; should_cancel, an optional cancel check.
     Output: a dict from path to the analysis and a detection-failure count of 0 or 1.
     Uses: _score_all for files that were not in the cache.
-    Limitations: without a detector, workers score previews and persist runs on this thread. With a detector, the model stays on this thread. Cache rows are written in persist, not on the workers. Originals are not written.
+    Limitations: without a detector or a bird-eye finder, workers score previews and persist runs on this thread. With either model, that model stays on this thread. Cache rows are written in persist, not on the workers. Originals are not written.
     """
 
     found: dict[Path, tuple[FrameAnalysis, int]] = {}
@@ -300,15 +318,15 @@ def _measure_pending(
 
         _check_cancel(should_cancel)
 
-    if detector is None:
+    if detector is None and eye_finder is None:
 
         def score_at(index: int) -> tuple[FrameAnalysis, int]:
-            """Load and score one cache miss when subject detection is off.
+            """Load and score one cache miss when no model is running.
 
             Inputs: index, the position in pending.
             Output: the analysis and a detection-failure count of 0.
             Uses: _measure_pending. A preview worker calls this.
-            Limitations: no subject model runs on this call. The preview is an embedded or paired JPEG resized to a 1024 px long edge, with no demosaic. The SQLite cache row is written later on the coordinating thread. Eye sharpness is None when the eye is smaller than 16 px.
+            Limitations: no subject model and no bird-eye model run on this call. The preview is an embedded or paired JPEG resized to a 1024 px long edge, with no demosaic. The SQLite cache row is written later on the coordinating thread.
             """
 
             scanned = pending[index]
@@ -318,9 +336,9 @@ def _measure_pending(
                 cache,
                 weights,
                 subject_key,
-                eye_scoring,
                 None,
                 0,
+                None,
             )
 
         run_ordered(
@@ -339,7 +357,7 @@ def _measure_pending(
         weights=weights,
         detector=detector,
         subject_key=subject_key,
-        eye_scoring=eye_scoring,
+        eye_finder=eye_finder,
         persist=persist,
         cancel=cancel,
     )
@@ -360,21 +378,21 @@ def _measure_with_detector(
     capture_info: dict,
     cache: Cache | None,
     weights: Weights,
-    detector: SubjectDetector,
+    detector: SubjectDetector | None,
     subject_key: str,
-    eye_scoring: bool,
+    eye_finder: object | None,
     persist: Callable[[int, tuple[FrameAnalysis, int]], None],
     cancel: Callable[[], None],
 ) -> None:
-    """Decode ahead on a pool, run the subject model on this thread, then score.
+    """Decode ahead on a pool, run models on this thread, then score.
 
-    The model is not shared across threads. A batch is a few frames. Decode of
+    A model is not shared across threads. A batch is a few frames. Decode of
     the next frames keeps running while that batch is predicted.
 
-    Inputs: pending, the cache misses; capture_info, clocks; cache, weights, detector, subject_key, and eye_scoring, the measurement settings; persist, the coordinating-thread callback that stores one result; cancel, the cancel check.
+    Inputs: pending, the cache misses; capture_info, clocks; cache, weights, detector, subject_key, and eye_finder, the measurement settings; persist, the coordinating-thread callback that stores one result; cancel, the cancel check.
     Output: none. Results are delivered through persist in file order.
-    Uses: _measure_pending when a subject detector is active.
-    Limitations: detect_many runs on this caller thread, in batches of up to four frames. The model is not shared across threads. Cache rows stay in persist. Photographs are not written, and previews are not demosaiced.
+    Uses: _measure_pending when a subject detector or a bird-eye finder is active.
+    Limitations: detect_many and find_many run on this caller thread, in batches of up to four frames. The models are not shared across threads. Cache rows stay in persist. Photographs are not written, and previews are not demosaiced.
     """
 
     total = len(pending)
@@ -434,7 +452,12 @@ def _measure_with_detector(
                     if image is None:
                         raise RuntimeError("A frame in the subject batch has no preview")
                     images.append(image)
-                boxes, failures = _detect_batch(detector, images)
+                if detector is None:
+                    boxes: list[object] = [None] * len(images)
+                    failures = [0] * len(images)
+                else:
+                    boxes, failures = _detect_batch(detector, images)
+                eyes = _find_eyes(eye_finder, images)
                 for offset, index in enumerate(indexes):
                     loaded = decoded[index]
                     image = images[offset]
@@ -445,10 +468,10 @@ def _measure_with_detector(
                         image,
                         boxes[offset],
                         failures[offset],
+                        eyes[offset],
                         cache,
                         weights,
                         subject_key,
-                        eye_scoring,
                     )] = index
                 next_detect = indexes[-1] + 1
                 progressed = True
@@ -556,6 +579,32 @@ def _detect_batch(
     return found, failures
 
 
+def _find_eyes(finder: object | None, images: list[np.ndarray]) -> list[object]:
+    """Run bird-eye detection for one batch on the caller thread.
+
+    Inputs: finder, the pose model or None; images, the BGR previews.
+    Output: one eye or None per image. A missing finder returns None for each image.
+    Uses: _measure_with_detector.
+    Limitations: find_many runs on this thread. The model is not shared across threads. A detection exception returns no eyes for that batch. Those frames keep their usual sharpness rank.
+    """
+
+    if finder is None:
+        return [None] * len(images)
+    many = getattr(finder, "find_many", None)
+    if not callable(many):
+        log.warning("Bird eye finder has no find_many method")
+        return [None] * len(images)
+    try:
+        found = list(many(images))
+    except Exception:
+        log.warning("Bird eye detection failed for %d frame(s)", len(images), exc_info=True)
+        return [None] * len(images)
+    if len(found) != len(images):
+        log.warning("Bird eye detection returned %d eyes for %d frames", len(found), len(images))
+        found = (found + [None] * len(images))[: len(images)]
+    return found
+
+
 def _load_scanned(scanned: ScannedFile, info: object) -> _Loaded:
     """Build the frame record and decode its analysis preview.
 
@@ -583,16 +632,16 @@ def _score_loaded(
     cache: Cache | None,
     weights: Weights,
     subject_key: str,
-    eye_scoring: bool,
     detection: object,
     detection_failures: int,
+    eye: object,
 ) -> tuple[FrameAnalysis, int]:
     """Decode one file and score it with a detection result that is already known.
 
-    Inputs: scanned and info, the file and its capture clock; cache, weights, subject_key, and eye_scoring, the measurement settings; detection, an optional subject box; detection_failures, 0 or 1.
+    Inputs: scanned and info, the file and its capture clock; cache, weights, and subject_key, the measurement settings; detection, an optional subject box; detection_failures, 0 or 1; eye, an optional eye already found on the coordinating thread.
     Output: the analysis and the same detection-failure count.
-    Uses: score_at when subject detection is off, passing an empty detection.
-    Limitations: this does not write the SQLite cache. The preview is not demosaiced. Eye sharpness stays None when the eye is under 16 px.
+    Uses: score_at when no model is running, passing an empty detection and no eye.
+    Limitations: this does not write the SQLite cache. The preview is not demosaiced. An eye smaller than 16 px is stored without sharpness.
     """
 
     loaded = _load_scanned(scanned, info)
@@ -601,10 +650,10 @@ def _score_loaded(
         loaded.image,
         detection,
         detection_failures,
+        eye,
         cache,
         weights,
         subject_key,
-        eye_scoring,
     )
 
 
@@ -613,17 +662,17 @@ def _score_image(
     image: np.ndarray | None,
     detection: object,
     detection_failures: int,
+    eye: object,
     cache: Cache | None,
     weights: Weights,
     subject_key: str,
-    eye_scoring: bool,
 ) -> tuple[FrameAnalysis, int]:
     """Measure one decoded preview and write its cache JPEGs.
 
-    Inputs: loaded, the frame and any decode error; image, the BGR preview or None; detection, an optional box with label and confidence; detection_failures, 0 or 1; cache, weights, subject_key, and eye_scoring, the measurement settings.
+    Inputs: loaded, the frame and any decode error; image, the BGR preview or None; detection, an optional box with label and confidence; detection_failures, 0 or 1; eye, an optional eye from the pose model; cache, weights, and subject_key, the measurement settings.
     Output: a FrameAnalysis and the detection-failure count. A missing image becomes a failed analysis.
-    Uses: the preview workers after a subject batch, and the path with no detector.
-    Limitations: preview JPEGs go into the cache directory, not beside the photograph. Eye scoring is classical, and sharpness is None when the eye is smaller than MIN_RATED_DIAMETER (16 px). There is no demosaic. The SQLite cache row is written later on the coordinating thread.
+    Uses: the preview workers after a model batch, and the path with no model.
+    Limitations: preview JPEGs go into the cache directory, not beside the photograph. This function does not search for an eye. Sharpness is None when the eye is smaller than 16 px. There is no demosaic. The SQLite cache row is written later on the coordinating thread.
     """
 
     if image is None:
@@ -636,17 +685,13 @@ def _score_image(
             subject_label=getattr(detection, "label", None),
             subject_confidence=getattr(detection, "confidence", None),
         )
-        if eye_scoring:
-            from outburst.eyes import locate_eye
-
-            eye = locate_eye(image, box)
-            if eye is not None:
-                metrics = replace(
-                    metrics,
-                    eye_sharpness=eye.sharpness,
-                    eye_center=(eye.x, eye.y),
-                    eye_radius=eye.radius,
-                )
+        if eye is not None:
+            metrics = replace(
+                metrics,
+                eye_sharpness=getattr(eye, "sharpness", None),
+                eye_center=(int(eye.x), int(eye.y)),
+                eye_radius=int(eye.radius),
+            )
         preview_path, thumb_path = _write_previews(cache, loaded.scanned, subject_key, image)
         return (
             FrameAnalysis(
