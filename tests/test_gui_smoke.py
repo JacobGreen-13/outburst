@@ -790,7 +790,9 @@ def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
     assert window._decisions[sharp] == "keep"
     assert window._origins[sharp] == "auto"
     assert soft not in window._decisions
-    assert "Bird eye detected" in window.viewer.info.text()
+    assert "Bird eye detected" in window.viewer.detail.text()
+    assert "Bird eye detected" not in window.viewer.info.text()
+    assert window.viewer.detail.isHidden()
     assert "2 eyes" in window.burst_list.item(0).text()
     assert "bird eye detection" in window.statusBar().currentMessage()
     assert "2 bird eyes" in window.statusBar().currentMessage()
@@ -1048,7 +1050,9 @@ def test_subject_box_and_eye_circle_can_be_hidden(
     assert window.controls.show_eye_circle() is True
     assert window.viewer.preview._box == (40, 30, 80, 60)
     assert window.viewer.preview._circle == (70, 55, 12)
-    assert "Bird eye detected" in window.viewer.info.text()
+    assert "Bird eye detected" in window.viewer.detail.text()
+    assert "Bird eye detected" not in window.viewer.info.text()
+    assert window.viewer.detail.isHidden()
 
     window.controls._show_box.setChecked(False)
     qt_app.processEvents()
@@ -1063,7 +1067,9 @@ def test_subject_box_and_eye_circle_can_be_hidden(
     assert window.controls.eye_scoring() is eye_on
     assert window.viewer.preview._circle is None
     assert window.viewer.preview._focus == (70, 55)
-    assert "Bird eye detected" in window.viewer.info.text()
+    assert "Bird eye detected" in window.viewer.detail.text()
+    assert "Bird eye detected" not in window.viewer.info.text()
+    assert window.viewer.detail.isHidden()
     assert scans == []
 
     window.compare_action.setChecked(True)
@@ -1089,6 +1095,59 @@ def test_subject_box_and_eye_circle_can_be_hidden(
     assert restored.controls.prefer_subject() is False
     assert restored.controls.eye_scoring() is False
     restored.close()
+    qt_app.processEvents()
+
+
+def test_info_button_hides_the_lines_after_the_laplacian(qt_app, tmp_path: Path) -> None:
+    from datetime import datetime
+
+    from PySide6.QtGui import QColor, QImage
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.models import Burst, Frame, FrameAnalysis, Library, Metrics, Weights
+
+    _isolate_settings(tmp_path / "settings")
+    preview = tmp_path / "bird.jpg"
+    image = QImage(160, 120, QImage.Format.Format_RGB32)
+    image.fill(QColor("#336699"))
+    assert image.save(str(preview))
+    frame = Frame(preview, "jpeg", datetime(2024, 6, 1, 12, 0, 0), "exif", "Sample", 1, 1)
+    metrics = Metrics(45, 119, 209, 0.8, 0.0, 0.0, critical_sharpness=123)
+    analysis = FrameAnalysis(frame, metrics, 0.79, preview, preview, None)
+    library = Library(tmp_path, (analysis,), (Burst("burst-001", (frame,)),), (), 1.0, Weights())
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(900, 640)
+    window.show()
+    window.controls.set_minimum_frames(1)
+    window.present(library)
+    qt_app.processEvents()
+    assert window.viewer.info_button.text() == "Info"
+    assert window.viewer.info_open() is False
+    assert window.viewer.detail.isHidden()
+    assert "Laplacian" in window.viewer.info.text()
+    assert "Frame 1 of 1" not in window.viewer.info.text()
+    assert "Full-frame sharpness" in window.viewer.detail.text()
+    assert "Exposure looks balanced" in window.viewer.detail.text()
+
+    window.viewer.info_button.setChecked(True)
+    qt_app.processEvents()
+    assert window.viewer.detail.isVisible()
+    window.viewer.info_button.setChecked(False)
+    qt_app.processEvents()
+    assert window.viewer.detail.isHidden()
+
+    window._save_settings()
+    window.close()
+    qt_app.processEvents()
+    restored = MainWindow(cache_dir=tmp_path / "cache")
+    assert restored.viewer.info_open() is False
+    restored.viewer.set_info_open(True)
+    restored._save_settings()
+    restored.close()
+    qt_app.processEvents()
+    again = MainWindow(cache_dir=tmp_path / "cache")
+    assert again.viewer.info_open() is True
+    again.close()
     qt_app.processEvents()
 
 
