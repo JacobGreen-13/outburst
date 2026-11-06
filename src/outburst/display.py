@@ -2,7 +2,7 @@
 
 Kept outside the Qt layer so the wording can be tested without a display.
 
-``filmstrip_order``, ``visible_bursts``, and ``visible_frame_indexes`` choose which frames appear and in what order. ``frame_meets_minimum_score`` compares a frame with the minimum score using the number on the filmstrip. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``star_glyphs``, ``frame_info_html``, and ``format_captured`` build the labels. ``detected_eye_count`` counts frames with a bird eye. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
+``filmstrip_order``, ``visible_bursts``, and ``visible_frame_indexes`` choose which frames appear and in what order. ``frame_meets_minimum_score`` compares a frame with the minimum score using the number on the filmstrip. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``star_glyphs``, ``frame_info_html``, ``frame_info_parts``, and ``format_captured`` build the labels. ``detected_eye_count`` counts frames with a bird eye. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
 """
 
 from __future__ import annotations
@@ -382,9 +382,51 @@ def frame_info_html(
     """Rich text for the preview panel. Filenames are escaped.
 
     Inputs: frame identity, analysis, weights, recommendation, decision, stars, and subject or eye flags.
-    Output: an HTML fragment for the preview panel.
-    Uses: the review window preview panel.
-    Limitations: a missing preview is described as unread, and error text is escaped.
+    Output: the summary and the detail joined into one HTML fragment.
+    Uses: tests and callers that want the whole panel.
+    Limitations: a missing preview is described as unread, and error text is escaped. The joined string matches frame_info_parts with no extra separator.
+    """
+
+    summary, detail = frame_info_parts(
+        filename=filename,
+        frame_number=frame_number,
+        frame_count=frame_count,
+        burst_id=burst_id,
+        captured_at=captured_at,
+        camera=camera,
+        analysis=analysis,
+        weights=weights,
+        recommended=recommended,
+        decision=decision,
+        subject_active=subject_active,
+        stars=stars,
+        eye_active=eye_active,
+    )
+    return summary + detail
+
+
+def frame_info_parts(
+    *,
+    filename: str,
+    frame_number: int,
+    frame_count: int,
+    burst_id: str,
+    captured_at: datetime | None,
+    camera: str | None,
+    analysis: FrameAnalysis | None,
+    weights: Weights,
+    recommended: bool,
+    decision: str | None,
+    subject_active: bool,
+    stars: int | None = None,
+    eye_active: bool = False,
+) -> tuple[str, str]:
+    """Split the preview text at the Laplacian number.
+
+    Inputs: frame identity, analysis, weights, recommendation, decision, stars, and subject or eye flags.
+    Output: the summary through the score and Laplacian line, then the frame, exposure, and other measurements.
+    Uses: the Info button on the review preview.
+    Limitations: a missing preview puts the error in the summary and returns an empty detail. Filenames and error text are escaped.
     """
 
     badges: list[str] = []
@@ -429,19 +471,19 @@ def frame_info_html(
         problem = "Outburst could not read a preview from this file."
         if analysis is not None and analysis.error:
             problem += " " + analysis.error
-        return title + f'<div style="color:#e0a15a; margin-top:6px;">{escape(problem)}</div>'
+        return title + f'<div style="color:#e0a15a; margin-top:6px;">{escape(problem)}</div>', ""
 
     metrics = analysis.metrics
     score = score_percent(analysis.composite)
-    detail_bits = [f"Score {score} / 100"]
+    score_bits = [f"Score {score} / 100"]
     if metrics is not None:
-        detail_bits.append(f"Laplacian {effective_sharpness(metrics, weights):.0f}")
+        score_bits.append(f"Laplacian {effective_sharpness(metrics, weights):.0f}")
         sentence, warning = clip_status(metrics)
         color = "#e0a15a" if warning else "#8fd9b5"
         exposure_html = f'<div style="color:{color}; margin-top:4px;">{escape(sentence)}</div>'
     else:
         exposure_html = ""
-    detail = " &nbsp;·&nbsp; ".join(escape(bit) for bit in detail_bits)
+    score_line = " &nbsp;·&nbsp; ".join(escape(bit) for bit in score_bits)
     meta_bits = [
         f"Frame {frame_number} of {frame_count}",
         human_burst_name(burst_id),
@@ -477,11 +519,7 @@ def frame_info_html(
                 )
         if eye_active:
             extra += _eye_line(metrics)
-    return (
-        title
-        + f'<div style="color:#e8e8e8; margin-top:6px;">{detail}</div>'
-        + f'<div style="color:#9a9a9a; margin-top:4px;">{meta}</div>'
-        + exposure_html
-        + extra
-    )
+    summary = title + f'<div style="color:#e8e8e8; margin-top:6px;">{score_line}</div>'
+    detail = f'<div style="color:#9a9a9a; margin-top:4px;">{meta}</div>' + exposure_html + extra
+    return summary, detail
 

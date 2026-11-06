@@ -13,6 +13,7 @@ from outburst.display import (
     detected_eye_count,
     filmstrip_order,
     frame_info_html,
+    frame_info_parts,
     frame_meets_minimum_score,
     obvious_misses,
     score_caption,
@@ -128,6 +129,25 @@ def test_html_escapes_filenames_and_marks_the_recommendation() -> None:
     assert "Burst 4" in html
     assert "08:00:00.200" in html
     assert "Sharpest patch" not in html
+    summary, detail = frame_info_parts(
+        filename=frame.path.name,
+        frame_number=1,
+        frame_count=1,
+        burst_id="burst-004",
+        captured_at=frame.captured_at,
+        camera=frame.camera,
+        analysis=analysis,
+        weights=Weights(),
+        recommended=True,
+        decision=None,
+        subject_active=False,
+    )
+    assert summary + detail == html
+    assert "Laplacian" in summary
+    assert "Burst 4" not in summary
+    assert "Burst 4" in detail
+    assert "Exposure looks balanced" in detail
+    assert "Full-frame sharpness" in detail
 
 
 def test_burst_label_and_badge() -> None:
