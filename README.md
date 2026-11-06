@@ -86,6 +86,8 @@ The left side is **Bursts**, **Grouping**, and **Scoring**. The open folder sits
 
 **Sharp** and **Center** change the ranking without reading the files again. Sharpness is three quarters of the score. The center of the frame counts more than the corners.
 
+**Info**, beside the score, starts off. It shows the lines after the Laplacian number: the frame, the exposure, and the other measurements.
+
 **Z** shows the preview at 1:1. **+**, **−**, and the scroll wheel step through fit, 1:1, 2:1, and 4:1. Drag to look around. **F** paints the strongest edges green. These use the preview Outburst scored.
 
 ### Keyboard
@@ -171,7 +173,7 @@ The model is birds only, so a distant or unusual field frame may have no eye. Ou
 
 With two or more rated eyes in a burst, the sharpest eye is the best frame and Outburst marks it as a keeper. A reject on that frame stays rejected. A keeper you already set stays yours. A burst with fewer than two rated eyes keeps the usual sharpness rank.
 
-A detected eye is a gold ring labeled EYE. **Show eye circle** hides the ring without scanning again. The score, the info line, and the zoom center stay. The filmstrip says EYE. The burst row and the status bar count detected eyes, including frames in bursts hidden by **Minimum**.
+A detected eye is a gold ring labeled EYE. **Show eye circle** hides the ring without scanning again. The score and the zoom center stay. **Info** shows the eye sentence with the other measurements. The filmstrip says EYE. The burst row and the status bar count detected eyes, including frames in bursts hidden by **Minimum**.
 
 In an older environment that does not yet have Ultralytics, turning **Subject-aware sharpness** or **Bird eye detection** on installs it before the scan. The status bar says that PyTorch is downloading. You can also run `pip install "outburst[subject]"`.
 

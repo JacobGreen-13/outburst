@@ -42,7 +42,7 @@ from outburst.display import (
     burst_list_text,
     detected_eye_count,
     filmstrip_order,
-    frame_info_html,
+    frame_info_parts,
     obvious_misses,
     score_caption,
     thumb_badge,
@@ -1943,7 +1943,7 @@ class MainWindow(QMainWindow):
         if show_subject and analysis.metrics is not None:
             box = analysis.metrics.subject_box
         circle = self._eye_circle(analysis)
-        html = frame_info_html(
+        summary, detail = frame_info_parts(
             filename=frame.path.name,
             frame_number=self._frame_index + 1,
             frame_count=burst.count,
@@ -1971,13 +1971,14 @@ class MainWindow(QMainWindow):
         self.viewer.set_frame(
             analysis.preview_path,
             box if self.controls.show_subject_box() else None,
-            html,
+            summary,
             border,
             keeper=keeper,
             rejected=rejected,
             stars=self._stars.get(frame.path),
             circle=circle if self.controls.show_eye_circle() else None,
             focus=_overlay_focus(box, circle),
+            detail=detail,
         )
         self.viewer.set_view_mode(scale=self._zoom_scale, peak=self._peaking)
         self.viewer.set_compare(self._compare)
@@ -2739,7 +2740,7 @@ class MainWindow(QMainWindow):
         Restore the controls and the last folder from saved settings.
 
         Inputs: none.
-        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, filmstrip order, and model id are applied. A saved folder becomes the next dialog start.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, the Info panel, filmstrip order, and model id are applied. A saved folder becomes the next dialog start.
         Uses: opening the review window.
         Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise.
         """
@@ -2755,6 +2756,7 @@ class MainWindow(QMainWindow):
         self.controls.set_eye_scoring(_as_bool(settings.value("eye_scoring"), False))
         self.controls.set_show_subject_box(_as_bool(settings.value("show_subject_box"), True))
         self.controls.set_show_eye_circle(_as_bool(settings.value("show_eye_circle"), True))
+        self.viewer.set_info_open(_as_bool(settings.value("show_frame_detail"), False))
         self._set_filmstrip_sort(str(settings.value("filmstrip_sort", "time") or "time"))
         folder = settings.value("last_folder", "")
         if folder:
@@ -2767,7 +2769,7 @@ class MainWindow(QMainWindow):
         Store the controls and the open folder for the next launch.
 
         Inputs: none.
-        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, filmstrip order, and model id are written.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, the Info panel, filmstrip order, and model id are written.
         Uses: closing the review window.
         Limitations: the folder is saved only when one is open. The resolved model path is saved only when one is stored.
         """
@@ -2783,6 +2785,7 @@ class MainWindow(QMainWindow):
         settings.setValue("eye_scoring", self.controls.eye_scoring())
         settings.setValue("show_subject_box", self.controls.show_subject_box())
         settings.setValue("show_eye_circle", self.controls.show_eye_circle())
+        settings.setValue("show_frame_detail", self.viewer.info_open())
         settings.setValue("filmstrip_sort", self._filmstrip_sort)
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:

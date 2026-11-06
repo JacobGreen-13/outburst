@@ -1,6 +1,6 @@
 """Large preview of the frame currently under review.
 
-``next_zoom`` steps through fit, 1:1, 2:1, and 4:1. ``PreviewLabel`` pans and crops the embedded preview. ``ImageViewer.set_frame`` shows one frame, ``set_partner`` the compare frame, and ``set_view_mode`` applies zoom and focus peaking to both. ``_draw_box``, ``_draw_circle``, and ``_draw_badge`` mark the subject, the eye, and the keeper on the preview. Zoom does not demosaic the RAW file.
+``next_zoom`` steps through fit, 1:1, 2:1, and 4:1. ``PreviewLabel`` pans and crops the embedded preview. ``ImageViewer.set_frame`` shows one frame, ``set_partner`` the compare frame, and ``set_view_mode`` applies zoom and focus peaking to both. The Info button shows the measurements after the Laplacian number and starts off. ``_draw_box``, ``_draw_circle``, and ``_draw_badge`` mark the subject, the eye, and the keeper on the preview. Zoom does not demosaic the RAW file.
 """
 
 from __future__ import annotations
@@ -416,9 +416,9 @@ class ImageViewer(QFrame):
         Build the preview, compare pane, star buttons, and keeper and reject buttons.
 
         Inputs: none.
-        Output: no return value. The compare pane starts hidden and the welcome placeholder is shown.
+        Output: no return value. The compare pane starts hidden, Info starts off, and the welcome placeholder is shown.
         Uses: the main review pane.
-        Limitations: the five star buttons emit 1 through 5. Pressing the same rating again is cleared by the window. The compare pane's click is connected; the main preview's click is not.
+        Limitations: the five star buttons emit 1 through 5. Pressing the same rating again is cleared by the window. The compare pane's click is connected; the main preview's click is not. Info reveals the detail label and does not rescore.
         """
         super().__init__()
         self.setObjectName("viewerFrame")
@@ -479,14 +479,38 @@ class ImageViewer(QFrame):
         marks.addWidget(self.keeper_button)
         marks.addWidget(self.reject_button)
         self.info = QLabel()
-        self.info.setObjectName("infoPanel")
         self.info.setWordWrap(True)
         self.info.setTextFormat(Qt.TextFormat.RichText)
-        self.info.setMinimumHeight(72)
+        self.info.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self.detail = QLabel()
+        self.detail.setObjectName("infoDetail")
+        self.detail.setWordWrap(True)
+        self.detail.setTextFormat(Qt.TextFormat.RichText)
+        self.detail.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self.detail.hide()
+        self.info_button = QPushButton("Info")
+        self.info_button.setObjectName("infoButton")
+        self.info_button.setCheckable(True)
+        self.info_button.setChecked(False)
+        self.info_button.setToolTip(
+            "Show the frame, exposure, and measurements after the Laplacian number."
+        )
+        self.info_button.toggled.connect(self._on_info_toggled)
+        self.info_box = QWidget()
+        self.info_box.setObjectName("infoPanel")
+        info_text = QVBoxLayout(self.info_box)
+        info_text.setContentsMargins(8, 4, 8, 4)
+        info_text.setSpacing(0)
+        info_text.addWidget(self.info)
+        info_text.addWidget(self.detail)
+        info_row = QHBoxLayout()
+        info_row.setSpacing(8)
+        info_row.addWidget(self.info_box, 1)
+        info_row.addWidget(self.info_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(panes, 1)
         layout.addWidget(self.hint)
         layout.addLayout(marks)
-        layout.addWidget(self.info)
+        layout.addLayout(info_row)
         self.set_placeholder(
             "Open a folder of RAW bursts to start culling.\n\n"
             "Outburst groups frames shot close together, scores sharpness and exposure "
@@ -499,7 +523,7 @@ class ImageViewer(QFrame):
         Replace the preview with a message and clear the marks.
 
         Inputs: text, the message shown in the preview.
-        Output: no return value. The badge, image, partner pane, hint, and info are cleared, and the mark buttons are disabled.
+        Output: no return value. The badge, image, partner pane, hint, and info are cleared, Info is hidden, and the mark buttons are disabled.
         Uses: the empty review window and a folder whose bursts are all shorter than Minimum frames.
         Limitations: the border returns to the idle color. Keeper, reject, and star controls do not accept clicks while the placeholder is shown.
         """
@@ -509,6 +533,10 @@ class ImageViewer(QFrame):
         self.partner_box.hide()
         self.hint.hide()
         self.info.setText("")
+        self.detail.setText("")
+        self.detail.hide()
+        self.info_box.hide()
+        self.info_button.hide()
         self.set_border("#2a2a2a")
         self._apply_marks(False, False, None, enabled=False)
 
@@ -638,14 +666,15 @@ class ImageViewer(QFrame):
         stars: int | None = None,
         circle: tuple[int, int, int] | None = None,
         focus: tuple[int, int] | None = None,
+        detail: str = "",
     ) -> None:
         """
         Show one frame in the main preview with its info and marks.
 
-        Inputs: preview, the embedded preview path or None; box, the subject rectangle or None; html, the info panel; border, the frame color; keeper, rejected, and stars, the marks; circle, the eye circle or None; focus, a zoom center, or None to use the circle then the box.
-        Output: no return value. The preview, info, border, and buttons update. A missing or unreadable preview shows "No preview for this frame". The mark buttons are enabled.
+        Inputs: preview, the embedded preview path or None; box, the subject rectangle or None; html, the summary through the Laplacian number; border, the frame color; keeper, rejected, and stars, the marks; circle, the eye circle or None; focus, a zoom center, or None to use the circle then the box; detail, the measurements after the Laplacian number.
+        Output: no return value. The preview, summary, detail, border, and buttons update. A missing or unreadable preview shows "No preview for this frame". The mark buttons are enabled.
         Uses: the frame currently under review.
-        Limitations: zoom uses the embedded preview. A rejected badge is drawn ahead of a keeper badge. A missing focus centers on the eye circle when one is given, otherwise on the subject box. A box or circle that is omitted is not drawn.
+        Limitations: zoom uses the embedded preview. A rejected badge is drawn ahead of a keeper badge. A missing focus centers on the eye circle when one is given, otherwise on the subject box. A box or circle that is omitted is not drawn. The detail stays hidden until Info is on.
         """
         pixmap = QPixmap(str(preview)) if preview is not None else QPixmap()
         if rejected:
@@ -663,8 +692,59 @@ class ImageViewer(QFrame):
         else:
             self.preview.set_source(pixmap, box=box, circle=circle, focus=focus, identity=identity)
         self.info.setText(html)
+        self.detail.setText(detail)
+        self.info_box.show()
+        self.info_button.show()
+        self._apply_info_visibility()
         self.set_border(border)
         self._apply_marks(keeper, rejected, stars, enabled=True)
+
+    def info_open(self) -> bool:
+        """
+        Whether the measurements after the Laplacian number are shown.
+
+        Inputs: none.
+        Output: True when Info is checked.
+        Uses: saving the review window settings.
+        Limitations: this is the button state. A placeholder hides the button and leaves this value as it was.
+        """
+        return self.info_button.isChecked()
+
+    def set_info_open(self, open_: bool) -> None:
+        """
+        Show or hide the measurements after the Laplacian number.
+
+        Inputs: open_, whether those lines are shown.
+        Output: no return value. The button matches open_ and the detail label follows it.
+        Uses: restoring the Info button from settings.
+        Limitations: the signal is blocked, so restoring does not redraw. An empty detail stays hidden.
+        """
+        self.info_button.blockSignals(True)
+        self.info_button.setChecked(bool(open_))
+        self.info_button.blockSignals(False)
+        self._apply_info_visibility()
+
+    def _on_info_toggled(self, _checked: bool) -> None:
+        """
+        Show or hide the detail when Info is clicked.
+
+        Inputs: _checked, the new button state. The button is read again while the label is updated.
+        Output: no return value. The detail label is shown only when Info is on and it has text.
+        Uses: the Info button beside the score.
+        Limitations: this does not rescore and does not change the summary.
+        """
+        self._apply_info_visibility()
+
+    def _apply_info_visibility(self) -> None:
+        """
+        Match the detail label to the Info button.
+
+        Inputs: none.
+        Output: no return value. The detail is visible when Info is checked and the label has text.
+        Uses: set_frame, set_info_open, and the Info button.
+        Limitations: a placeholder that has hidden the button leaves the detail hidden.
+        """
+        self.detail.setVisible(self.info_button.isChecked() and bool(self.detail.text()))
 
     def set_border(self, color: str) -> None:
         """
@@ -680,7 +760,14 @@ class ImageViewer(QFrame):
             f"border: 2px solid {color}; border-radius: 10px; background: #141414;"
             "}"
             "QFrame#viewerFrame QLabel { color: #f2f2f2; background: transparent; }"
-            "QLabel#infoPanel { background: #1b1b1b; }"
+            "QWidget#infoPanel { background: #1b1b1b; border-radius: 6px; }"
+            "QLabel#infoDetail { background: transparent; }"
+            "QPushButton#infoButton {"
+            "min-height: 22px; max-height: 28px; padding: 2px 10px; font-size: 12px; font-weight: 600;"
+            "}"
+            "QPushButton#infoButton:checked {"
+            "background: #1f3d30; color: #f4fff8; border: 1px solid #7dffc3;"
+            "}"
             "QLabel#partnerCaption, QLabel#viewerHint { color: #c8c8c8; }"
             "QPushButton#keeperButton, QPushButton#rejectButton {"
             "min-height: 36px; font-size: 14px; font-weight: 600; padding: 8px 16px;"
