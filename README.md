@@ -121,15 +121,50 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 
 ## How a frame gets its score
 
-Outburst scores the embedded JPEG preview, or the paired JPEG, with the long side at most 1024 pixels.
+Outburst scores the embedded JPEG preview, or the JPEG that sits beside a RAW file of the same name. The preview is scaled so the long side is at most 1024 pixels. The RAW file is not demosaiced. Each frame is scored on its own: one frame's number does not depend on the others in the burst.
 
-Sharpness is the variance of a Laplacian on that preview. The rank follows the sharpest patch in the middle, mixed with the full frame by **Center**. With subject detection on, that patch is inside the animal. Tenengrad is shown as edge energy.
+The filmstrip shows that score times 100, rounded to a whole number from 0 to 100.
 
-Exposure uses the preview histogram. Clipped highlights cost more than crushed shadows. A little specular highlight is tolerated.
+### Sharpness
 
-The filmstrip number is that mix, from 0 to 100. The highest score in a burst is the recommendation. A tie goes to the sharper full frame, then the earlier filename.
+Sharpness is how much fine detail the preview has. Outburst turns the preview gray and measures the variance of a Laplacian. A crisp edge spreads those values. A soft frame does not.
 
-**Minimum score** hides frames under the cutoff. A burst with none left leaves the list. Marks and Save keepers are unchanged.
+Two sharpness numbers are kept:
+
+- The whole frame.
+- The middle 60 percent of the width and of the height. Inside that middle, nine patches are measured. The patch number is 85 percent of the sharpest patch plus 15 percent of the next, so one bright speck does not decide it.
+
+**Center** mixes those two. The default is 65, so the score uses 65 percent of the middle patch and 35 percent of the whole frame. At 100, only the middle patch counts, and grass or branches in the corners drop out. At 0, only the whole frame counts. Moving Center rescores immediately from measurements already saved. The files are not read again.
+
+Edge energy, shown under **Info**, is a second edge measurement (Tenengrad). It is stored for you to read. It is left out of the score and out of the ranking.
+
+### Exposure
+
+Exposure is read from the preview, not from a RAW histogram. Pixels at or above 250 count as clipped highlights. Pixels at or below 5 count as crushed shadows. A little specular highlight is tolerated. A large blown area costs more than crushed shadows, and a frame far from a mid gray loses a little more. The result is a number from 0 to 1.
+
+### The number on the filmstrip
+
+**Sharp** is the share of the score that comes from sharpness. The rest is exposure. The default is 75, so sharpness is three quarters and exposure is one quarter. At 100 the score is sharpness only. At 0 it is exposure only. Moving Sharp rescores immediately, without reading the files again.
+
+Before the mix, sharpness is squeezed into the range 0 to 1 by dividing it by itself plus 300. A very sharp frame approaches 1. A soft frame stays low. That scaled sharpness and the exposure number are then mixed by **Sharp**. Multiply the mix by 100 and you have the filmstrip number.
+
+### Which frame is recommended
+
+Inside a burst, the highest score is the recommendation. If two scores match, the sharper whole frame wins, then the earlier filename. When a scan finishes, that frame is marked a keeper when the burst does not already have one.
+
+**Subject-aware sharpness** changes which sharpness number is used. When it is on and an animal is found, the sharpest patch inside that box, expanded by 12 percent, replaces the Center blend for that frame. **Center** does not apply to a frame that has a measured animal. When nothing is found, that frame keeps the Center blend. Turning the checkbox on scans the folder again and downloads the selected model when the file is missing. Turning it off rescores from the measurements already saved. Choosing another model can move the box, and that can change the score. **Show subject box** only hides the rectangle. The score still uses the box.
+
+**Bird eye detection** leaves the 0 to 100 score as it is and can change which frame is recommended. When two or more frames in the burst have an eye large enough to rate, the sharpest of those eyes becomes the recommendation, and an earlier filename breaks a tie. An eye is rated when the disk on the analysis preview is at least 16 pixels across. A smaller eye is noted and left out of the ranking. One rated eye, or none, leaves the usual score ranking in place. Turning the checkbox on or off scans the folder again. **Show eye circle** only hides the ring.
+
+### What leaves the score alone
+
+**Burst gap** does not change a frame's number. It decides which frames share a burst, and so which frames compete for the recommendation. The default is 1.0 second. Frames closer than that stay together. A gap of exactly 1.0 second starts a new burst. Moving it regroups immediately. Keepers you marked stay. Outburst clears the keeper it chose and marks the best frame of each new burst.
+
+**Minimum** hides bursts shorter than the number you set. The default is 2 frames. Their scores stay. They leave the list and are left out of Save.
+
+**Minimum score** hides frames whose on-screen number is below the cutoff. A burst with none left leaves the list. The scores, the marks, and Save keepers stay as they are.
+
+**Info** only shows or hides the extra measurements.
 
 ## Your files
 
