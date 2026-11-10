@@ -50,6 +50,134 @@ def test_subject_runtime_ready_matches_the_import() -> None:
     assert subject_runtime_ready() is expected
 
 
+def test_subject_hardware_support_matches_the_published_builds() -> None:
+    from outburst.subject import SUBJECT_INSTALL_FREE_BYTES, subject_hardware_support
+
+    plenty = SUBJECT_INSTALL_FREE_BYTES
+    short = SUBJECT_INSTALL_FREE_BYTES - 1
+    ok = subject_hardware_support(
+        system="linux",
+        machine="x86_64",
+        bits=64,
+        free_bytes=plenty,
+    )
+    assert ok.compatible is True
+    apple = subject_hardware_support(
+        system="darwin",
+        machine="arm64",
+        bits=64,
+        macos_version="15.2",
+        free_bytes=plenty,
+    )
+    assert apple.compatible is True
+    windows = subject_hardware_support(
+        system="win32",
+        machine="AMD64",
+        bits=64,
+        windows_major=10,
+        free_bytes=plenty,
+    )
+    assert windows.compatible is True
+    intel_mac = subject_hardware_support(
+        system="darwin",
+        machine="x86_64",
+        bits=64,
+        macos_version="15.2",
+        free_bytes=plenty,
+    )
+    assert intel_mac.compatible is False
+    assert "Intel" in intel_mac.explanation
+    assert "will not install" in intel_mac.explanation
+    assert "download the models" in intel_mac.explanation
+    old_mac = subject_hardware_support(
+        system="darwin",
+        machine="arm64",
+        bits=64,
+        macos_version="13.6",
+        free_bytes=plenty,
+    )
+    assert old_mac.compatible is False
+    assert "macOS 14" in old_mac.explanation
+    arm_pc = subject_hardware_support(
+        system="win32",
+        machine="ARM64",
+        bits=64,
+        windows_major=10,
+        free_bytes=plenty,
+    )
+    assert arm_pc.compatible is False
+    assert "64-bit Intel and AMD" in arm_pc.explanation
+    narrow = subject_hardware_support(system="linux", machine="x86_64", bits=32, free_bytes=plenty)
+    assert narrow.compatible is False
+    assert "32-bit" in narrow.explanation
+    tight = subject_hardware_support(
+        system="linux",
+        machine="aarch64",
+        bits=64,
+        free_bytes=short,
+    )
+    assert tight.compatible is False
+    assert "5 GB" in tight.explanation
+    installed = subject_hardware_support(
+        system="linux",
+        machine="aarch64",
+        bits=64,
+        free_bytes=short,
+        needs_install=False,
+    )
+    assert installed.compatible is True
+
+
+def test_internet_connection_reports_a_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+    from email.message import Message
+
+    from outburst.subject import internet_connection
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def read(self, _size: int) -> bytes:
+            return b""
+
+    monkeypatch.setattr("outburst.subject.urllib.request.urlopen", lambda *_args, **_kwargs: Response())
+    assert internet_connection().online is True
+
+    def http_error(*_args: object, **_kwargs: object) -> None:
+        raise urllib.error.HTTPError("https://pypi.org", 405, "Method Not Allowed", Message(), None)
+
+    monkeypatch.setattr("outburst.subject.urllib.request.urlopen", http_error)
+    assert internet_connection().online is True
+
+
+def test_internet_connection_reports_an_offline_computer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+
+    from outburst.subject import OFFLINE_EXPLANATION, internet_connection
+
+    def offline(*_args: object, **_kwargs: object) -> None:
+        raise urllib.error.URLError("offline")
+
+    monkeypatch.setattr("outburst.subject.urllib.request.urlopen", offline)
+    status = internet_connection()
+    assert status.online is False
+    assert status.explanation == OFFLINE_EXPLANATION
+    assert "not downloaded" in status.explanation
+
+
+def test_subject_license_text_names_the_agpl_terms() -> None:
+    from outburst.subject import SUBJECT_LICENSE_TEXT
+
+    assert "AGPL-3.0" in SUBJECT_LICENSE_TEXT
+    assert "eye_pose_v0.pt" in SUBJECT_LICENSE_TEXT
+    assert "does not install" in SUBJECT_LICENSE_TEXT
+    assert "does not download" in SUBJECT_LICENSE_TEXT
+
+
 def test_frozen_app_does_not_pip_install_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 

@@ -7,13 +7,17 @@ subject scoring needs it. Loading a detector never fetches weights by itself.
 If detection is unavailable or finds no animal, scoring falls back to the
 full frame.
 
-``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics imports. ``subject_runtime_can_install`` reports whether this process can pip-install that library. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
+``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics imports. ``subject_runtime_can_install`` reports whether this process can pip-install that library. ``subject_hardware_support`` reports whether this computer can run that software. ``internet_connection`` reports whether a model host can be reached. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import platform
+import shutil
+import struct
+import sys
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -373,6 +377,211 @@ def make_subject_key(model_path: Path) -> str:
 
 
 SUBJECT_PIP_SPEC = "ultralytics>=8.3"
+SUBJECT_INSTALL_FREE_BYTES = 5 * 1024**3
+SUBJECT_LICENSE_TEXT = """Subject-aware sharpness and bird eye detection use Ultralytics YOLO and open model weights. Ultralytics, the YOLO weights, and eye_pose_v0.pt are licensed under the GNU Affero General Public License, version 3 (AGPL-3.0).
+
+Accepting lets Outburst install Ultralytics and PyTorch on this computer and download the selected model weights. Those pieces stay under AGPL-3.0. You may use, copy, and share them, and you can ask for their source. Your photographs stay on this computer.
+
+If you do not accept, Outburst keeps scoring the whole frame. It does not install that software and it does not download the models."""
+
+
+@dataclass(frozen=True)
+class HardwareSupport:
+    """Whether this computer can install and run subject and bird-eye detection."""
+
+    compatible: bool
+    explanation: str
+
+
+def _machine_key(machine: str) -> str:
+    """Collapse processor names that refer to the same architecture.
+
+    Inputs: machine, the raw value from platform.machine.
+    Output: x86_64, arm64, or the lowercase name when it is neither of those.
+    Uses: subject_hardware_support.
+    Limitations: this is a name check. It does not read the processor.
+    """
+
+    value = machine.lower().replace(" ", "")
+    if value in {"amd64", "x86_64", "x64"}:
+        return "x86_64"
+    if value in {"arm64", "aarch64"}:
+        return "arm64"
+    return value
+
+
+def _macos_major(version: str) -> int | None:
+    """Read the macOS major version from a version string.
+
+    Inputs: version, a string such as 15.1 or 14.
+    Output: the major version, or None when the string does not start with a number.
+    Uses: subject_hardware_support on Apple Silicon.
+    Limitations: a missing or blank string returns None. A beta suffix after the number is ignored.
+    """
+
+    head = version.strip().split(".", 1)[0]
+    if not head.isdigit():
+        return None
+    return int(head)
+
+
+def _free_bytes(path: Path) -> int | None:
+    """Free space on the volume that holds path.
+
+    Inputs: path, a directory that exists or has a parent that exists.
+    Output: free bytes, or None when the volume cannot be read.
+    Uses: subject_hardware_support before an install.
+    Limitations: this does not reserve the space. A path with no existing parent returns None.
+    """
+
+    target = path if path.exists() else path.parent
+    if not target.exists():
+        return None
+    try:
+        return shutil.disk_usage(target).free
+    except OSError:
+        return None
+
+
+def subject_hardware_support(
+    *,
+    system: str | None = None,
+    machine: str | None = None,
+    bits: int | None = None,
+    macos_version: str | None = None,
+    windows_major: int | None = None,
+    free_bytes: int | None = None,
+    needs_install: bool = True,
+) -> HardwareSupport:
+    """Report whether subject and bird-eye detection can be installed here.
+
+    Inputs: optional overrides for the operating system, processor, pointer size, macOS version, Windows major version, and free bytes. needs_install includes the free-space check when True.
+    Output: HardwareSupport. compatible is True only for a 64-bit system PyTorch publishes wheels for, with enough free space when an install is still required. explanation is the text to show when compatible is False.
+    Uses: the review window before it installs Ultralytics or downloads a model.
+    Limitations: the live computer is read only for arguments left as None. A volume whose free space cannot be read does not fail the space check. This does not import PyTorch and does not start an install.
+    """
+
+    probe = system is None and machine is None and bits is None
+    if system is None:
+        system = sys.platform
+    if machine is None:
+        machine = platform.machine()
+    if bits is None:
+        bits = struct.calcsize("P") * 8
+    if probe and system == "darwin" and macos_version is None:
+        macos_version = platform.mac_ver()[0]
+    if probe and system == "win32" and windows_major is None:
+        windows_major = sys.getwindowsversion().major
+    if probe and needs_install and free_bytes is None:
+        free_bytes = _free_bytes(Path(sys.prefix))
+
+    if bits < 64:
+        return HardwareSupport(
+            False,
+            "This computer is using a 32-bit system. Subject and bird eye detection need a 64-bit system. "
+            "Outburst will not install that software or download the models.",
+        )
+
+    kind = _machine_key(machine)
+    if system == "darwin":
+        if kind != "arm64":
+            return HardwareSupport(
+                False,
+                "This Mac uses an Intel processor. Subject and bird eye detection publish macOS builds for "
+                "Apple Silicon only. Outburst will not install that software or download the models.",
+            )
+        major = _macos_major(macos_version or "")
+        if major is None:
+            return HardwareSupport(
+                False,
+                "Outburst could not read the macOS version. Subject and bird eye detection need macOS 14 or "
+                "newer on Apple Silicon. Outburst will not install that software or download the models.",
+            )
+        if major < 14:
+            shown = macos_version or str(major)
+            return HardwareSupport(
+                False,
+                f"This Mac is running macOS {shown}. Subject and bird eye detection need macOS 14 or newer. "
+                "Outburst will not install that software or download the models.",
+            )
+    elif system == "win32":
+        if kind != "x86_64":
+            return HardwareSupport(
+                False,
+                f"This PC uses a {machine} processor. Subject and bird eye detection publish Windows builds "
+                "for 64-bit Intel and AMD processors. Outburst will not install that software or download the models.",
+            )
+        if windows_major is not None and windows_major < 10:
+            return HardwareSupport(
+                False,
+                "This PC is running a Windows version older than Windows 10. Subject and bird eye detection "
+                "need Windows 10 or Windows 11. Outburst will not install that software or download the models.",
+            )
+    elif system == "linux":
+        if kind not in {"x86_64", "arm64"}:
+            return HardwareSupport(
+                False,
+                f"This computer is Linux on {machine}. Subject and bird eye detection can be installed on "
+                "64-bit Linux for Intel, AMD, or ARM. Outburst will not install that software or download the models.",
+            )
+    else:
+        return HardwareSupport(
+            False,
+            f"This computer is {system} on {machine}. Subject and bird eye detection can be installed on "
+            "64-bit Windows, 64-bit Linux, and Apple Silicon Macs with macOS 14 or newer. "
+            "Outburst will not install that software or download the models.",
+        )
+
+    if needs_install and free_bytes is not None and free_bytes < SUBJECT_INSTALL_FREE_BYTES:
+        free_gb = free_bytes // (1024**3)
+        return HardwareSupport(
+            False,
+            f"This computer has {free_gb} GB free where the detection software would be installed. "
+            "Subject and bird eye detection need at least 5 GB free. "
+            "Outburst will not install that software or download the models.",
+        )
+    return HardwareSupport(True, "")
+
+
+@dataclass(frozen=True)
+class OnlineStatus:
+    """Whether Outburst can reach the network before an install or a model download."""
+
+    online: bool
+    explanation: str
+
+
+OFFLINE_EXPLANATION = (
+    "Outburst could not reach the internet. "
+    "Subject and bird eye detection stay uninstalled, and the models are not downloaded."
+)
+
+
+def internet_connection(*, timeout: float = 5.0, url: str = "https://pypi.org") -> OnlineStatus:
+    """Check that this computer can reach the network before an install or a download.
+
+    Inputs: timeout, seconds to wait for a response. url, the address used for the check.
+    Output: OnlineStatus. online is True when the address answers, including an HTTP error from that server. explanation is the text to show when online is False.
+    Uses: the install button before Ultralytics is installed or a model is downloaded.
+    Limitations: a response proves the network path works. It does not prove that the model file itself can be downloaded. A timeout, a DNS failure, or a connection error is offline.
+    """
+
+    request = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response.read(64)
+    except urllib.error.HTTPError:
+        return OnlineStatus(True, "")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return OnlineStatus(False, OFFLINE_EXPLANATION)
+    return OnlineStatus(True, "")
+
+
+PACKAGED_SUBJECT_EXPLANATION = (
+    "This computer can run subject and bird eye detection. "
+    "This install cannot add that software to the application, so Outburst will not install it or download the models. "
+    "Scoring still uses the whole frame."
+)
 
 
 class SubjectRuntimeCancelled(Exception):

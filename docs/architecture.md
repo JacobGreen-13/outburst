@@ -12,7 +12,7 @@ Outburst is a desktop app. The scoring pipeline does not import Qt, so it can be
 | `preview.py` | Loads a preview. Paired JPEGs win. Otherwise rawpy's embedded thumbnail is used. A byte scan for an embedded JPEG is the fallback. Full demosaic is never requested. |
 | `scoring.py` | Laplacian variance, optional Tenengrad, exposure penalties, and the weighted composite. Pure functions. |
 | `eyes.py` | Optional bird eye detection. `eye-pose-v0` supplies the eye keypoints from a BGR preview, then from overlapping windows when the full preview has no eye. A disk is rated only when it is at least 16 px across on the analysis preview. The pose model runs on CPU. |
-| `subject.py` | Optional YOLO detector and the model catalog. Device order is Apple Silicon MPS, then NVIDIA CUDA, then CPU. `ensure_model` downloads a missing weights file into the models folder. `install_subject_runtime` installs Ultralytics into the running Python. `load_yolo_detector` only opens a file that is already there. |
+| `subject.py` | Optional YOLO detector and the model catalog. Device order is Apple Silicon MPS, then NVIDIA CUDA, then CPU. `subject_hardware_support` checks the computer before an install. `internet_connection` checks the network before that install or a model download. `ensure_model` downloads a missing weights file into the models folder. `install_subject_runtime` installs Ultralytics into the running Python after the license is accepted. `load_yolo_detector` only opens a file that is already there. |
 | `cache.py` | SQLite plus JPEG previews in the user cache directory. |
 | `pipeline.py` | Ties the steps together and rebuilds scores or groups when weights or the gap change. |
 | `output.py` | XMP sidecars, keeper copies or hard links, JSON and CSV reports. |
