@@ -158,7 +158,7 @@ def pose_device(requested: str | None = None) -> str:
     return chosen
 
 
-def load_bird_eye_detector(model_path: Path, device: str | None = None) -> BirdEyeDetector:
+def load_bird_eye_detector(model_path: Path, device: str | None = None) -> EyeFinder:
     """Load bird-eye pose weights that are already on disk. This does not download them.
 
     Inputs: model_path, the .pt file; device, an optional torch device. The subject detector's device order is used when device is omitted, except that MPS becomes cpu.
@@ -169,6 +169,12 @@ def load_bird_eye_detector(model_path: Path, device: str | None = None) -> BirdE
 
     if not model_path.is_file():
         raise FileNotFoundError(f"Bird eye model not found: {model_path}")
+    from outburst.subject import uses_private_python
+
+    if uses_private_python():
+        from outburst.sidecar import SidecarEyeFinder
+
+        return SidecarEyeFinder(model_path)
     try:
         from ultralytics import YOLO
     except ImportError as exc:

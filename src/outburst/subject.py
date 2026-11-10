@@ -7,7 +7,7 @@ subject scoring needs it. Loading a detector never fetches weights by itself.
 If detection is unavailable or finds no animal, scoring falls back to the
 full frame.
 
-``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics imports. ``subject_runtime_can_install`` reports whether this process can pip-install that library. ``subject_hardware_support`` reports whether this computer can run that software. ``internet_connection`` reports whether a model host can be reached. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
+``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics can be used. ``subject_runtime_can_install`` reports whether this process can add that library. A packaged Windows app installs it into a private Python. ``subject_hardware_support`` reports whether this computer can run that software. ``internet_connection`` reports whether a model host can be reached. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
 """
 
 from __future__ import annotations
@@ -588,16 +588,48 @@ class SubjectRuntimeCancelled(Exception):
     """The Ultralytics install was cancelled before pip finished."""
 
 
-def subject_runtime_ready() -> bool:
-    """
-    Report whether Ultralytics can be imported in this process.
+def uses_private_python() -> bool:
+    """Report whether detection runs in a private Python next to this app.
 
     Inputs: none.
-    Output: True when ``import ultralytics`` succeeds, otherwise False.
-    Uses: deciding whether subject detection and bird eye detection can load.
-    Limitations: a failed import is treated as missing. This does not install anything and does not check that a weights file is present.
+    Output: True for a frozen 64-bit Windows app. False for a normal Python process and for a frozen app on another system.
+    Uses: the install button and the detector loaders.
+    Limitations: this does not check that the private Python has been downloaded yet. ``subject_runtime_ready`` does that.
     """
 
+    return bool(getattr(sys, "frozen", False)) and _windows_embed_supported()
+
+
+def _windows_embed_supported() -> bool:
+    """Report whether this process can host the official embeddable Python.
+
+    Inputs: none.
+    Output: True on 64-bit Windows for Intel or AMD.
+    Uses: uses_private_python.
+    Limitations: this is a name and pointer-size check. It does not download Python.
+    """
+
+    if sys.platform != "win32":
+        return False
+    if struct.calcsize("P") * 8 < 64:
+        return False
+    return _machine_key(platform.machine()) == "x86_64"
+
+
+def subject_runtime_ready() -> bool:
+    """
+    Report whether Ultralytics can be used for detection.
+
+    Inputs: none.
+    Output: True when a normal process can import ultralytics, or when a packaged Windows app has finished installing it into the private Python.
+    Uses: deciding whether subject detection and bird eye detection can load.
+    Limitations: a failed import is treated as missing. A packaged Windows app does not import Ultralytics inside Outburst.exe. This does not check that a weights file is present.
+    """
+
+    if uses_private_python():
+        from outburst.sidecar import private_runtime_ready
+
+        return private_runtime_ready()
     try:
         import ultralytics  # noqa: F401
     except ImportError:
@@ -606,16 +638,16 @@ def subject_runtime_ready() -> bool:
 
 
 def subject_runtime_can_install() -> bool:
-    """Report whether this process can pip-install Ultralytics into itself.
+    """Report whether this process can add Ultralytics.
 
     Inputs: none.
-    Output: False for a frozen installer build. True for a normal Python process.
+    Output: True for a normal Python process and for a packaged 64-bit Windows app. False for a frozen app that cannot host a private Python.
     Uses: the review window before it offers to install subject detection.
-    Limitations: this does not check that pip or a network connection is available. A frozen build that already imported Ultralytics still returns False here; callers also check ``subject_runtime_ready``.
+    Limitations: this does not check that pip or a network connection is available. A packaged Windows app installs into a private Python rather than into Outburst.exe.
     """
 
-    import sys
-
+    if uses_private_python():
+        return True
     return not bool(getattr(sys, "frozen", False))
 
 
@@ -641,7 +673,7 @@ def install_subject_runtime(should_cancel: Callable[[], bool] | None = None) -> 
     Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when pip exits with an error.
     Uses: the review window the first time subject or bird eye detection is turned on without Ultralytics.
-    Limitations: a frozen installer build raises RuntimeError and does not start pip. A normal install downloads PyTorch and can take several minutes. It does not download model weights. The caller should stay off the window thread.
+    Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. A packaged Windows app downloads a private Python, then installs Ultralytics there. A normal install downloads PyTorch and can take several minutes. It does not download model weights. The caller should stay off the window thread.
     """
 
     import subprocess
@@ -651,6 +683,11 @@ def install_subject_runtime(should_cancel: Callable[[], bool] | None = None) -> 
             "This install scores the whole frame. "
             "Subject-aware sharpness and bird eye detection are not included."
         )
+    if uses_private_python():
+        from outburst.sidecar import install_private_runtime
+
+        install_private_runtime(should_cancel)
+        return
     process = subprocess.Popen(
         subject_runtime_install_command(),
         stdout=subprocess.PIPE,
@@ -688,6 +725,10 @@ def load_yolo_detector(model_path: Path, device: str | None = None) -> SubjectDe
 
     if not model_path.is_file():
         raise FileNotFoundError(f"Subject model not found: {model_path}")
+    if uses_private_python():
+        from outburst.sidecar import SidecarSubjectDetector
+
+        return SidecarSubjectDetector(model_path)
     try:
         from ultralytics import YOLO
     except ImportError as exc:
