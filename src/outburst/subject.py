@@ -378,6 +378,13 @@ def make_subject_key(model_path: Path) -> str:
 
 SUBJECT_PIP_SPEC = "ultralytics>=8.3"
 SUBJECT_INSTALL_FREE_BYTES = 5 * 1024**3
+ULTRALYTICS_SOURCE_URL = "https://github.com/ultralytics/ultralytics"
+ULTRALYTICS_LICENSE_URL = "https://github.com/ultralytics/ultralytics/blob/main/LICENSE"
+YOLO_WEIGHTS_URL = "https://github.com/ultralytics/assets/releases/tag/v8.3.0"
+BIRD_EYE_PROJECT_URL = "https://huggingface.co/synthet/eye-pose-v0"
+AGPL_LICENSE_URL = "https://www.gnu.org/licenses/agpl-3.0.html"
+PYTORCH_SOURCE_URL = "https://github.com/pytorch/pytorch"
+PYTORCH_LICENSE_URL = "https://github.com/pytorch/pytorch/blob/main/LICENSE"
 SUBJECT_LICENSE_TEXT = """Subject-aware sharpness and bird eye detection use Ultralytics YOLO and open model weights. Ultralytics, the YOLO weights, and eye_pose_v0.pt are licensed under the GNU Affero General Public License, version 3 (AGPL-3.0).
 
 Accepting lets Outburst install Ultralytics and PyTorch on this computer and download the selected model weights. Those pieces stay under AGPL-3.0. You may use, copy, and share them, and you can ask for their source. Your photographs stay on this computer.

@@ -2,7 +2,7 @@
 
 Outburst culls wildlife and nature bursts on your own computer. It groups frames shot a fraction of a second apart, scores each one, and opens on the frame it would keep.
 
-Nothing is uploaded. There is no account. Original RAW and JPEG files stay untouched. A subject or bird-eye model is downloaded only when you turn that feature on and the weights are not already on disk.
+Nothing is uploaded. There is no account. Original RAW and JPEG files stay untouched. Subject and bird eye models stay off until you install that software, and each weight file is downloaded when that file is missing.
 
 ![Outburst review window, with the recommended frame marked as a keeper](docs/images/outburst-review.png)
 
@@ -20,9 +20,90 @@ Press **C** to put the current frame beside another one. It starts beside the be
 - Change keepers with that button or the keyboard. Marks are remembered on this computer.
 - Save marked keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV manifest.
 
+## Requirements
+
+### The app
+
+The Windows setup program and a source checkout have different requirements. Culling itself stays on this computer. Once the app is installed, opening a folder and scoring bursts works with the computer offline.
+
+**Windows 11 setup program**
+
+- Windows 11, 64-bit, on an Intel or AMD processor.
+- The setup program is [Outburst-Setup-0.1.3.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.3) on the Releases page. It is about 80 MB.
+- It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. Open **Outburst** from the Start menu after setup.
+- The setup program is unsigned. The first time Windows SmartScreen appears, choose **More info**, then **Run anyway**.
+
+**From source**
+
+- Python 3.11 or newer.
+- macOS, Windows, or Linux. On Apple Silicon, use an arm64 build of Python.
+- Internet the first time, so the launcher can create `.venv` and install Outburst.
+- [exiftool](https://exiftool.org/) is recommended, especially for CR3. The Windows setup program already includes it.
+
+### Subject and bird eye detection
+
+These are optional. Until they are installed, every frame is scored from the whole preview and the center blend. The controls stay hidden, and the checkboxes stay off after the install until you turn them on.
+
+**Computer**
+
+- 64-bit Windows 10 or Windows 11 on an Intel or AMD processor. The setup program itself is Windows 11.
+- 64-bit Linux on Intel, AMD, or ARM.
+- An Apple Silicon Mac running macOS 14 or newer.
+- At least 5 GB free where the detection software will be installed.
+- An internet connection while the software and any missing model files are downloading.
+
+The install button stops when the computer is 32-bit, an Intel Mac, Windows on ARM, or another system outside that list. It also stops when free space is under 5 GB, or when the internet check fails. In each of those cases Outburst explains why, leaves the controls hidden, and leaves the model files where they are.
+
+**Software the button adds**
+
+- [Ultralytics](https://github.com/ultralytics/ultralytics) 8.3 or newer, under the [GNU AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html). Its license file is [LICENSE](https://github.com/ultralytics/ultralytics/blob/main/LICENSE).
+- [PyTorch](https://github.com/pytorch/pytorch), which Ultralytics installs. The download is large and can take several minutes. PyTorch is [BSD-3](https://github.com/pytorch/pytorch/blob/main/LICENSE).
+- On the Windows setup program, a private Python 3.12 under `%LOCALAPPDATA%\Outburst\detection`. Detection runs in that Python. The photographs stay on this computer.
+- From source, Ultralytics and PyTorch go into the same Python that is running Outburst.
+
+You accept the AGPL-3.0 license in the app before any of that is downloaded. Declining leaves the controls hidden.
+
+**Model files**
+
+All five weight files are AGPL-3.0. The install button downloads YOLO11 Nano and `eye_pose_v0.pt` into the models folder after the software is in place. The other subject models download when you choose them. The Help menu opens the same pages.
+
+| Model | File | About | Use | Source |
+| --- | --- | --- | --- | --- |
+| YOLO11 Nano | `yolo11n.pt` | 6 MB | Default subject model | [weights](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt) |
+| YOLO11 Small | `yolo11s.pt` | 19 MB | More accurate subject model | [weights](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt) |
+| YOLOv8 Nano | `yolov8n.pt` | 6 MB | Subject model | [weights](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt) |
+| YOLOv8 Small | `yolov8s.pt` | 22 MB | More accurate subject model | [weights](https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8s.pt) |
+| eye-pose-v0 | `eye_pose_v0.pt` | 6 MB | Bird eyes | [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) |
+
+The four subject files come from the [Ultralytics assets v8.3.0 release](https://github.com/ultralytics/assets/releases/tag/v8.3.0). `eye_pose_v0.pt` is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. The direct file is [eye_pose_v0.pt](https://huggingface.co/synthet/eye-pose-v0/resolve/main/eye_pose_v0.pt).
+
+Subject detection uses MPS on Apple Silicon when PyTorch provides it, CUDA on NVIDIA, and the CPU otherwise. Bird eye detection uses CUDA or the CPU. On a Mac it stays on the CPU.
+
 ## Install
 
-You need Python 3.11 or newer. Outburst runs on macOS (including Apple Silicon), Windows, and Linux. On Apple Silicon, use an arm64 build of Python.
+### Windows 11
+
+1. Download [Outburst-Setup-0.1.3.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.3).
+2. If SmartScreen appears, choose **More info**, then **Run anyway**.
+3. Finish the setup. Open **Outburst** from the Start menu.
+4. In **Scoring**, press **Install subject and bird eye detection**.
+5. Outburst checks the computer, then the internet connection. A failed check explains itself and stops there.
+6. Read the AGPL-3.0 notice and choose **Install**.
+7. Wait while the private Python, Ultralytics, and PyTorch download, then YOLO11 Nano and `eye_pose_v0.pt`. The status bar names the step. **Esc** cancels.
+8. The subject and bird eye controls appear. Both checkboxes stay off.
+9. Check **Subject-aware sharpness** to score inside an animal when one is found. YOLO11 Nano is already downloaded and is the default. Choose another model in the list when you want it. That choice downloads the file when it is missing.
+10. Check **Bird eye detection** to rank a burst by the sharpest rated eye when two or more frames have one. `eye_pose_v0.pt` is already downloaded when the install finished.
+11. **Show subject box** and **Show eye circle** only hide the drawing. The score and the recommendation stay.
+
+To build that setup program on a Windows machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
+```
+
+The result is `dist\installer\Outburst-Setup-0.1.3.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
+
+### From source
 
 | System | Double-click |
 | --- | --- |
@@ -30,19 +111,7 @@ You need Python 3.11 or newer. Outburst runs on macOS (including Apple Silicon),
 | Windows | `Outburst.bat` |
 | Linux | `Outburst.desktop`, or run `./outburst.sh` |
 
-The first run creates `.venv`, installs Outburst, and opens the window. Subject detection and bird eye detection stay off, and their controls stay hidden. **Install subject and bird eye detection** checks this computer, then the internet connection. If either check fails, Outburst explains why and does not install the software or download the models. If both succeed, you accept the AGPL-3.0 license, and then Outburst installs Ultralytics and downloads the models. That install downloads PyTorch and can take several minutes. The detection controls appear after the modules are installed.
-
-### Windows 11 installer
-
-Windows 11 can install Outburst without Python or this source tree. On a Windows machine:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
-```
-
-The setup program is `dist\installer\Outburst-Setup-0.1.2.exe`. It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. **Install subject and bird eye detection** checks the computer and the internet connection, then downloads a private Python and installs Ultralytics and PyTorch into it. The models download after that. Detection runs in that private Python, and the photographs stay on this computer. The setup program is unsigned, so Windows SmartScreen asks for confirmation the first time.
-
-GitHub Actions builds the same installer with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
+The first run creates `.venv`, installs Outburst, and opens the window. Subject and bird eye controls stay hidden. **Install subject and bird eye detection** follows the same computer check, internet check, and AGPL-3.0 acceptance as the Windows app. Accepting installs Ultralytics and PyTorch into that `.venv`, then downloads the models. The detection controls appear after the modules are installed. The checkboxes stay off until you turn them on.
 
 ```bash
 ./outburst.sh examples/sample_burst
@@ -59,7 +128,7 @@ macOS and Linux:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[subject]"
+pip install -e .
 outburst
 ```
 
@@ -68,9 +137,11 @@ Windows:
 ```bat
 py -3 -m venv .venv
 .venv\Scripts\activate
-pip install -e ".[subject]"
+pip install -e .
 outburst
 ```
+
+That installs the app. Detection stays on the **Install subject and bird eye detection** button. To put Ultralytics and PyTorch into the environment before you open the window, use `pip install -e ".[subject]"` instead. The models still download the first time you use them, after you accept the AGPL-3.0 license.
 
 Open a folder immediately with `outburst examples/sample_burst`. Redraw the sample with `python examples/generate_sample_burst.py`.
 
@@ -204,7 +275,7 @@ A burst shorter than the minimum is not saved, so a pick on one of those frames 
 
 ## Subject detection
 
-This stays off until you check **Subject-aware sharpness**. The model list is YOLO11 Nano (the default), YOLO11 Small, YOLOv8 Nano, and YOLOv8 Small. Checking the box, or choosing a model, scores the open folder and downloads the weights when the file is missing. Cancel with Esc. Unchecking the box scores again from the measurements already cached.
+After **Install subject and bird eye detection** finishes, this stays off until you check **Subject-aware sharpness**. The model list is YOLO11 Nano (the default), YOLO11 Small, YOLOv8 Nano, and YOLOv8 Small. The files, sizes, license, and source pages are in [Requirements](#requirements). Checking the box, or choosing a model, scores the open folder and downloads the weights when the file is missing. Cancel with Esc. Unchecking the box scores again from the measurements already cached.
 
 When an animal is found, the sharpest patch inside that box becomes the score, and the box is drawn. **Show subject box** hides the rectangle without scanning again. The score still uses the box, and zoom still centers on it when no eye is present. If nothing is found, Outburst keeps the center-patch score and says so.
 
@@ -214,15 +285,13 @@ On Apple Silicon the subject detector uses MPS when PyTorch provides it. On NVID
 
 ## Bird eye detection
 
-This stays off until you check **Bird eye detection**. Checking it, or unchecking it, scans the open folder again. The first time, Outburst downloads `eye_pose_v0.pt` (about 6 MB) into the models folder. That file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. The weights are AGPL-3.0. Photos stay on this computer. The eye finder stays on the CPU.
+After the install button finishes, this stays off until you check **Bird eye detection**. Checking it, or unchecking it, scans the open folder again. The first time, Outburst downloads `eye_pose_v0.pt` (about 6 MB) into the models folder. That file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. The weights are [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html). Photos stay on this computer. The eye finder stays on the CPU.
 
 The model is birds only, so a distant or unusual field frame may have no eye. Outburst checks the whole preview, then overlapping 512 pixel windows, and maps the strongest eye back. A keypoint under 0.35 confidence is ignored. An eye is rated only when the disk around it is at least 16 pixels across. A smaller eye is noted and left out of the ranking.
 
 With two or more rated eyes in a burst, the sharpest eye is the best frame and Outburst marks it as a keeper. A reject on that frame stays rejected. A keeper you already set stays yours. A burst with fewer than two rated eyes keeps the usual sharpness rank.
 
 A detected eye is a gold ring labeled EYE. **Show eye circle** hides the ring without scanning again. The score and the zoom center stay. **Info** shows the eye sentence with the other measurements. The filmstrip says EYE. The burst row and the status bar count detected eyes, including frames in bursts hidden by **Minimum**.
-
-On a compatible computer, turning **Subject-aware sharpness** or **Bird eye detection** on asks you to accept the AGPL-3.0 license when that choice is not saved yet. Accepting installs Ultralytics when it is missing. The status bar says that PyTorch is downloading. You can also run `pip install "outburst[subject]"`. An incompatible computer does not install it and does not download a model.
 
 ## For developers
 
@@ -232,10 +301,18 @@ pip install -e ".[dev]"
 pytest
 ```
 
-On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst.
-
-Later versions can add a bundled small detector and signed installers for macOS and Windows.
+On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program is on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.3) page.
 
 ## License
 
-[MIT](LICENSE).
+Outburst itself is [MIT](LICENSE).
+
+Subject detection and bird eye detection are optional. Installing them brings in software and weight files under their own licenses. The Help menu opens these pages.
+
+| Piece | License | Source |
+| --- | --- | --- |
+| Outburst | [MIT](LICENSE) | This repository |
+| Ultralytics | [AGPL-3.0](https://github.com/ultralytics/ultralytics/blob/main/LICENSE) | [ultralytics/ultralytics](https://github.com/ultralytics/ultralytics) |
+| YOLO11 and YOLOv8 weights | [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html) | [Ultralytics assets v8.3.0](https://github.com/ultralytics/assets/releases/tag/v8.3.0) |
+| synthet/eye-pose-v0 | [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html) | [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) |
+| PyTorch | [BSD-3](https://github.com/pytorch/pytorch/blob/main/LICENSE) | [pytorch/pytorch](https://github.com/pytorch/pytorch) |

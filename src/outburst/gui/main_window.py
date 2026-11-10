@@ -73,10 +73,16 @@ from outburst.output import choose_keepers, frames_for_sidecars, write_reports
 from outburst.pipeline import with_threshold, with_weights
 from outburst.scoring import compare_partner_offset, eye_chooses_best, recommended_offset
 from outburst.subject import (
+    AGPL_LICENSE_URL,
     BIRD_EYE_OPTION,
+    BIRD_EYE_PROJECT_URL,
     DEFAULT_MODEL_ID,
     MODEL_OPTIONS,
     PACKAGED_SUBJECT_EXPLANATION,
+    PYTORCH_LICENSE_URL,
+    ULTRALYTICS_LICENSE_URL,
+    ULTRALYTICS_SOURCE_URL,
+    YOLO_WEIGHTS_URL,
     internet_connection,
     model_is_ready,
     model_path,
@@ -579,6 +585,15 @@ class MainWindow(QMainWindow):
         )
         shortcuts_action = self._action("Keyboard shortcuts", lambda: show_shortcuts(self))
         about_action = self._action("About Outburst", self._about)
+        yolo_weights_action = self._link_action("YOLO model weights", YOLO_WEIGHTS_URL)
+        ultralytics_source_action = self._link_action("Ultralytics source", ULTRALYTICS_SOURCE_URL)
+        ultralytics_license_action = self._link_action(
+            "Ultralytics license (AGPL-3.0)",
+            ULTRALYTICS_LICENSE_URL,
+        )
+        bird_eye_action = self._link_action("Bird eye model", BIRD_EYE_PROJECT_URL)
+        agpl_action = self._link_action("AGPL-3.0 license", AGPL_LICENSE_URL)
+        pytorch_license_action = self._link_action("PyTorch license (BSD)", PYTORCH_LICENSE_URL)
 
         self.open_action.setIconText("Open")
         self.rescan_action.setIconText("Rescan")
@@ -635,6 +650,14 @@ class MainWindow(QMainWindow):
         view_menu.addAction(cache_action)
         view_menu.addAction(self.clear_cache_action)
         help_menu.addAction(shortcuts_action)
+        help_menu.addSeparator()
+        help_menu.addAction(yolo_weights_action)
+        help_menu.addAction(ultralytics_source_action)
+        help_menu.addAction(ultralytics_license_action)
+        help_menu.addAction(bird_eye_action)
+        help_menu.addAction(agpl_action)
+        help_menu.addAction(pytorch_license_action)
+        help_menu.addSeparator()
         help_menu.addAction(about_action)
         toolbar.addAction(self.cancel_action)
         toolbar.addWidget(self.folder_label)
@@ -661,6 +684,34 @@ class MainWindow(QMainWindow):
             action.setShortcut(QKeySequence(shortcut))
         action.triggered.connect(lambda _checked=False, callback=slot: callback())
         return action
+
+    def _link_action(self, text: str, url: str) -> QAction:
+        """
+        Create a Help action that opens a model or license page.
+
+        Inputs: text, the menu label; url, the page to open.
+        Output: the action, parented to the window, with the URL stored on the action.
+        Uses: the Help menu links for the YOLO weights, Ultralytics, the bird eye model, AGPL-3.0, and PyTorch.
+        Limitations: the action stores the URL and does not open it until the user chooses the menu item.
+        """
+        action = QAction(text, self)
+        action.setData(url)
+        action.triggered.connect(lambda _checked=False, target=url: self._open_link(target))
+        return action
+
+    def _open_link(self, url: str) -> None:
+        """
+        Open a model or license page in the system browser.
+
+        Inputs: url, an http or https address stored on a Help action.
+        Output: no return value. The desktop service is asked to open the address.
+        Uses: Help menu links.
+        Limitations: a headless test run records the address and does not open a browser.
+        """
+        if os.environ.get("OUTBURST_HEADLESS") == "1":
+            self.last_notice = ("link", url)
+            return
+        QDesktopServices.openUrl(QUrl(url))
 
     def _check_action(self, text: str, tooltip: str) -> QAction:
         """
