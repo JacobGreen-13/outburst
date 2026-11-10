@@ -565,7 +565,10 @@ class MainWindow(QMainWindow):
             "Keeper marks stay."
         )
         self.export_action.setIconText("Save")
-        self.export_action.setToolTip("Save the frames marked as keepers. Originals stay where they are.")
+        self.export_action.setToolTip(
+            "Save the frames marked as keepers, and write an .xmp sidecar beside each one. "
+            "Originals stay where they are."
+        )
         self.report_action.setIconText("Save manifest")
         self.report_action.setToolTip(
             "Save a manifest of this folder as outburst-report.json and outburst-report.csv. "
@@ -2074,9 +2077,9 @@ class MainWindow(QMainWindow):
         Ask where to save marked keepers and start that save.
 
         Inputs: none.
-        Output: no return value. A chosen folder starts a copy or hard-link save. No marked keepers in bursts that meet the minimum shows a notice.
+        Output: no return value. A chosen folder starts a copy or hard-link save and writes an .xmp beside each saved keeper. No marked keepers in bursts that meet the minimum shows a notice.
         Uses: the Save keepers action.
-        Limitations: bursts under Minimum frames are left out. A cancelled dialog, or a headless process, does nothing. Original files are not modified.
+        Limitations: bursts under Minimum frames are left out. A cancelled dialog, or a headless process, does nothing. Original files are not modified. The sidecar is written in the keepers folder.
         """
         if self._library is None:
             return
@@ -2098,7 +2101,14 @@ class MainWindow(QMainWindow):
             )
             return
         self._start_save(
-            ExportWorker([choice.path for choice in choices], request.folder, request.mode),
+            ExportWorker(
+                [choice.path for choice in choices],
+                request.folder,
+                request.mode,
+                self._library,
+                dict(self._decisions),
+                dict(self._stars),
+            ),
             f"Saving {len(choices)} keeper(s)…",
         )
 
@@ -2637,7 +2647,7 @@ class MainWindow(QMainWindow):
         Report a finished keeper save or sidecar write.
 
         Inputs: save_id, the save this result belongs to; payload, a sidecar tuple of written paths and warnings, or a list of export results.
-        Output: no return value. Saving stops and the status bar summarizes what was written. Sidecar warnings replace the stored scan notes.
+        Output: no return value. Saving stops and the status bar summarizes what was written, including the sidecar count for a keeper save. Sidecar warnings replace the stored scan notes.
         Uses: the end of Save keepers or Write XMP sidecars.
         Limitations: a stale save id is ignored. A payload that is neither a tuple nor a list is summarized as zero keepers.
         """
@@ -2654,10 +2664,15 @@ class MainWindow(QMainWindow):
         else:
             results = payload if isinstance(payload, list) else []
             notes = [getattr(result, "note", "") for result in results if getattr(result, "note", "")]
+            notes.extend(
+                getattr(result, "sidecar_note", "") for result in results if getattr(result, "sidecar_note", "")
+            )
+            sidecars = [result for result in results if getattr(result, "sidecar", None) is not None]
             folder = results[0].destination.parent if results else ""
             message = f"Saved {len(results)} keeper(s)"
             if folder:
                 message += f" to {folder}"
+            message += f" and wrote {len(sidecars)} sidecar(s)"
             if notes:
                 message += " " + str(notes[0])
         self._sync_actions()

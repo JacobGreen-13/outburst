@@ -18,6 +18,7 @@ from outburst.output import (
     export_keepers,
     review_xmp_fields,
     upsert_xmp,
+    write_exported_sidecars,
     write_library_sidecars,
     write_reports,
     write_xmp_sidecar,
@@ -149,6 +150,63 @@ def test_choose_keepers_and_export_modes(tmp_path: Path) -> None:
     assert [item.source for item in copied_many] == names
     assert [item.destination.name for item in copied_many] == [path.name for path in names]
     assert copied_many[3].destination.read_bytes() == b"body-3"
+
+
+def test_export_writes_a_sidecar_beside_each_keeper(tmp_path: Path) -> None:
+    first = tmp_path / "a.jpg"
+    second = tmp_path / "b.jpg"
+    first.write_bytes(b"aaa")
+    second.write_bytes(b"bbb")
+    before = (_digest(first), first.stat().st_mtime_ns, _digest(second), second.stat().st_mtime_ns)
+    frame_a, analysis_a = _frame(first, 0.4)
+    frame_b, analysis_b = _frame(second, 0.9)
+    library = _library(tmp_path, [(frame_a, analysis_a), (frame_b, analysis_b)])
+    decisions = {first: "keep", second: "keep"}
+    copied = export_keepers([second, first], tmp_path / "keepers", "copy")
+    updated, warnings = write_exported_sidecars(library, copied, decisions, stars={second: 4})
+    assert warnings == []
+    assert [item.destination.name for item in updated] == ["b.jpg", "a.jpg"]
+    for item in updated:
+        assert item.sidecar == item.destination.with_suffix(".xmp")
+        assert item.sidecar is not None
+        text = item.sidecar.read_text(encoding="utf-8")
+        assert 'xmpDM:pick="1"' in text
+        assert "outburst:Score" in text
+    sharp = next(item for item in updated if item.source == second)
+    other = next(item for item in updated if item.source == first)
+    assert sharp.sidecar is not None and 'xmp:Rating="4"' in sharp.sidecar.read_text(encoding="utf-8")
+    assert 'outburst:Recommended="True"' in sharp.sidecar.read_text(encoding="utf-8")
+    assert other.sidecar is not None and 'xmp:Rating="5"' in other.sidecar.read_text(encoding="utf-8")
+    assert not first.with_suffix(".xmp").exists()
+    assert not second.with_suffix(".xmp").exists()
+    assert (_digest(first), first.stat().st_mtime_ns, _digest(second), second.stat().st_mtime_ns) == before
+
+    taken = tmp_path / "keepers" / "b.jpg"
+    taken.write_bytes(b"already-there")
+    renamed = export_keepers([second], tmp_path / "keepers", "copy")
+    assert renamed[0].destination.name == "b_1.jpg"
+    renamed_written, renamed_warnings = write_exported_sidecars(library, renamed, decisions)
+    assert renamed_warnings == []
+    assert renamed_written[0].sidecar == tmp_path / "keepers" / "b_1.xmp"
+    assert renamed_written[0].sidecar is not None
+    assert 'xmpDM:pick="1"' in renamed_written[0].sidecar.read_text(encoding="utf-8")
+
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    (blocked / "a.xmp").write_text("notes", encoding="utf-8")
+    saved = export_keepers([first], blocked, "copy")
+    blocked_written, blocked_warnings = write_exported_sidecars(library, saved, decisions)
+    assert saved[0].destination.read_bytes() == b"aaa"
+    assert blocked_written[0].sidecar is None
+    assert blocked_warnings
+    assert (blocked / "a.xmp").read_text(encoding="utf-8") == "notes"
+
+    linked = export_keepers([first], tmp_path / "links", "hardlink")
+    linked_written, linked_warnings = write_exported_sidecars(library, linked, decisions)
+    assert linked_warnings == []
+    assert linked_written[0].destination.samefile(first)
+    assert linked_written[0].sidecar == tmp_path / "links" / "a.xmp"
+    assert not first.with_suffix(".xmp").exists()
 
 
 def test_sidecar_writes_stars_and_pick_flags(tmp_path: Path) -> None:

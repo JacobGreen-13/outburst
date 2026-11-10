@@ -1,6 +1,6 @@
 """Background threads so the window stays responsive.
 
-``AnalyzeWorker`` scans a folder and can be aborted. It can pass a bird-eye weights path. ``ModelFetchWorker`` downloads one weights file, including the bird-eye pose model. ``RuntimeInstallWorker`` installs Ultralytics when subject or bird eye detection is turned on without that library. ``ExportWorker`` copies keepers two at a time. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
+``AnalyzeWorker`` scans a folder and can be aborted. It can pass a bird-eye weights path. ``ModelFetchWorker`` downloads one weights file, including the bird-eye pose model. ``RuntimeInstallWorker`` installs Ultralytics when subject or bird eye detection is turned on without that library. ``ExportWorker`` copies keepers two at a time and writes an ``.xmp`` beside each saved file. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 from outburst.models import Library, Weights
-from outburst.output import export_keepers, write_library_sidecars
+from outburst.output import export_keepers, write_exported_sidecars, write_library_sidecars
 from outburst.pipeline import CancelledError, analyze_folder
 from outburst.subject import (
     ModelCancelled,
@@ -246,41 +246,83 @@ class RuntimeInstallWorker(QThread):
 
 
 class ExportWorker(QThread):
-    """Copy or link keepers without blocking the window. Two files at a time."""
+    """Copy or link keepers without blocking the window, then write one sidecar each."""
 
     progress = Signal(int, int, str)
     succeeded = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, sources: list[Path], folder: Path, mode: str) -> None:
+    def __init__(
+        self,
+        sources: list[Path],
+        folder: Path,
+        mode: str,
+        library: Library,
+        decisions: dict[Path, str],
+        stars: dict[Path, int],
+    ) -> None:
         """
-        Store the keeper files, destination folder, and copy or link mode.
+        Store the keeper files, destination folder, copy or link mode, and the marks for the sidecars.
 
-        Inputs: sources, the files to save; folder, the destination; mode, "copy" or "hardlink".
+        Inputs: sources, the files to save; folder, the destination; mode, "copy" or "hardlink"; library; decisions, each path's keep or reject mark; stars, each path's rating.
         Output: no return value. The worker is ready to start.
         Uses: Save keepers.
-        Limitations: this worker has no abort flag. Original files are not modified.
+        Limitations: this worker has no abort flag. Original files are not modified. It keeps the decision and star maps it was given.
         """
         super().__init__()
         self._sources = sources
         self._folder = folder
         self._mode = mode
+        self._library = library
+        self._decisions = decisions
+        self._stars = stars
 
     def run(self) -> None:
         """
-        Copy or link the keeper files and emit the results.
+        Copy or link the keeper files, write an .xmp beside each one, and emit the results.
 
-        Inputs: none. Sources, folder, and mode were stored on the worker.
+        Inputs: none. Sources, folder, mode, library, and marks were stored on the worker.
         Output: no return value. Emits succeeded with the export results, or failed with the exception text.
         Uses: Save keepers, off the window thread.
-        Limitations: the copies run two at a time. A file already in the destination is left as it is. Original files are not modified.
+        Limitations: the copies and the sidecars each run two at a time. A file already in the destination is left as it is. The sidecar is written in the keepers folder. Original files are not modified.
         """
         try:
+            count = len(self._sources)
+
+            def report_copy(done: int, total: int, message: str) -> None:
+                """Count each saved photograph as the first half of the save.
+
+                Inputs: done, how many photographs are saved; total, the photograph count; message, the status line.
+                Output: none. Progress is emitted with a total that leaves room for the sidecars.
+                Uses: export_keepers during Save keepers.
+                Limitations: an empty save reports a total of 2. This does not write a file.
+                """
+
+                self.progress.emit(done, max(total, count, 1) * 2, message)
+
+            def report_sidecar(done: int, total: int, message: str) -> None:
+                """Count each sidecar after the photographs.
+
+                Inputs: done, how many sidecars are written; total, the sidecar count; message, the status line.
+                Output: none. Progress continues from the end of the photograph copies.
+                Uses: write_exported_sidecars during Save keepers.
+                Limitations: the total matches the copy phase. This does not write a file.
+                """
+
+                self.progress.emit(max(total, count) + done, max(total, count, 1) * 2, message)
+
             results = export_keepers(
                 self._sources,
                 self._folder,
                 self._mode,
-                progress=lambda done, total, message: self.progress.emit(done, total, message),
+                progress=report_copy,
+            )
+            results, _warnings = write_exported_sidecars(
+                self._library,
+                results,
+                self._decisions,
+                stars=self._stars,
+                progress=report_sidecar,
             )
         except Exception as exc:
             log.exception("Saving keepers failed")
