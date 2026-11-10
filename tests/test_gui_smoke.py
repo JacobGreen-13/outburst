@@ -915,8 +915,14 @@ def test_save_keepers_disables_save_until_the_copy_finishes(
         time.sleep(0.02)
     assert window._saving is False
     assert window.export_action.isEnabled() is True
+    assert "sidecar" in window.statusBar().currentMessage()
     assert (destination / written["sharp"].name).is_file()
     assert (destination / written["second_sharp"].name).is_file()
+    for saved in (written["sharp"], written["second_sharp"]):
+        sidecar = (destination / saved.name).with_suffix(".xmp")
+        assert sidecar.is_file()
+        assert 'xmpDM:pick="1"' in sidecar.read_text(encoding="utf-8")
+        assert not saved.with_suffix(".xmp").exists()
     window.close()
     qt_app.processEvents()
 

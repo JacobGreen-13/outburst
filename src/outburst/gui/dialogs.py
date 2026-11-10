@@ -96,7 +96,7 @@ class ExportKeepersDialog(QDialog):
         Inputs: parent, the owning widget; start, the folder shown in the field, or None for the home folder.
         Output: no return value. The dialog is titled, filled, and sized.
         Uses: the Save keepers dialog.
-        Limitations: copy is selected by default. The dialog does not create the folder, and the note says original files are not modified.
+        Limitations: copy is selected by default. The dialog does not create the folder. The note says original files are not modified and that the sidecar is written in the keepers folder.
         """
         super().__init__(parent)
         self.setWindowTitle("Save keepers")
@@ -121,7 +121,8 @@ class ExportKeepersDialog(QDialog):
 
         layout = QVBoxLayout(self)
         summary = QLabel(
-            "Outburst saves marked keepers from bursts that meet Minimum frames. "
+            "Outburst saves marked keepers from bursts that meet Minimum frames "
+            "and writes an .xmp sidecar beside each saved file. "
             "Shorter bursts stay hidden and are not saved."
         )
         summary.setWordWrap(True)
@@ -132,11 +133,14 @@ class ExportKeepersDialog(QDialog):
         layout.addLayout(row)
         layout.addWidget(self._copy)
         layout.addWidget(self._link)
-        note = QLabel("Originals are not modified. A file already in that folder is left as it is.")
+        note = QLabel(
+            "Originals are not modified. A file already in that folder is left as it is. "
+            "The sidecar is written in the keepers folder."
+        )
         note.setWordWrap(True)
         layout.addWidget(note)
         layout.addWidget(buttons)
-        self.resize(520, 220)
+        self.resize(560, 260)
 
     @staticmethod
     def ask(parent: QWidget | None, start: Path | None) -> ExportRequest | None:

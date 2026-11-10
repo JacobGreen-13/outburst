@@ -77,7 +77,7 @@ The database lives in the user cache directory (`~/Library/Caches/Outburst` on m
 | Scan and score | Cache directory only |
 | Keep / reject | Cache directory only |
 | Write XMP | A new or updated `<stem>.xmp` beside a keeper or a star-rated frame, and only after confirmation. Other frames are left alone. Stars go to `xmp:Rating` and `MicrosoftPhoto:Rating`. A pick is `xmpDM:pick` 1 and `digiKam:PickLabel` 3. A starred reject is `xmpDM:pick` -1 and `digiKam:PickLabel` 1. A reject with no stars gets no sidecar |
-| Save keepers | A folder the photographer chooses. Copy, or a hard link with a copy fallback. Only marked frames from bursts that meet Minimum frames. Hidden shorter bursts are not saved |
+| Save keepers | A folder the photographer chooses. Copy, or a hard link with a copy fallback, plus an `.xmp` sidecar beside each saved keeper. Only marked frames from bursts that meet Minimum frames. Hidden shorter bursts are not saved |
 | Save manifest | `outburst-report.json` and `outburst-report.csv` in a chosen folder. Every frame, its score, and the keeper marks. Photos are not changed |
 | Download a subject model | The models folder: `models` in this project when Outburst is run from the checkout, `models` inside the cache directory otherwise, or `OUTBURST_MODELS` when that is set |
 
