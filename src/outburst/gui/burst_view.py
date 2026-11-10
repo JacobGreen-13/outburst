@@ -79,6 +79,7 @@ class ThumbCard(QFrame):
         self.badge = QLabel(thumb.badge)
         for label in (self.title, self.score, self.badge):
             label.setWordWrap(False)
+        self.score.setMinimumHeight(22)
         layout.addWidget(self.image)
         layout.addWidget(self.title)
         layout.addWidget(self.score)
@@ -145,7 +146,7 @@ class ThumbCard(QFrame):
         Inputs: none.
         Output: no return value. The frame stylesheet and the badge color are replaced.
         Uses: the filmstrip card appearance.
-        Limitations: selection is green when the card is also the best frame and blue otherwise. Compare gold, reject red, and keeper green apply only when the card is not selected.
+        Limitations: selection is green when the card is also the best frame and blue otherwise. Compare gold, reject red, and keeper green apply only when the card is not selected. The selected score is 18 pixels. The other scores stay at 13.
         """
         if self._selected and self._best:
             color = "#7dffc3"
@@ -168,7 +169,10 @@ class ThumbCard(QFrame):
             f"QLabel {{ color: {title_color}; background: transparent; }}"
         )
         self.badge.setStyleSheet(f"color: {badge_color}; background: transparent; font-weight: 600;")
-        self.score.setStyleSheet("color: #f2f2f2; background: transparent; font-weight: 600;")
+        score_size = "18px" if self._selected else "13px"
+        self.score.setStyleSheet(
+            f"color: #f2f2f2; background: transparent; font-weight: 600; font-size: {score_size};"
+        )
 
 
 class Filmstrip(QScrollArea):
@@ -184,14 +188,14 @@ class Filmstrip(QScrollArea):
         Inputs: none.
         Output: no return value. A scroll area with a trailing stretch is ready for cards.
         Uses: the filmstrip under the preview.
-        Limitations: the vertical scrollbar stays off. The minimum height is 196 pixels, so extra frames scroll sideways.
+        Limitations: the vertical scrollbar stays off. The minimum height is 224 pixels, so extra frames scroll sideways and the selected score has room.
         """
         super().__init__()
         self.setObjectName("filmstrip")
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setMinimumHeight(196)
+        self.setMinimumHeight(224)
         self._inner = QWidget()
         self._layout = QHBoxLayout(self._inner)
         self._layout.setContentsMargins(8, 8, 8, 8)

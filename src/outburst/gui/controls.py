@@ -1,6 +1,6 @@
 """Threshold, weights, and the optional subject-detection toggle.
 
-``ControlPanel`` is the Grouping and Scoring sections. The getters read burst gap, sharpness, center, minimum frames, minimum score, subfolders, subject, bird eye detection, the subject-box and eye-circle marks, and the model id. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark.
+``ControlPanel`` is the Grouping and Scoring sections. Grouping starts collapsed and Scoring starts open. The getters read burst gap, sharpness, center, minimum frames, minimum score, subfolders, subject, bird eye detection, the subject-box and eye-circle marks, the model id, and whether each section is open. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark. ``set_score_effect`` shows how many frames Minimum score is leaving on screen.
 """
 
 from __future__ import annotations
@@ -10,12 +10,12 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -47,9 +47,9 @@ class ControlPanel(QWidget):
         Build the grouping and scoring controls with their default values.
 
         Inputs: none.
-        Output: no return value. Burst gap starts at 1.0 seconds, minimum at 2 frames, sharpness at 75, center at 65, and minimum score off at 50.
+        Output: no return value. Burst gap starts at 1.0 seconds, minimum at 2 frames, sharpness at 75, center at 65, and minimum score off at 50. Grouping starts collapsed and Scoring starts open.
         Uses: the control panel beside the burst list.
-        Limitations: the panel emits signals when those controls change and does not scan or rescore by itself. The model list is filled from the models folder during construction.
+        Limitations: the panel emits signals when those controls change and does not scan or rescore by itself. The model list is filled from the models folder during construction. Opening or closing a section only shows or hides its controls.
         """
         super().__init__()
         self._threshold = QDoubleSpinBox()
@@ -133,17 +133,24 @@ class ControlPanel(QWidget):
         self._rebuild_model_items()
         self._model.currentIndexChanged.connect(lambda index: self._emit_model(int(index)))
 
-        grouping = QGroupBox("Grouping")
-        grouping.setObjectName("sectionBox")
-        grouping_layout = QVBoxLayout(grouping)
+        self._score_effect = QLabel("")
+        self._score_effect.setObjectName("hint")
+        self._score_effect.hide()
+
+        self._grouping_body = QWidget()
+        self._grouping_body.setObjectName("sectionBody")
+        grouping_layout = QVBoxLayout(self._grouping_body)
+        grouping_layout.setContentsMargins(8, 8, 8, 8)
         grouping_layout.setSpacing(6)
         grouping_layout.addWidget(self._row("Burst gap", self._threshold))
         grouping_layout.addWidget(self._row("Minimum", self._minimum))
         grouping_layout.addWidget(self._recursive)
+        self._grouping_toggle = self._disclosure("Grouping", self._grouping_body, open_=False)
 
-        scoring = QGroupBox("Scoring")
-        scoring.setObjectName("sectionBox")
-        scoring_layout = QVBoxLayout(scoring)
+        self._scoring_body = QWidget()
+        self._scoring_body.setObjectName("sectionBody")
+        scoring_layout = QVBoxLayout(self._scoring_body)
+        scoring_layout.setContentsMargins(8, 8, 8, 8)
         scoring_layout.setSpacing(6)
         scoring_layout.addWidget(self._slider_row(self._sharpness_label, self._sharpness))
         scoring_layout.addWidget(self._slider_row(self._center_label, self._center))
@@ -154,12 +161,15 @@ class ControlPanel(QWidget):
         scoring_layout.addWidget(self._indented(self._show_eye))
         scoring_layout.addWidget(self._model)
         scoring_layout.addWidget(self._model_label)
+        self._scoring_toggle = self._disclosure("Scoring", self._scoring_body, open_=True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        layout.addWidget(grouping)
-        layout.addWidget(scoring)
+        layout.addWidget(self._grouping_toggle)
+        layout.addWidget(self._grouping_body)
+        layout.addWidget(self._scoring_toggle)
+        layout.addWidget(self._scoring_body)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self._refresh_labels()
 
@@ -206,7 +216,7 @@ class ControlPanel(QWidget):
         Inputs: none. The checkbox and spin box were created with the panel.
         Output: a row widget with the toggle and the 0 to 100 cutoff.
         Uses: Minimum score in the Scoring section.
-        Limitations: the number stays disabled until the checkbox is on.
+        Limitations: the number stays disabled until the checkbox is on. The effect line stays hidden until the window reports a count.
         """
         row = QWidget()
         layout = QHBoxLayout(row)
@@ -214,7 +224,44 @@ class ControlPanel(QWidget):
         layout.setSpacing(8)
         layout.addWidget(self._score_filter, 1)
         layout.addWidget(self._score_minimum)
+        layout.addWidget(self._score_effect)
         return row
+
+    def _disclosure(self, title: str, body: QWidget, *, open_: bool) -> QToolButton:
+        """
+        Build a header that shows or hides one section.
+
+        Inputs: title, the section name; body, the controls to show or hide; open_, whether the section starts open.
+        Output: the header button. The body is visible only when open_ is true.
+        Uses: Grouping and Scoring in the control panel.
+        Limitations: the button's arrow follows the open state. This does not change the values inside the section.
+        """
+        button = QToolButton()
+        button.setObjectName("sectionToggle")
+        button.setText(title)
+        button.setCheckable(True)
+        button.setChecked(open_)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setArrowType(Qt.ArrowType.DownArrow if open_ else Qt.ArrowType.RightArrow)
+        button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        button.setToolTip(f"Show or hide {title}.")
+        body.setVisible(open_)
+        button.toggled.connect(
+            lambda checked, control=button, target=body: self._apply_section(control, target, checked)
+        )
+        return button
+
+    def _apply_section(self, button: QToolButton, body: QWidget, open_: bool) -> None:
+        """
+        Show or hide a section and point its arrow the matching way.
+
+        Inputs: button, the section header; body, the controls; open_, whether the section is open.
+        Output: no return value. The body is visible when open_ is true, and the arrow points down when open and right when closed.
+        Uses: the Grouping and Scoring headers.
+        Limitations: this does not change the values inside the section and does not rescore.
+        """
+        button.setArrowType(Qt.ArrowType.DownArrow if open_ else Qt.ArrowType.RightArrow)
+        body.setVisible(open_)
 
     def _on_score_filter_toggled(self, checked: bool) -> None:
         """
@@ -338,6 +385,72 @@ class ControlPanel(QWidget):
         if not self._score_filter.isChecked():
             return None
         return self.minimum_score()
+
+    def set_score_effect(self, showing: int | None, eligible: int | None) -> None:
+        """
+        Show how many frames Minimum score is leaving on screen.
+
+        Inputs: showing, the frames still visible, or None to hide the line; eligible, the frames in bursts long enough to review.
+        Output: no return value. The line reads "N of M showing" when both numbers are given, and is hidden otherwise.
+        Uses: the Minimum score row while a library is open.
+        Limitations: a missing number hides the line. This does not change the cutoff or hide frames itself.
+        """
+        if showing is None or eligible is None:
+            self._score_effect.clear()
+            self._score_effect.hide()
+            return
+        self._score_effect.setText(f"{showing} of {eligible} showing")
+        self._score_effect.show()
+
+    def grouping_open(self) -> bool:
+        """
+        Read whether the Grouping section is open.
+
+        Inputs: none.
+        Output: True when the Grouping controls are visible.
+        Uses: saving the review window settings.
+        Limitations: this is the header state. It does not say what the burst gap is.
+        """
+        return self._grouping_toggle.isChecked()
+
+    def scoring_open(self) -> bool:
+        """
+        Read whether the Scoring section is open.
+
+        Inputs: none.
+        Output: True when the Scoring controls are visible.
+        Uses: saving the review window settings.
+        Limitations: this is the header state. It does not say whether subject scoring is on.
+        """
+        return self._scoring_toggle.isChecked()
+
+    def set_grouping_open(self, open_: bool) -> None:
+        """
+        Open or close Grouping without treating it as a user click.
+
+        Inputs: open_, whether the Grouping controls are visible.
+        Output: no return value. The header and the body match open_.
+        Uses: restoring the saved Grouping section.
+        Limitations: the signal is blocked, so restoring does not emit a second change. The burst gap is left as it is.
+        """
+        self._grouping_toggle.blockSignals(True)
+        self._grouping_toggle.setChecked(bool(open_))
+        self._grouping_toggle.blockSignals(False)
+        self._apply_section(self._grouping_toggle, self._grouping_body, bool(open_))
+
+    def set_scoring_open(self, open_: bool) -> None:
+        """
+        Open or close Scoring without treating it as a user click.
+
+        Inputs: open_, whether the Scoring controls are visible.
+        Output: no return value. The header and the body match open_.
+        Uses: restoring the saved Scoring section.
+        Limitations: the signal is blocked, so restoring does not emit a second change. The sliders are left as they are.
+        """
+        self._scoring_toggle.blockSignals(True)
+        self._scoring_toggle.setChecked(bool(open_))
+        self._scoring_toggle.blockSignals(False)
+        self._apply_section(self._scoring_toggle, self._scoring_body, bool(open_))
 
     def set_minimum_score_enabled(self, checked: bool) -> None:
         """

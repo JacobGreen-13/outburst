@@ -39,6 +39,30 @@ QLabel#subtitle, QLabel#folderLabel, QLabel#hint, QLabel#fieldLabel {
 QLabel#folderLabel {
     padding-right: 8px;
 }
+QLabel#folderLabel[open="true"] {
+    color: #d7d7d7;
+}
+QLabel#folderLabel[open="true"]:hover {
+    color: #ffffff;
+    text-decoration: underline;
+}
+QToolButton#sectionToggle {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: #cfcfcf;
+    font-weight: 600;
+    padding: 2px 4px;
+    text-align: left;
+}
+QToolButton#sectionToggle:hover {
+    background: #2a2a2a;
+}
+QWidget#sectionBody {
+    background: #1c1c1c;
+    border: 1px solid #333333;
+    border-radius: 8px;
+}
 QWidget#sidePanel {
     background: transparent;
 }
