@@ -453,7 +453,7 @@ class ImageViewer(QFrame):
             button.setToolTip(f"Set {number} star{'s' if number != 1 else ''}. Press again to clear. Keyboard: {number}")
             button.clicked.connect(lambda _checked=False, value=number: self.star_clicked.emit(value))
             self.star_buttons.append(button)
-        self.keeper_button = QPushButton("Mark as keeper")
+        self.keeper_button = QPushButton("Keep · A")
         self.keeper_button.setObjectName("keeperButton")
         self.keeper_button.setCheckable(True)
         self.keeper_button.setToolTip(
@@ -461,11 +461,12 @@ class ImageViewer(QFrame):
             "sidecar beside each one. Press again to clear it. Keyboard: A"
         )
         self.keeper_button.clicked.connect(lambda _checked=False: self.keeper_clicked.emit())
-        self.reject_button = QPushButton("Reject")
+        self.reject_button = QPushButton("Reject · X")
         self.reject_button.setObjectName("rejectButton")
         self.reject_button.setCheckable(True)
         self.reject_button.setToolTip(
-            "Flag this frame as a reject. A star rating on this frame is still written to a sidecar. Keyboard: X"
+            "Flag this frame as a reject. The photograph stays where it is, and Save keepers skips it. "
+            "A star rating on this frame is still written to a sidecar. Keyboard: X"
         )
         self.reject_button.clicked.connect(lambda _checked=False: self.reject_clicked.emit())
         marks = QHBoxLayout()
@@ -797,8 +798,8 @@ class ImageViewer(QFrame):
         self.reject_button.blockSignals(True)
         self.keeper_button.setChecked(keeper)
         self.reject_button.setChecked(rejected)
-        self.keeper_button.setText("Marked keeper" if keeper else "Mark as keeper")
-        self.reject_button.setText("Rejected" if rejected else "Reject")
+        self.keeper_button.setText("Keep · A")
+        self.reject_button.setText("Reject · X")
         self.keeper_button.setEnabled(enabled)
         self.reject_button.setEnabled(enabled)
         filled = 0 if stars is None else stars
