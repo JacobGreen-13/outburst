@@ -175,14 +175,14 @@ def test_recommended_frame_starts_marked_and_save_uses_that_mark(qt_app, tmp_pat
     assert window._decisions[written["second_sharp"]] == "keep"
     assert window._origins[written["second_sharp"]] == "auto"
     assert window.viewer.keeper_button.isChecked()
-    assert window.viewer.keeper_button.text() == "Marked keeper"
+    assert window.viewer.keeper_button.text() == "Keep · A"
     assert "KEEPER" in window.viewer.info.text()
 
     window.viewer.keeper_button.click()
     qt_app.processEvents()
     assert written["sharp"] not in window._decisions
     assert window.viewer.keeper_button.isChecked() is False
-    assert window.viewer.keeper_button.text() == "Mark as keeper"
+    assert window.viewer.keeper_button.text() == "Keep · A"
     saved = [choice.path for choice in choose_keepers(library.bursts, window._by_path, window._decisions)]
     assert written["sharp"] not in saved
     assert written["second_sharp"] in saved
@@ -974,6 +974,8 @@ def test_minimum_score_hides_weaker_frames_and_keeps_marks(qt_app, tmp_path: Pat
     window.controls._score_filter.setChecked(True)
     qt_app.processEvents()
     assert window.controls.score_floor() == 50
+    assert window.controls._score_effect.text() == "1 of 5 showing"
+    assert window.controls._score_effect.isHidden() is False
     assert window.burst_list.count() == 1
     assert "1 of 3 frames" in window.burst_list.item(0).text()
     assert [card.index for card in window.filmstrip._cards] == [0]
@@ -985,14 +987,104 @@ def test_minimum_score_hides_weaker_frames_and_keeps_marks(qt_app, tmp_path: Pat
 
     window.controls._score_minimum.setValue(90)
     qt_app.processEvents()
+    assert window.controls._score_effect.text() == "0 of 5 showing"
     assert window.burst_list.count() == 0
     assert "Minimum score" in window.viewer.preview.text()
 
     window.controls._score_filter.setChecked(False)
     qt_app.processEvents()
+    assert window.controls._score_effect.isHidden() is True
     assert window.burst_list.count() == 2
     assert len(window.filmstrip._cards) == 3
     window.close()
+    qt_app.processEvents()
+
+
+def test_review_controls_keep_their_labels_and_sections(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import datetime
+
+    from PySide6.QtCore import Qt, QUrl
+    from PySide6.QtGui import QDesktopServices
+    from PySide6.QtTest import QTest
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.models import Burst, Frame, FrameAnalysis, Library, Metrics, Weights
+
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.resize(1100, 760)
+    window.show()
+    qt_app.processEvents()
+    assert window.controls.grouping_open() is False
+    assert window.controls.scoring_open() is True
+    assert window.controls._grouping_body.isHidden() is True
+    assert window.controls._scoring_body.isHidden() is False
+    window.controls._grouping_toggle.click()
+    window.controls._scoring_toggle.click()
+    qt_app.processEvents()
+    assert window.controls.grouping_open() is True
+    assert window.controls._grouping_body.isHidden() is False
+    assert window.controls.scoring_open() is False
+    window.close()
+    qt_app.processEvents()
+
+    restored = MainWindow(cache_dir=tmp_path / "cache")
+    assert restored.controls.grouping_open() is True
+    assert restored.controls.scoring_open() is False
+    restored.close()
+    qt_app.processEvents()
+
+    when = datetime(2024, 6, 1, 12, 0, 0)
+    folder = tmp_path / "photos"
+    folder.mkdir()
+
+    def frame(name: str, score: float) -> tuple[Frame, FrameAnalysis]:
+        path = folder / name
+        item = Frame(path, "jpeg", when, "exif", None, 1, 1)
+        analysis = FrameAnalysis(item, Metrics(1, 1, 1, 0.5, 0.0, 0.0), score, None, None, None)
+        return item, analysis
+
+    first, first_analysis = frame("a.jpg", 0.80)
+    second, second_analysis = frame("b.jpg", 0.40)
+    library = Library(
+        folder,
+        (first_analysis, second_analysis),
+        (Burst("burst-001", (first, second)),),
+        (),
+        1.0,
+        Weights(),
+    )
+    review = MainWindow(cache_dir=tmp_path / "cache")
+    review.resize(1100, 760)
+    review.show()
+    review.present(library)
+    qt_app.processEvents()
+    assert review.viewer.keeper_button.text() == "Keep · A"
+    assert review.viewer.keeper_button.isChecked()
+    assert review.viewer.reject_button.text() == "Reject · X"
+    tip = review.viewer.reject_button.toolTip()
+    assert "stays where it is" in tip
+    assert "Save keepers skips it" in tip
+    assert review.folder_label.toolTip() == "Open this folder"
+    opened: list[str] = []
+
+    def remember(url: QUrl) -> bool:
+        opened.append(url.toLocalFile())
+        return True
+
+    monkeypatch.setattr(QDesktopServices, "openUrl", remember)
+    QTest.mouseClick(review.folder_label, Qt.MouseButton.LeftButton)
+    qt_app.processEvents()
+    assert opened == [str(folder)]
+    selected = [card for card in review.filmstrip._cards if card._selected]
+    others = [card for card in review.filmstrip._cards if not card._selected]
+    assert len(selected) == 1
+    assert others
+    assert "font-size: 18px" in selected[0].score.styleSheet()
+    assert "font-size: 13px" in others[0].score.styleSheet()
+    review.close()
     qt_app.processEvents()
 
 

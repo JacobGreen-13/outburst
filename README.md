@@ -16,7 +16,7 @@ Press **C** to put the current frame beside another one. It starts beside the be
 
 - Open a folder of RAW bursts, or JPEGs when that is what the camera wrote.
 - Review bursts in the list and frames in the filmstrip. **Minimum** (default 2 frames) hides shorter bursts from the list and from Save. **Minimum score** hides frames under the number you set. A mark on a frame hidden that way stays, and Save still writes it.
-- The recommended frame starts as a keeper: a green **KEEPER** stamp and **Marked keeper** pressed.
+- The recommended frame starts as a keeper: a green **KEEPER** stamp and **Keep** pressed.
 - Change keepers with that button or the keyboard. Marks are remembered on this computer.
 - Save marked keepers as copies or hard links, write XMP sidecars, or save a JSON and CSV manifest.
 
@@ -80,7 +80,7 @@ If the window fails to open because `libEGL.so.1` is missing, install `libegl1` 
 
 The first visit reads each file. Later visits are faster, because measurements and thumbnails stay in a cache on this computer. **Rescan** drops that cache for the open folder and reads it again. The list, preview, and filmstrip stay empty until scoring finishes. Keeper marks stay. **Clear cache** in the View menu forgets every folder.
 
-The left side is **Bursts**, **Grouping**, and **Scoring**. The open folder sits on the right of the toolbar. Under the preview, stars set the rating, and **Mark as keeper** and **Reject** set the pick and reject flags. The filmstrip shows the burst, scored 0 to 100. **Time** follows the shutter. **Score** puts the highest score on the left, with ties left in shooting order. Arrow keys, Home, and End follow the order on screen. **CLIP** is a badly blown or crushed exposure. **SOFT** is well behind the best frame in that burst.
+The left side is **Bursts**, **Grouping**, and **Scoring**. Grouping starts collapsed and Scoring starts open, and that choice is remembered. The open folder sits on the right of the toolbar. Click the path to open that folder. **Rescan** is still the toolbar action. Under the preview, stars set the rating, and **Keep** and **Reject** set the pick and reject flags. The buttons stay labeled **Keep · A** and **Reject · X**. Green or red fill shows which one is on. Reject only flags the frame: the photograph stays where it is, and Save keepers skips it. A star rating on a rejected frame is still written to a sidecar. The filmstrip shows the burst, scored 0 to 100. The selected card's score is larger. **Time** follows the shutter. **Score** puts the highest score on the left, with ties left in shooting order. Arrow keys, Home, and End follow the order on screen. **CLIP** is a badly blown or crushed exposure. **SOFT** is well behind the best frame in that burst. While **Minimum score** is on, the control shows how many frames are still on screen, such as “1 of 5 showing.”
 
 **Burst gap** is how close two frames must be to stay together. The default is 1.0 second. A gap of exactly 1.0 second starts a new burst. Moving it regroups immediately. Keepers you marked stay. Outburst clears its own pick and marks the best frame of each burst.
 
@@ -108,8 +108,8 @@ These work unless a slider or the burst-gap box is focused. Arrow keys then adju
 | F | Focus peaking |
 | 1–5 | Set that star rating. Press the same number again to clear it |
 | 0 | Clear the star rating |
-| A | Pick. Same as **Mark as keeper**. Press again to clear |
-| X | Reject. Press again to clear |
+| A | Keep the current frame. Press again to clear |
+| X | Reject this frame. The file stays put, and Save keepers skips it. Press again to clear |
 | R | Reject the burst. Press again to clear |
 | G | Reject obvious misses. Press again to restore them |
 | Ctrl+O | Open a folder |

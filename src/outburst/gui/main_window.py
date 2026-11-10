@@ -82,7 +82,7 @@ _WELCOME = (
     "Open a folder of RAW bursts to start culling.\n\n"
     "Outburst groups frames shot close together, scores sharpness and exposure "
     "from embedded previews, and marks the recommended frame as a keeper.\n\n"
-    "Use Mark as keeper under the preview to choose what Save keepers writes. "
+    "Use Keep under the preview to choose what Save keepers writes. "
     "Original files stay untouched."
 )
 
@@ -298,13 +298,20 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
         """
-        Handle review shortcuts before the focused widget sees the key.
+        Handle review shortcuts, and open the folder when its path is clicked.
 
         Inputs: watched, the object that received the event; event, the Qt event.
-        Output: True when a review shortcut was handled. Otherwise the base filter's result.
-        Uses: keyboard review while the window is open.
-        Limitations: keys are ignored while a spin box, slider, line edit, or combo box is focused. Only a KeyPress whose target is the focus widget is considered.
+        Output: True when a review shortcut or a folder-path click was handled. Otherwise the base filter's result.
+        Uses: keyboard review and the toolbar folder path.
+        Limitations: keys are ignored while a spin box, slider, line edit, or combo box is focused. Only a KeyPress whose target is the focus widget is considered. A click opens the folder only when one is open.
         """
+        if (
+            watched is self.folder_label
+            and event.type() == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._open_current_folder()
+            return True
         if event.type() == QEvent.Type.KeyPress and watched is QApplication.focusWidget():
             if not _typing_target(watched) and self._handle_key(event.key()):
                 return True
@@ -532,6 +539,8 @@ class MainWindow(QMainWindow):
         self.folder_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.folder_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.folder_label.setMinimumWidth(180)
+        self.folder_label.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.folder_label.setCursor(Qt.CursorShape.ArrowCursor)
         style = self.style()
         open_icon = style.standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon)
         refresh_icon = style.standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
@@ -1426,6 +1435,30 @@ class MainWindow(QMainWindow):
             return
         self._show_burst(row, prefer_path=None)
 
+    def _update_score_effect(self) -> None:
+        """
+        Show how many frames Minimum score is leaving on screen.
+
+        Inputs: none.
+        Output: no return value. The Scoring row reads "N of M showing" while the filter is on. The line is hidden when the filter is off or no library is open.
+        Uses: the Minimum score control after the burst list is rebuilt.
+        Limitations: M counts frames in bursts that meet Minimum frames. N counts the ones still on a filmstrip. Short bursts are left out of both numbers. The line does not change marks or Save keepers.
+        """
+        library = self._library
+        floor = self.controls.score_floor()
+        if library is None or floor is None:
+            self.controls.set_score_effect(None, None)
+            return
+        minimum = self.controls.minimum_frames()
+        eligible = 0
+        showing = 0
+        for burst in library.bursts:
+            if burst.count < minimum:
+                continue
+            eligible += burst.count
+            showing += len(visible_frame_indexes(burst.frames, self._by_path, minimum_score=floor))
+        self.controls.set_score_effect(showing, eligible)
+
     def _refresh_burst_list(self, prefer_path: Path | None) -> None:
         """
         Rebuild the burst list from the visible bursts.
@@ -1438,6 +1471,7 @@ class MainWindow(QMainWindow):
         if self._review_suspended:
             return
         library = self._library
+        self._update_score_effect()
         self.burst_list.blockSignals(True)
         self.burst_list.clear()
         if library is None:
@@ -2211,6 +2245,19 @@ class MainWindow(QMainWindow):
         """
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._cache_dir)))
 
+    def _open_current_folder(self) -> None:
+        """
+        Open the folder under review in the system file browser.
+
+        Inputs: none.
+        Output: no return value. The desktop service is asked to open the folder. Nothing happens when no folder is open.
+        Uses: a click on the toolbar folder path.
+        Limitations: this asks the operating system to open the path. Rescan stays on the toolbar and is not started by the click.
+        """
+        if self._folder is None:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._folder)))
+
     def _clear_cache(self) -> None:
         """
         Delete cached measurements and previews after confirmation, then rescan an open folder.
@@ -2569,16 +2616,23 @@ class MainWindow(QMainWindow):
         Show the open folder path on the toolbar.
 
         Inputs: none.
-        Output: no return value. The label and its tooltip show the folder path, or the text "No folder open" with an empty tooltip.
+        Output: no return value. The label shows the folder path and a hand cursor, or the text "No folder open".
         Uses: the toolbar folder label.
-        Limitations: a missing folder clears both the text and the tooltip.
+        Limitations: a missing folder clears the tooltip and uses an arrow cursor. The click opens the folder and does not rescan it.
         """
         if self._folder is None:
             self.folder_label.setText("No folder open")
             self.folder_label.setToolTip("")
-            return
-        self.folder_label.setText(str(self._folder))
-        self.folder_label.setToolTip(str(self._folder))
+            self.folder_label.setCursor(Qt.CursorShape.ArrowCursor)
+            self.folder_label.setProperty("open", "false")
+        else:
+            self.folder_label.setText(str(self._folder))
+            self.folder_label.setToolTip("Open this folder")
+            self.folder_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.folder_label.setProperty("open", "true")
+        style = self.folder_label.style()
+        style.unpolish(self.folder_label)
+        style.polish(self.folder_label)
 
     def _suspend_review(self) -> None:
         """
@@ -2595,6 +2649,7 @@ class MainWindow(QMainWindow):
         self.burst_list.blockSignals(False)
         self.filmstrip.set_cards([])
         self.viewer.set_placeholder(_SCANNING_PREVIEW)
+        self.controls.set_score_effect(None, None)
 
     def _resume_review(self) -> None:
         """
@@ -2755,7 +2810,7 @@ class MainWindow(QMainWindow):
         Restore the controls and the last folder from saved settings.
 
         Inputs: none.
-        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, the Info panel, filmstrip order, and model id are applied. A saved folder becomes the next dialog start.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, the Info panel, filmstrip order, Grouping, Scoring, and model id are applied. A saved folder becomes the next dialog start.
         Uses: opening the review window.
         Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise.
         """
@@ -2772,6 +2827,8 @@ class MainWindow(QMainWindow):
         self.controls.set_show_subject_box(_as_bool(settings.value("show_subject_box"), True))
         self.controls.set_show_eye_circle(_as_bool(settings.value("show_eye_circle"), True))
         self.viewer.set_info_open(_as_bool(settings.value("show_frame_detail"), False))
+        self.controls.set_grouping_open(_as_bool(settings.value("grouping_open"), False))
+        self.controls.set_scoring_open(_as_bool(settings.value("scoring_open"), True))
         self._set_filmstrip_sort(str(settings.value("filmstrip_sort", "time") or "time"))
         folder = settings.value("last_folder", "")
         if folder:
@@ -2784,7 +2841,7 @@ class MainWindow(QMainWindow):
         Store the controls and the open folder for the next launch.
 
         Inputs: none.
-        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, the Info panel, filmstrip order, and model id are written.
+        Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, the Info panel, filmstrip order, Grouping, Scoring, and model id are written.
         Uses: closing the review window.
         Limitations: the folder is saved only when one is open. The resolved model path is saved only when one is stored.
         """
@@ -2801,6 +2858,8 @@ class MainWindow(QMainWindow):
         settings.setValue("show_subject_box", self.controls.show_subject_box())
         settings.setValue("show_eye_circle", self.controls.show_eye_circle())
         settings.setValue("show_frame_detail", self.viewer.info_open())
+        settings.setValue("grouping_open", self.controls.grouping_open())
+        settings.setValue("scoring_open", self.controls.scoring_open())
         settings.setValue("filmstrip_sort", self._filmstrip_sort)
         settings.setValue("subject_model_id", self.controls.model_id())
         if self._folder is not None:
