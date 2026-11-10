@@ -1,6 +1,6 @@
 """Launch the Outburst review window.
 
-``main`` parses an optional folder and ``--version``. ``_run_gui`` applies the theme, shows ``MainWindow``, and opens that folder when one was given. A missing PySide6 install returns status 1.
+``main`` parses an optional folder and ``--version``. ``_run_gui`` applies the theme, shows ``MainWindow``, and opens that folder when one was given. A missing PySide6 install returns status 1. Running this file directly, which is how the Windows installer starts, calls ``main``.
 """
 
 from __future__ import annotations
@@ -72,3 +72,7 @@ def _run_gui(folder: Path | None) -> int:
     if folder is not None:
         window.open_path(folder)
     return int(app.exec())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -18,7 +19,7 @@ def configure_logging(cache_dir: Path | None = None) -> None:
     Inputs: an optional cache directory for outburst.log.
     Output: none.
     Uses: desktop startup before the window opens.
-    Limitations: a second call does nothing, and a file that cannot be opened is logged to stderr only.
+    Limitations: a second call does nothing. A windowed build has no stderr stream, so records go to the log file only. A file that cannot be opened is logged to stderr when that stream exists.
     """
 
     global _configured
@@ -27,9 +28,10 @@ def configure_logging(cache_dir: Path | None = None) -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    stream = logging.StreamHandler()
-    stream.setFormatter(formatter)
-    root.addHandler(stream)
+    if sys.stderr is not None:
+        stream = logging.StreamHandler()
+        stream.setFormatter(formatter)
+        root.addHandler(stream)
     if cache_dir is not None:
         try:
             cache_dir.mkdir(parents=True, exist_ok=True)

@@ -73,6 +73,7 @@ from outburst.subject import (
     model_path,
     models_dir,
     option_by_id,
+    subject_runtime_can_install,
     subject_runtime_ready,
 )
 
@@ -696,11 +697,12 @@ class MainWindow(QMainWindow):
         Inputs: none. The folder, recursion, gap, weights, cache, subject model, and bird eye detection are read from the window.
         Output: no return value. The preview and filmstrip are cleared, the progress bar is shown, and the worker starts. A missing subject model or bird-eye model starts a download instead.
         Uses: opening and rescanning a folder.
-        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. The subject model is downloaded before the bird-eye model when both are missing. When Ultralytics is missing, that library is installed before either weights file.
+        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. The subject model is downloaded before the bird-eye model when both are missing. When Ultralytics is missing, that library is installed before either weights file. A frozen install without Ultralytics turns those features off and scans the whole frame.
         """
         if self._folder is None:
             return
         self._suspend_review()
+        self._refuse_subject_features()
         if self._needs_subject_runtime():
             self._begin_runtime_install(then_scan=True)
             return
@@ -893,6 +895,8 @@ class MainWindow(QMainWindow):
             self._download_then_scan = False
             self._apply_weights()
             return
+        if self._refuse_subject_features():
+            return
         if self._needs_subject_runtime():
             self._begin_runtime_install(then_scan=self._folder is not None)
             return
@@ -913,6 +917,8 @@ class MainWindow(QMainWindow):
         """
         if not self.controls.prefer_subject():
             self.controls.set_subject_checked(True)
+        if self._refuse_subject_features():
+            return
         if self._folder is None:
             if not self._model_ready():
                 self._begin_download(then_scan=False)
@@ -954,6 +960,41 @@ class MainWindow(QMainWindow):
             return True
         self._eye_model_path = None
         return False
+
+    def _packaged_without_subject_runtime(self) -> bool:
+        """
+        Report whether this build has no way to add subject or bird-eye detection.
+
+        Inputs: none.
+        Output: True when the process is a frozen installer and Ultralytics does not import.
+        Uses: restoring settings and the subject and bird-eye checkboxes.
+        Limitations: a frozen build that already has Ultralytics returns False, so those features stay available.
+        """
+        return not subject_runtime_can_install() and not subject_runtime_ready()
+
+    def _refuse_subject_features(self) -> bool:
+        """
+        Turn subject and bird-eye detection off when this install cannot add them.
+
+        Inputs: none. The subject and bird-eye checkboxes are read.
+        Output: True when a requested feature was turned off. False when this build can install Ultralytics, Ultralytics is already present, or both checkboxes are already off.
+        Uses: the subject checkbox, the model combo, the bird-eye checkbox, and the start of a scan.
+        Limitations: the checkboxes change without emitting their own scan. The notice is logged, and a message box opens only when the process is not headless.
+        """
+        if not self._packaged_without_subject_runtime():
+            return False
+        if not (self.controls.prefer_subject() or self.controls.eye_scoring()):
+            return False
+        self.controls.set_eye_scoring(False)
+        self.controls.set_subject_checked(False)
+        self.statusBar().showMessage("Subject and bird eye detection are not in this install.")
+        self._notify(
+            "Subject detection",
+            "This install scores the whole frame. "
+            "Subject-aware sharpness and bird eye detection are not included.",
+            "info",
+        )
+        return True
 
     def _needs_subject_runtime(self) -> bool:
         """
@@ -2362,6 +2403,10 @@ class MainWindow(QMainWindow):
             if self._folder is not None:
                 self.rescan()
             return
+        if self._refuse_subject_features():
+            if self._folder is not None:
+                self.rescan()
+            return
         if self._needs_subject_runtime():
             self._begin_runtime_install(then_scan=self._folder is not None)
             return
@@ -2812,7 +2857,7 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, the Info panel, filmstrip order, Grouping, Scoring, and model id are applied. A saved folder becomes the next dialog start.
         Uses: opening the review window.
-        Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise.
+        Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise. A frozen install without Ultralytics restores subject and bird-eye detection as off.
         """
         settings = QSettings("Outburst", "Outburst")
         self.controls.set_threshold(_as_float(settings.value("threshold"), 1.0))
@@ -2834,6 +2879,9 @@ class MainWindow(QMainWindow):
         if folder:
             self._dialog_start = Path(str(folder))
         self.controls.set_model_id(_saved_model_id(settings))
+        if self._packaged_without_subject_runtime():
+            self.controls.set_subject_checked(False)
+            self.controls.set_eye_scoring(False)
         self._model_ready()
 
     def _save_settings(self) -> None:

@@ -32,6 +32,18 @@ You need Python 3.11 or newer. Outburst runs on macOS (including Apple Silicon),
 
 The first run creates `.venv`, installs the libraries (including subject and bird-eye detection), and opens the window. That first install downloads PyTorch and can take several minutes. Later runs open the window. An older environment installs the extra the next time you start the launcher, or the first time you turn either feature on.
 
+### Windows 11 installer
+
+Windows 11 can install Outburst without Python or this source tree. On a Windows machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
+```
+
+The setup program is `dist\installer\Outburst-Setup-0.1.0.exe`. It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. Subject detection and bird eye detection are not in this installer. The setup program is unsigned, so Windows SmartScreen asks for confirmation the first time.
+
+GitHub Actions builds the same installer with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
+
 ```bash
 ./outburst.sh examples/sample_burst
 ```

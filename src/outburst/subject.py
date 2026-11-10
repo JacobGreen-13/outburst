@@ -7,7 +7,7 @@ subject scoring needs it. Loading a detector never fetches weights by itself.
 If detection is unavailable or finds no animal, scoring falls back to the
 full frame.
 
-``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics imports. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
+``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics imports. ``subject_runtime_can_install`` reports whether this process can pip-install that library. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
 """
 
 from __future__ import annotations
@@ -396,6 +396,20 @@ def subject_runtime_ready() -> bool:
     return True
 
 
+def subject_runtime_can_install() -> bool:
+    """Report whether this process can pip-install Ultralytics into itself.
+
+    Inputs: none.
+    Output: False for a frozen installer build. True for a normal Python process.
+    Uses: the review window before it offers to install subject detection.
+    Limitations: this does not check that pip or a network connection is available. A frozen build that already imported Ultralytics still returns False here; callers also check ``subject_runtime_ready``.
+    """
+
+    import sys
+
+    return not bool(getattr(sys, "frozen", False))
+
+
 def subject_runtime_install_command() -> list[str]:
     """
     Build the pip command that installs Ultralytics into this interpreter.
@@ -418,11 +432,16 @@ def install_subject_runtime(should_cancel: Callable[[], bool] | None = None) -> 
     Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when pip exits with an error.
     Uses: the review window the first time subject or bird eye detection is turned on without Ultralytics.
-    Limitations: this downloads PyTorch and can take several minutes. It does not download model weights. The caller should stay off the window thread.
+    Limitations: a frozen installer build raises RuntimeError and does not start pip. A normal install downloads PyTorch and can take several minutes. It does not download model weights. The caller should stay off the window thread.
     """
 
     import subprocess
 
+    if not subject_runtime_can_install():
+        raise RuntimeError(
+            "This install scores the whole frame. "
+            "Subject-aware sharpness and bird eye detection are not included."
+        )
     process = subprocess.Popen(
         subject_runtime_install_command(),
         stdout=subprocess.PIPE,

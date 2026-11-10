@@ -18,5 +18,6 @@ htmlcov/
 Thumbs.db
 outburst_cache/
 *.spec
+!packaging/windows/outburst.spec
 models/*.pt
 models/*.pt.part
