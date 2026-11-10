@@ -1,6 +1,6 @@
 """The one-click launcher finds Python and does not install during a dry run.
 
-``_run`` invokes ``outburst.sh``. The tests check script syntax, help, a dry run that selects Python 3.11 or newer, the subject extra, and rejection of an older Python.
+``_run`` invokes ``outburst.sh``. The tests check script syntax, help, a dry run that selects Python 3.11 or newer, a core install without the subject extra, and rejection of an older Python.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def test_launcher_dry_run_selects_python() -> None:
     result = _run(["bash", "outburst.sh"], {"OUTBURST_DRY_RUN": "1"})
     assert result.returncode == 0, result.stderr
     values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-    assert values["extras"] == "[subject]"
+    assert values["extras"] == ""
     assert values["folder"] == ""
     version = subprocess.run(
         [values["python"], "-c", "import sys; print(sys.version_info >= (3, 11))"],
@@ -61,7 +61,8 @@ def test_launcher_dry_run_accepts_subject_and_folder() -> None:
         {"OUTBURST_DRY_RUN": "1"},
     )
     assert result.returncode == 0, result.stderr
-    assert "extras=[subject]" in result.stdout
+    assert "extras=" in result.stdout
+    assert "extras=[subject]" not in result.stdout
     assert "folder=examples/sample_burst" in result.stdout
 
 

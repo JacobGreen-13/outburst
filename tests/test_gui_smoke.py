@@ -440,15 +440,186 @@ def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monke
     window.close()
 
 
+def test_detection_controls_stay_hidden_until_the_modules_are_installed(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.show()
+    qt_app.processEvents()
+    assert window.controls._install_detection.isVisible()
+    assert window.controls.detection_installed() is False
+    assert window.controls._subject.isVisible() is False
+    assert window.controls._eye.isVisible() is False
+    assert window.controls._model.isVisible() is False
+    window.controls.set_detection_installed(True)
+    qt_app.processEvents()
+    assert window.controls._install_detection.isVisible() is False
+    assert window.controls._subject.isVisible()
+    assert window.controls._eye.isVisible()
+    assert window.controls._model.isVisible()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_incompatible_hardware_skips_the_license_and_the_install(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.subject import HardwareSupport
+
+    asked: list[str] = []
+
+    def remember(parent: object, title: str, text: str, level: str = "info") -> None:
+        del level
+        parent.last_notice = (title, text)  # type: ignore[attr-defined]
+
+    monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
+    monkeypatch.setattr("outburst.gui.main_window.notify", remember)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    monkeypatch.setattr(
+        "outburst.gui.main_window.subject_hardware_support",
+        lambda **_kwargs: HardwareSupport(
+            False,
+            "This Mac uses an Intel processor. Outburst will not install that software or download the models.",
+        ),
+    )
+    monkeypatch.setattr(
+        "outburst.gui.main_window.internet_connection",
+        lambda *_args, **_kwargs: asked.append("internet"),
+    )
+    monkeypatch.setattr(
+        "outburst.gui.main_window.accept_subject_license",
+        lambda _parent: asked.append("license") or False,
+    )
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.controls._install_detection.click()
+    qt_app.processEvents()
+    assert asked == []
+    assert window.controls.prefer_subject() is False
+    assert window.controls.detection_installed() is False
+    assert window.last_notice is not None
+    assert "Intel processor" in window.last_notice[1]
+    assert "will not install" in window.last_notice[1]
+    assert "download the models" in window.last_notice[1]
+    window.close()
+    qt_app.processEvents()
+
+
+def test_an_offline_computer_does_not_install_or_download(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import RuntimeInstallWorker
+    from outburst.subject import HardwareSupport, OnlineStatus
+
+    asked: list[str] = []
+    installs: list[str] = []
+
+    def remember(parent: object, title: str, text: str, level: str = "info") -> None:
+        del level
+        parent.last_notice = (title, text)  # type: ignore[attr-defined]
+
+    monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
+    monkeypatch.setattr("outburst.gui.main_window.notify", remember)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    monkeypatch.setattr(
+        "outburst.gui.main_window.subject_hardware_support",
+        lambda **_kwargs: HardwareSupport(True, ""),
+    )
+    monkeypatch.setattr(
+        "outburst.gui.main_window.internet_connection",
+        lambda *_args, **_kwargs: OnlineStatus(False, "Outburst could not reach the internet. Models are not downloaded."),
+    )
+    monkeypatch.setattr(
+        "outburst.gui.main_window.accept_subject_license",
+        lambda _parent: asked.append("license") or False,
+    )
+    monkeypatch.setattr(RuntimeInstallWorker, "start", lambda *_args, **_kwargs: installs.append("runtime"))
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.controls._install_detection.click()
+    qt_app.processEvents()
+    assert asked == []
+    assert installs == []
+    assert window.controls.detection_installed() is False
+    assert window.controls._install_detection.isHidden() is False
+    assert window.last_notice is not None
+    assert "internet" in window.last_notice[1]
+    assert "not downloaded" in window.last_notice[1]
+    window.close()
+    qt_app.processEvents()
+
+
+def test_declining_the_license_does_not_install_or_download(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import ModelFetchWorker, RuntimeInstallWorker
+    from outburst.subject import HardwareSupport, OnlineStatus
+
+    downloads: list[str] = []
+    monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
+    monkeypatch.setattr(
+        "outburst.gui.main_window.subject_hardware_support",
+        lambda **_kwargs: HardwareSupport(True, ""),
+    )
+    monkeypatch.setattr(
+        "outburst.gui.main_window.internet_connection",
+        lambda *_args, **_kwargs: OnlineStatus(True, ""),
+    )
+    monkeypatch.setattr("outburst.gui.main_window.accept_subject_license", lambda _parent: False)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    monkeypatch.setattr(ModelFetchWorker, "start", lambda *_args, **_kwargs: downloads.append("model"))
+    monkeypatch.setattr(RuntimeInstallWorker, "start", lambda *_args, **_kwargs: downloads.append("runtime"))
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.controls._install_detection.click()
+    qt_app.processEvents()
+    assert downloads == []
+    assert window.controls.eye_scoring() is False
+    assert window.controls.detection_installed() is False
+    assert window.last_notice is not None
+    assert "did not install" in window.last_notice[1]
+    assert "download the models" in window.last_notice[1]
+    window.close()
+    qt_app.processEvents()
+
+
 def test_packaged_build_keeps_subject_detection_off(
     qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from PySide6.QtCore import QSettings
 
     from outburst.gui.main_window import MainWindow
+    from outburst.subject import HardwareSupport, OnlineStatus
 
+    asked: list[str] = []
+
+    def remember(parent: object, title: str, text: str, level: str = "info") -> None:
+        del level
+        parent.last_notice = (title, text)  # type: ignore[attr-defined]
+
+    monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
+    monkeypatch.setattr("outburst.gui.main_window.notify", remember)
     monkeypatch.setattr("outburst.gui.main_window.subject_runtime_can_install", lambda: False)
     monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    monkeypatch.setattr(
+        "outburst.gui.main_window.subject_hardware_support",
+        lambda **_kwargs: HardwareSupport(True, ""),
+    )
+    monkeypatch.setattr(
+        "outburst.gui.main_window.internet_connection",
+        lambda *_args, **_kwargs: OnlineStatus(True, ""),
+    )
+    monkeypatch.setattr(
+        "outburst.gui.main_window.accept_subject_license",
+        lambda _parent: asked.append("license") or False,
+    )
     _isolate_settings(tmp_path / "settings")
     saved = QSettings("Outburst", "Outburst")
     saved.setValue("prefer_subject", True)
@@ -457,46 +628,85 @@ def test_packaged_build_keeps_subject_detection_off(
     window = MainWindow(cache_dir=tmp_path / "cache")
     assert window.controls.prefer_subject() is False
     assert window.controls.eye_scoring() is False
+    assert window.controls.detection_installed() is False
     assert window.last_notice is None
-    window.controls._subject.setChecked(True)
+    window.controls._install_detection.click()
     qt_app.processEvents()
+    assert asked == []
     assert window.controls.prefer_subject() is False
+    assert window.controls.detection_installed() is False
     assert window.last_notice is not None
-    assert "not included" in window.last_notice[1]
+    assert "cannot add that software" in window.last_notice[1]
+    assert "download the models" in window.last_notice[1]
     assert "whole frame" in window.last_notice[1]
     window.close()
     qt_app.processEvents()
 
 
-def test_a_missing_subject_runtime_installs_before_the_scan(
+def test_a_missing_subject_runtime_installs_from_the_button(
     qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from PySide6.QtCore import QThread
 
     from outburst.gui.main_window import MainWindow
-    from outburst.gui.worker import AnalyzeWorker, RuntimeInstallWorker
+    from outburst.gui.worker import AnalyzeWorker, ModelFetchWorker, RuntimeInstallWorker
+    from outburst.subject import BIRD_EYE_OPTION, DEFAULT_MODEL_ID, HardwareSupport, OnlineStatus
 
+    ready = {"ok": False}
+    models = {"subject": False, "eye": False}
     monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
-    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: ready["ok"])
+    monkeypatch.setattr(
+        "outburst.gui.main_window.subject_hardware_support",
+        lambda **_kwargs: HardwareSupport(True, ""),
+    )
+    monkeypatch.setattr(
+        "outburst.gui.main_window.internet_connection",
+        lambda *_args, **_kwargs: OnlineStatus(True, ""),
+    )
+    monkeypatch.setattr("outburst.gui.main_window.accept_subject_license", lambda _parent: True)
+    monkeypatch.setattr(MainWindow, "_model_ready", lambda _self: models["subject"])
+    monkeypatch.setattr(MainWindow, "_bird_eye_ready", lambda _self: models["eye"])
     installs: list[str] = []
+    downloads: list[str] = []
     scans: list[str] = []
 
     class Spy(RuntimeInstallWorker):
         def start(self, priority: QThread.Priority = QThread.Priority.InheritPriority) -> None:
             installs.append("runtime")
 
+    class FetchSpy(ModelFetchWorker):
+        def start(self, priority: QThread.Priority = QThread.Priority.InheritPriority) -> None:
+            downloads.append(window._download_model_id or "")
+
     monkeypatch.setattr("outburst.gui.main_window.RuntimeInstallWorker", Spy)
+    monkeypatch.setattr("outburst.gui.main_window.ModelFetchWorker", FetchSpy)
     monkeypatch.setattr(AnalyzeWorker, "start", lambda *_args, **_kwargs: scans.append("scan"))
     _isolate_settings(tmp_path / "settings")
     window = MainWindow(cache_dir=tmp_path / "cache")
     window._folder = tmp_path / "photos"
-    window.controls.set_eye_scoring(True)
-    window.controls.set_subject_checked(True)
-    window._start_worker()
+    window.controls._install_detection.click()
     qt_app.processEvents()
     assert installs == ["runtime"]
+    assert downloads == []
     assert scans == []
     assert "PyTorch" in window.statusBar().currentMessage()
+    ready["ok"] = True
+    window._on_runtime_installed()
+    assert downloads == [DEFAULT_MODEL_ID]
+    assert window.controls.prefer_subject() is False
+    assert window.controls.eye_scoring() is False
+    assert window.controls.detection_installed() is True
+    models["subject"] = True
+    window._on_download_succeeded(str(tmp_path / "yolo11n.pt"))
+    assert downloads == [DEFAULT_MODEL_ID, BIRD_EYE_OPTION.id]
+    models["eye"] = True
+    window._on_download_succeeded(str(tmp_path / "eye_pose_v0.pt"))
+    assert scans == []
+    assert window.controls.prefer_subject() is False
+    assert window.controls.eye_scoring() is False
+    assert window.controls._install_detection.isHidden()
+    assert "are installed" in window.statusBar().currentMessage()
     window.close()
     qt_app.processEvents()
 

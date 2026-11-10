@@ -6,7 +6,6 @@ if /I "%~1"=="-h" goto :help
 if /I "%~1"=="--help" goto :help
 if /I "%~1"=="/?" goto :help
 
-set "EXTRAS=[subject]"
 rem "subject" remains accepted so an older shortcut still opens a folder.
 if /I "%~1"=="subject" (
   shift
@@ -35,7 +34,7 @@ exit /b 1
 :have_python
 if "%OUTBURST_DRY_RUN%"=="1" (
   echo python=!PYTHON!
-  echo extras=[subject]
+  echo extras=
   echo folder=!FOLDER!
   exit /b 0
 )
@@ -56,23 +55,19 @@ if errorlevel 1 (
 set "NEED_INSTALL=0"
 if not exist ".venv\Scripts\outburst.exe" set "NEED_INSTALL=1"
 if not exist ".venv\.outburst-stamp" set "NEED_INSTALL=1"
-if not exist ".venv\.outburst-subject" set "NEED_INSTALL=1"
 if exist ".venv\.outburst-stamp" (
   ".venv\Scripts\python.exe" -c "import sys; from pathlib import Path; stamp=Path(r'.venv/.outburst-stamp'); src=Path('pyproject.toml'); sys.exit(0 if stamp.stat().st_mtime >= src.stat().st_mtime else 1)"
   if errorlevel 1 set "NEED_INSTALL=1"
 )
-".venv\Scripts\python.exe" -c "import ultralytics" >nul 2>&1
-if errorlevel 1 set "NEED_INSTALL=1"
 
 if "!NEED_INSTALL!"=="1" (
-  echo Installing Outburst. Subject and bird eye detection are included.
-  echo This downloads PyTorch and can take several minutes.
+  echo Installing Outburst.
+  echo Subject and bird eye detection stay off until you install them in the window.
   ".venv\Scripts\python.exe" -m pip install --upgrade pip
   if errorlevel 1 goto :failed
-  ".venv\Scripts\python.exe" -m pip install -e ".!EXTRAS!"
+  ".venv\Scripts\python.exe" -m pip install -e .
   if errorlevel 1 goto :failed
   echo installed> ".venv\.outburst-stamp"
-  if not "!EXTRAS!"=="" echo subject> ".venv\.outburst-subject"
 )
 
 ".venv\Scripts\python.exe" -c "import PySide6" >nul 2>&1
@@ -104,8 +99,8 @@ echo        Outburst.bat subject [folder]
 echo.
 echo The first run creates .venv, installs Outburst, and opens the window.
 echo Later runs open the window. Subject detection and bird eye detection
-echo are included. The first run downloads PyTorch and can take several
-echo minutes. The subject argument is still accepted.
+echo stay off until you install them in the window.
+echo The subject argument is still accepted.
 exit /b 0
 
 :failed
