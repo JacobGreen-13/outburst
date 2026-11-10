@@ -1487,6 +1487,41 @@ def test_info_button_hides_the_lines_after_the_laplacian(qt_app, tmp_path: Path)
     qt_app.processEvents()
 
 
+def test_help_menu_links_to_the_models_and_their_licenses(qt_app, tmp_path: Path) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.subject import (
+        AGPL_LICENSE_URL,
+        BIRD_EYE_PROJECT_URL,
+        PYTORCH_LICENSE_URL,
+        ULTRALYTICS_LICENSE_URL,
+        ULTRALYTICS_SOURCE_URL,
+        YOLO_WEIGHTS_URL,
+    )
+
+    _isolate_settings(tmp_path / "settings")
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    help_menu = next(
+        action.menu()
+        for action in window.menuBar().actions()
+        if action.menu() is not None and action.text() == "Help"
+    )
+    links = {action.text(): action.data() for action in help_menu.actions() if action.data()}
+    assert links == {
+        "YOLO model weights": YOLO_WEIGHTS_URL,
+        "Ultralytics source": ULTRALYTICS_SOURCE_URL,
+        "Ultralytics license (AGPL-3.0)": ULTRALYTICS_LICENSE_URL,
+        "Bird eye model": BIRD_EYE_PROJECT_URL,
+        "AGPL-3.0 license": AGPL_LICENSE_URL,
+        "PyTorch license (BSD)": PYTORCH_LICENSE_URL,
+    }
+    yolo = next(action for action in help_menu.actions() if action.text() == "YOLO model weights")
+    yolo.trigger()
+    qt_app.processEvents()
+    assert window.last_notice == ("link", YOLO_WEIGHTS_URL)
+    window.close()
+    qt_app.processEvents()
+
+
 def test_version_flag() -> None:
     from outburst.main import main
 

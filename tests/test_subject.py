@@ -169,6 +169,30 @@ def test_internet_connection_reports_an_offline_computer(monkeypatch: pytest.Mon
     assert "not downloaded" in status.explanation
 
 
+def test_detection_pages_point_at_the_model_sources() -> None:
+    from outburst.subject import (
+        AGPL_LICENSE_URL,
+        BIRD_EYE_OPTION,
+        BIRD_EYE_PROJECT_URL,
+        MODEL_OPTIONS,
+        PYTORCH_LICENSE_URL,
+        ULTRALYTICS_LICENSE_URL,
+        ULTRALYTICS_SOURCE_URL,
+        YOLO_WEIGHTS_URL,
+    )
+
+    assert YOLO_WEIGHTS_URL == "https://github.com/ultralytics/assets/releases/tag/v8.3.0"
+    assert all(
+        option.url.startswith("https://github.com/ultralytics/assets/releases/download/v8.3.0/")
+        for option in MODEL_OPTIONS
+    )
+    assert BIRD_EYE_OPTION.url.startswith(BIRD_EYE_PROJECT_URL + "/")
+    assert ULTRALYTICS_SOURCE_URL == "https://github.com/ultralytics/ultralytics"
+    assert ULTRALYTICS_LICENSE_URL.endswith("/blob/main/LICENSE")
+    assert AGPL_LICENSE_URL == "https://www.gnu.org/licenses/agpl-3.0.html"
+    assert PYTORCH_LICENSE_URL == "https://github.com/pytorch/pytorch/blob/main/LICENSE"
+
+
 def test_subject_license_text_names_the_agpl_terms() -> None:
     from outburst.subject import SUBJECT_LICENSE_TEXT
 
