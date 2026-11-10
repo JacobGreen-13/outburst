@@ -40,7 +40,7 @@ Windows 11 can install Outburst without Python or this source tree. On a Windows
 powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
 ```
 
-The setup program is `dist\installer\Outburst-Setup-0.1.1.exe`. It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. **Install subject and bird eye detection** still checks the computer and the internet connection first. This Windows copy cannot add PyTorch to the application, so on a compatible PC with a network connection it explains that and does not download the models. The setup program is unsigned, so Windows SmartScreen asks for confirmation the first time.
+The setup program is `dist\installer\Outburst-Setup-0.1.2.exe`. It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. **Install subject and bird eye detection** checks the computer and the internet connection, then downloads a private Python and installs Ultralytics and PyTorch into it. The models download after that. Detection runs in that private Python, and the photographs stay on this computer. The setup program is unsigned, so Windows SmartScreen asks for confirmation the first time.
 
 GitHub Actions builds the same installer with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
 

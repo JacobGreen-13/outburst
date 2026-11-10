@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for the Windows folder build.
 
-The frozen app contains the core review window. Ultralytics, PyTorch, and the YOLO weights are excluded. ExifTool is copied next to Outburst.exe by packaging/windows/build.ps1 after this spec runs.
+The frozen app contains the core review window. Ultralytics, PyTorch, and the YOLO weights are excluded. The install button downloads a private Python and installs them there. The Outburst sources are shipped so that Python can run outburst.detect_worker. ExifTool is copied next to Outburst.exe by packaging/windows/build.ps1 after this spec runs.
 """
 
 import re
@@ -57,7 +57,7 @@ version_file.write_text(
     encoding="utf-8",
 )
 
-datas: list = []
+datas: list = [(str(root / "src" / "outburst"), "detection_src/outburst")]
 binaries: list = []
 hiddenimports = collect_submodules("outburst")
 for package in ("rawpy", "cv2"):

@@ -85,6 +85,7 @@ from outburst.subject import (
     subject_hardware_support,
     subject_runtime_can_install,
     subject_runtime_ready,
+    uses_private_python,
 )
 
 log = logging.getLogger(__name__)
@@ -967,9 +968,9 @@ class MainWindow(QMainWindow):
         Report whether this build has no way to add subject or bird-eye detection.
 
         Inputs: none.
-        Output: True when the process is a frozen installer and Ultralytics does not import.
-        Uses: restoring settings and the subject and bird-eye checkboxes.
-        Limitations: a frozen build that already has Ultralytics returns False, so those features stay available.
+        Output: True when this process cannot add Ultralytics and the private Python is not ready.
+        Uses: restoring settings and the install button.
+        Limitations: a packaged Windows app can add a private Python, so this returns False there. A frozen app on another system returns True until detection is already available.
         """
         return not subject_runtime_can_install() and not subject_runtime_ready()
 
@@ -1025,7 +1026,7 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: no return value. A compatible computer with a network connection asks for the license, then installs the modules and downloads the models.
         Uses: the Install subject and bird eye detection button.
-        Limitations: a headless process stays off. An incompatible computer, a missing network connection, a declined license, or a packaged build shows an explanation and does not install or download. The checkboxes stay off after a successful install.
+        Limitations: a headless process stays off. An incompatible computer, a missing network connection, a declined license, or a packaged app that cannot host a private Python shows an explanation and does not install or download. The checkboxes stay off after a successful install.
         """
 
         if self._downloading:
@@ -1045,7 +1046,7 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: True when the install can start. False when it must stay off.
         Uses: the install button.
-        Limitations: a headless process returns False without a dialog. The hardware check runs before the network check. The license is asked only after both succeed and this process can install or already has the modules. A packaged build without the modules explains that and does not download models.
+        Limitations: a headless process returns False without a dialog. The hardware check runs before the network check. The license is asked only after both succeed and this process can install or already has the modules. A packaged app that cannot host a private Python explains that and does not download models.
         """
 
         if os.environ.get("OUTBURST_HEADLESS") == "1":
@@ -1214,12 +1215,13 @@ class MainWindow(QMainWindow):
         if self.controls.prefer_subject():
             self.controls.set_subject_checked(False)
         self.statusBar().showMessage("Subject and bird eye detection stayed off.")
+        hint = ""
+        if not uses_private_python():
+            hint = "From the Outburst folder, run:\npip install \"outburst[subject]\"\n\n"
         self._notify(
             "Subject detection",
             "Subject and bird eye detection could not be installed.\n\n"
-            "From the Outburst folder, run:\n"
-            "pip install \"outburst[subject]\"\n\n"
-            f"{message}",
+            f"{hint}{message}",
             "warning",
         )
         if then_scan and self._folder is not None:
