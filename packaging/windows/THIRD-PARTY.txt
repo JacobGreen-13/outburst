@@ -1,0 +1,38 @@
+Outburst for Windows bundles these components. Each one stays a separate library or a separate program inside the install folder.
+
+Outburst
+  License: MIT
+  Copyright (c) 2026 Outburst contributors
+  The text is in Outburst-MIT.txt beside this file.
+
+PySide6 and Qt
+  License: GNU Lesser General Public License v3.0
+  https://www.gnu.org/licenses/lgpl-3.0.html
+  The Qt and PySide6 libraries are files in this install folder. You may replace those libraries with compatible builds. Qt source is published by The Qt Company.
+
+rawpy and LibRaw
+  rawpy license: MIT
+  LibRaw license: GNU Lesser General Public License v2.1 or the Common Development and Distribution License 1.0
+  https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+  https://opensource.org/license/cddl-1-0
+  LibRaw is the library rawpy uses to read RAW photographs. You may replace that library with a compatible build.
+
+OpenCV (opencv-python-headless)
+  License: Apache License 2.0
+  https://www.apache.org/licenses/LICENSE-2.0
+
+NumPy
+  License: BSD 3-Clause
+  https://github.com/numpy/numpy/blob/main/LICENSE.txt
+
+exifread
+  License: BSD
+  https://github.com/ianare/exif-py/blob/develop/LICENSE.txt
+
+ExifTool
+  Copyright (c) Phil Harvey
+  License: GNU General Public License v1.0 or later, or the Artistic License (Perl)
+  https://exiftool.org/
+  ExifTool is a separate program. This installer places exiftool.exe and the exiftool_files folder next to Outburst.exe. Outburst runs it to read capture times. Photographs are passed on the command line and are not uploaded.
+
+This installer does not include Ultralytics, PyTorch, or the YOLO weights.

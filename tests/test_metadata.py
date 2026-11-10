@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,8 @@ from outburst.metadata import (
     SOURCE_HEADER,
     _pack_tiff,
     build_exif_app1,
+    exiftool_available,
+    find_exiftool,
     inject_exif,
     read_capture_info,
     timestamp_reader_warning,
@@ -198,3 +201,24 @@ def test_reader_warning_without_exifread(monkeypatch) -> None:
     assert text is not None
     assert "built-in" in text
     assert "CR3" in text
+
+
+def test_find_exiftool_uses_the_copy_beside_a_frozen_app(monkeypatch, tmp_path: Path) -> None:
+    app = tmp_path / "Outburst.exe"
+    tool = tmp_path / "exiftool.exe"
+    app.write_bytes(b"")
+    tool.write_bytes(b"")
+    monkeypatch.delenv("OUTBURST_EXIFTOOL", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(app))
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/exiftool")
+    assert find_exiftool() == str(tool)
+    assert exiftool_available() is True
+
+
+def test_find_exiftool_honors_an_override(monkeypatch, tmp_path: Path) -> None:
+    tool = tmp_path / "custom-exiftool"
+    tool.write_bytes(b"")
+    monkeypatch.setenv("OUTBURST_EXIFTOOL", str(tool))
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    assert find_exiftool() == str(tool)
