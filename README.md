@@ -143,9 +143,9 @@ Scanning writes only into the cache:
 
 Delete that folder to measure everything again. `outburst.log` is kept there too.
 
-**Save** copies the frames you marked into a folder you pick. After a scan, each burst's recommended frame is marked when that burst has no keeper yet. **G** rejects the other frames that are much softer, or heavily clipped, and leaves your keepers. A burst with no keeper is skipped. A burst shorter than **Minimum** is hidden and is not saved. Hard links are offered when you want a second name for the same file. If a link cannot be created, Outburst copies the file. Deleting the copy leaves the original.
+**Save** copies the frames you marked into a folder you pick and writes an `.xmp` sidecar beside each saved keeper. After a scan, each burst's recommended frame is marked when that burst has no keeper yet. **G** rejects the other frames that are much softer, or heavily clipped, and leaves your keepers. A burst with no keeper is skipped. A burst shorter than **Minimum** is hidden and is not saved. Hard links are offered when you want a second name for the same file. If a link cannot be created, Outburst copies the file. Deleting the copy leaves the original.
 
-**XMP** writes a sidecar for each keeper and each star-rated frame. Lightroom, Capture One, Darktable, and digiKam can read it.
+**XMP** writes a sidecar next to the original for each keeper and each star-rated frame. Lightroom, Capture One, Darktable, and digiKam can read it. Save writes that same sidecar into the keepers folder.
 
 - Stars are `xmp:Rating` from 0 to 5, and `MicrosoftPhoto:Rating` as the matching percent.
 - A pick is `xmpDM:pick="1"` and `xmpDM:good="true"`. A pick with no stars of its own is also written as 5 stars.

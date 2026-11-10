@@ -457,8 +457,8 @@ class ImageViewer(QFrame):
         self.keeper_button.setObjectName("keeperButton")
         self.keeper_button.setCheckable(True)
         self.keeper_button.setToolTip(
-            "Flag this frame as a pick. Save keepers copies picked frames, and the XMP sidecar "
-            "records the pick. Press again to clear it. Keyboard: A"
+            "Flag this frame as a pick. Save keepers copies picked frames and writes an .xmp "
+            "sidecar beside each one. Press again to clear it. Keyboard: A"
         )
         self.keeper_button.clicked.connect(lambda _checked=False: self.keeper_clicked.emit())
         self.reject_button = QPushButton("Reject")

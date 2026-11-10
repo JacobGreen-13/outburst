@@ -3,7 +3,7 @@
 Outburst never opens a photograph for writing. Sidecars are separate files.
 Keeper export copies or hard-links the chosen frames into a folder you pick.
 
-``choose_keepers`` and ``export_keepers`` save marked frames from bursts that meet the minimum length. ``frames_for_sidecars``, ``review_xmp_fields``, ``sidecar_rating``, and ``write_library_sidecars`` write XMP for those keepers and for any star-rated frame. ``write_xmp_sidecar``, ``fresh_xmp``, and ``upsert_xmp`` create or update one sidecar. ``write_reports`` and ``build_report`` write JSON and CSV.
+``choose_keepers`` and ``export_keepers`` save marked frames from bursts that meet the minimum length. ``write_exported_sidecars`` writes one ``.xmp`` beside each saved keeper. ``frames_for_sidecars``, ``review_xmp_fields``, ``sidecar_rating``, and ``write_library_sidecars`` write XMP for those keepers and for any star-rated frame. ``write_xmp_sidecar``, ``fresh_xmp``, and ``upsert_xmp`` create or update one sidecar. ``write_reports`` and ``build_report`` write JSON and CSV.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -55,6 +55,8 @@ class ExportResult:
     destination: Path
     method: str
     note: str = ""
+    sidecar: Path | None = None
+    sidecar_note: str = ""
 
 
 def choose_keepers(
@@ -153,6 +155,127 @@ def export_keepers(
             progress(index + 1, len(planned), f"Saving {planned[index][0].name}")
 
     return run_ordered(len(planned), copy_at, workers=EXPORT_WORKERS, on_finished=report)
+
+
+def _library_marks(library: Library) -> tuple[dict[Path, FrameAnalysis], dict[Path, str], set[Path]]:
+    """Index a library by path, burst, and recommended frame.
+
+    Inputs: library, the scanned folder.
+    Output: analyses keyed by path, burst id keyed by path, and the recommended paths.
+    Uses: write_library_sidecars and write_exported_sidecars.
+    Limitations: an empty burst adds no paths. This does not write a file.
+    """
+
+    by_path = {item.frame.path: item for item in library.analyses}
+    burst_of: dict[Path, str] = {}
+    recommended: set[Path] = set()
+    for burst in library.bursts:
+        if not burst.frames:
+            continue
+        for frame in burst.frames:
+            burst_of[frame.path] = burst.id
+        recommended.add(burst.frames[recommended_offset(burst.frames, by_path)].path)
+    return by_path, burst_of, recommended
+
+
+def _xmp_fields(
+    analysis: FrameAnalysis | None,
+    *,
+    decision: str | None,
+    stars: int | None,
+    burst_id: str,
+    recommended: bool,
+    pick: str | None,
+) -> dict[str, str | None]:
+    """Build the XMP attributes for one frame.
+
+    Inputs: analysis, the frame measurement or None; decision, the stored keep or reject; stars, a rating or None; burst_id; recommended, whether this frame is the burst recommendation; pick, the flag written as a pick, which may differ from decision for a short-burst keep.
+    Output: the review fields plus the Outburst score, burst, and version attributes.
+    Uses: write_library_sidecars and write_exported_sidecars.
+    Limitations: this returns a dict. It does not write a file. A missing analysis leaves the score fields empty.
+    """
+
+    composite = None if analysis is None else analysis.composite
+    sharpness = None if analysis is None or analysis.metrics is None else analysis.metrics.sharpness
+    return {
+        **review_xmp_fields(pick, stars),
+        "outburst:Score": "" if composite is None else f"{composite:.4f}",
+        "outburst:ScorePercent": "" if composite is None else str(int(round(composite * 100))),
+        "outburst:Sharpness": "" if sharpness is None else f"{sharpness:.2f}",
+        "outburst:BurstId": burst_id,
+        "outburst:Recommended": "True" if recommended else "False",
+        "outburst:Decision": decision or "unset",
+        "outburst:App": "Outburst",
+        "outburst:Version": __version__,
+    }
+
+
+def write_exported_sidecars(
+    library: Library,
+    results: Sequence[ExportResult],
+    decisions: Mapping[Path, str],
+    *,
+    stars: Mapping[Path, int] | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
+) -> tuple[list[ExportResult], list[str]]:
+    """Write one ``.xmp`` beside each saved keeper.
+
+    The sidecar uses the destination filename. A numbered copy gets a matching sidecar. Nothing is written beside the original.
+
+    Inputs: library, the scanned folder; results, the saved keepers; decisions, path to keep or reject; stars, optional ratings; progress, an optional callback of count, total, and a status line.
+    Output: the same results with the sidecar path filled in, and warning strings for sidecars that could not be written.
+    Uses: Save keepers, after the photographs have been copied or linked.
+    Limitations: originals are never opened for writing. A destination that is not XMP is left alone and reported. The photograph copy is kept when the sidecar fails. Two workers write the sidecars.
+    """
+
+    by_path, burst_of, recommended = _library_marks(library)
+    star_ratings = {} if stars is None else stars
+    updated: list[ExportResult] = []
+    warnings: list[str] = []
+
+    def write_at(index: int) -> tuple[ExportResult, str | None]:
+        """Write the sidecar for one saved keeper.
+
+        Inputs: index, the position in the export results.
+        Output: the result with its sidecar path, or a note when the write raises OSError or SidecarError.
+        Uses: write_exported_sidecars. The pool calls this on a worker.
+        Limitations: the photograph is not opened for writing. A non-XMP sidecar is left unchanged. Other exceptions propagate.
+        """
+
+        result = results[index]
+        fields = _xmp_fields(
+            by_path.get(result.source),
+            decision=decisions.get(result.source, "keep"),
+            stars=star_ratings.get(result.source),
+            burst_id=burst_of.get(result.source, ""),
+            recommended=result.source in recommended,
+            pick="keep",
+        )
+        try:
+            sidecar = write_xmp_sidecar(result.destination, fields)
+        except (OSError, SidecarError) as exc:
+            note = f"{result.destination.with_suffix('.xmp').name}: {exc}"
+            return replace(result, sidecar_note=note), note
+        return replace(result, sidecar=sidecar), None
+
+    def collect(index: int, item: tuple[ExportResult, str | None]) -> None:
+        """Record one finished export sidecar and report progress.
+
+        Inputs: index, the finished result; item, the updated result and an optional warning.
+        Output: none. Results and warnings are appended in completion order.
+        Uses: write_exported_sidecars.
+        Limitations: progress is optional. This does not write the sidecar itself.
+        """
+
+        result, warning = item
+        updated.append(result)
+        if warning is not None:
+            warnings.append(warning)
+        if progress is not None:
+            progress(index + 1, len(results), f"Writing {result.destination.with_suffix('.xmp').name}")
+
+    run_ordered(len(results), write_at, workers=XMP_WORKERS, on_finished=collect)
+    return updated, warnings
 
 
 def sidecar_rating(decision: str | None, stars: int | None) -> int:
@@ -270,7 +393,7 @@ def write_library_sidecars(
     Limitations: originals are never opened for writing. Rejects without stars are skipped. A short-burst keep is not a pick; stars on that frame are still written, with the pick left unset. Two workers write the sidecars. A file that is not XMP is left alone and reported.
     """
 
-    by_path = {item.frame.path: item for item in library.analyses}
+    by_path, burst_of, recommended = _library_marks(library)
     keepers = {
         choice.path
         for choice in choose_keepers(
@@ -288,16 +411,6 @@ def write_library_sidecars(
             minimum_frames=minimum_frames,
         )
     )
-    recommended: set[Path] = set()
-    burst_of: dict[Path, str] = {}
-    for burst in library.bursts:
-        if not burst.frames:
-            continue
-        for frame in burst.frames:
-            burst_of[frame.path] = burst.id
-        index = recommended_offset(burst.frames, by_path)
-        recommended.add(burst.frames[index].path)
-
     star_ratings = {} if stars is None else stars
     jobs: list[tuple[Path, dict[str, str | None]]] = []
     for analysis in library.analyses:
@@ -307,22 +420,19 @@ def write_library_sidecars(
         decision = decisions.get(frame.path)
         # A keeper in a hidden short burst is not saved, so the sidecar does not flag it as a pick.
         exported = None if frame.path not in keepers and decision == "keep" else decision
-        fields: dict[str, str | None] = {
-            **review_xmp_fields(exported, star_ratings.get(frame.path)),
-            "outburst:Score": "" if analysis.composite is None else f"{analysis.composite:.4f}",
-            "outburst:ScorePercent": ""
-            if analysis.composite is None
-            else str(int(round(analysis.composite * 100))),
-            "outburst:Sharpness": ""
-            if analysis.metrics is None
-            else f"{analysis.metrics.sharpness:.2f}",
-            "outburst:BurstId": burst_of.get(frame.path, ""),
-            "outburst:Recommended": "True" if frame.path in recommended else "False",
-            "outburst:Decision": decision or "unset",
-            "outburst:App": "Outburst",
-            "outburst:Version": __version__,
-        }
-        jobs.append((frame.path, fields))
+        jobs.append(
+            (
+                frame.path,
+                _xmp_fields(
+                    analysis,
+                    decision=decision,
+                    stars=star_ratings.get(frame.path),
+                    burst_id=burst_of.get(frame.path, ""),
+                    recommended=frame.path in recommended,
+                    pick=exported,
+                ),
+            )
+        )
 
     def write_at(index: int) -> tuple[Path | None, str | None]:
         """Write one sidecar and turn a safe failure into a warning string.
