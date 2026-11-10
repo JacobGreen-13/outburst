@@ -20,6 +20,7 @@ from outburst.subject import (
     models_dir,
     option_by_id,
     preferred_device,
+    subject_runtime_can_install,
     subject_runtime_install_command,
     subject_runtime_ready,
 )
@@ -32,6 +33,7 @@ def test_preferred_device_is_a_known_name() -> None:
 def test_subject_runtime_install_command_targets_this_interpreter() -> None:
     import sys
 
+    assert subject_runtime_can_install() is True
     command = subject_runtime_install_command()
     assert command[0] == sys.executable
     assert command[1:3] == ["-m", "pip"]
@@ -46,6 +48,15 @@ def test_subject_runtime_ready_matches_the_import() -> None:
     except ImportError:
         expected = False
     assert subject_runtime_ready() is expected
+
+
+def test_frozen_app_does_not_pip_install_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert subject_runtime_can_install() is False
+    with pytest.raises(RuntimeError, match="not included"):
+        install_subject_runtime()
 
 
 def test_install_subject_runtime_reports_a_pip_failure(monkeypatch: pytest.MonkeyPatch) -> None:

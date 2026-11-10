@@ -1,0 +1,47 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - cursor/windows-installer-112a
+    paths:
+      - packaging/windows/**
+      - .github/workflows/windows-installer.yml
+      - src/**
+      - pyproject.toml
+      - LICENSE
+      - README.md
+
+jobs:
+  installer:
+    name: Windows 11 setup
+    runs-on: windows-latest
+    steps:
+      - name: Check out Outburst
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the setup program
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
+        env:
+          OUTBURST_PYTHON: python
+
+      - name: Upload the setup program
+        uses: actions/upload-artifact@v4
+        with:
+          name: Outburst-Windows-Setup
+          path: |
+            dist/installer/*.exe
+            dist/installer/SHA256.txt
+          if-no-files-found: error
+          retention-days: 90

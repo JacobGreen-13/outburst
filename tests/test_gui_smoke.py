@@ -440,6 +440,34 @@ def test_headless_subject_toggle_does_not_download(qt_app, tmp_path: Path, monke
     window.close()
 
 
+def test_packaged_build_keeps_subject_detection_off(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import QSettings
+
+    from outburst.gui.main_window import MainWindow
+
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_can_install", lambda: False)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: False)
+    _isolate_settings(tmp_path / "settings")
+    saved = QSettings("Outburst", "Outburst")
+    saved.setValue("prefer_subject", True)
+    saved.setValue("eye_scoring", True)
+    saved.sync()
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    assert window.controls.prefer_subject() is False
+    assert window.controls.eye_scoring() is False
+    assert window.last_notice is None
+    window.controls._subject.setChecked(True)
+    qt_app.processEvents()
+    assert window.controls.prefer_subject() is False
+    assert window.last_notice is not None
+    assert "not included" in window.last_notice[1]
+    assert "whole frame" in window.last_notice[1]
+    window.close()
+    qt_app.processEvents()
+
+
 def test_a_missing_subject_runtime_installs_before_the_scan(
     qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
