@@ -13,7 +13,7 @@ $Python = Join-Path $Venv "Scripts\python.exe"
 $Dist = Join-Path $Root "dist\Outburst"
 $Icon = Join-Path $Root "build\windows\outburst.ico"
 $ExifVersion = "13.62"
-$ExifUrl = "https://exiftool.org/exiftool-$ExifVersion`_64.zip"
+$ExifUrl = "https://downloads.sourceforge.net/project/exiftool/exiftool-$ExifVersion`_64.zip"
 
 function Invoke-Checked {
     param([scriptblock]$Command)
@@ -59,11 +59,21 @@ Invoke-Checked { & $Python -m PyInstaller --noconfirm --clean (Join-Path $Root "
 if (-not (Test-Path (Join-Path $Dist "Outburst.exe"))) {
     throw "PyInstaller did not write $Dist\Outburst.exe"
 }
+foreach ($required in @("Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "qwindows.dll")) {
+    $found = Get-ChildItem -Path $Dist -Recurse -Filter $required -File | Select-Object -First 1
+    if (-not $found) {
+        throw "The frozen app is missing $required"
+    }
+}
 
 Write-Host "Adding ExifTool $ExifVersion..."
 $ExifZip = Join-Path $Root "build\exiftool-$ExifVersion.zip"
 $ExifExtract = Join-Path $Root "build\exiftool-$ExifVersion"
-Invoke-WebRequest -Uri $ExifUrl -OutFile $ExifZip
+Invoke-WebRequest -Uri $ExifUrl -OutFile $ExifZip -UserAgent "Outburst-installer"
+$ExifSize = (Get-Item $ExifZip).Length
+if ($ExifSize -lt 1000000) {
+    throw "The ExifTool download was $ExifSize bytes. The address may have returned a web page instead of the zip."
+}
 if (Test-Path $ExifExtract) {
     Remove-Item -Recurse -Force $ExifExtract
 }
