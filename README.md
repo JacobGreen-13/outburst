@@ -4,6 +4,32 @@ Outburst culls wildlife and nature bursts on your own computer. It groups frames
 
 Nothing is uploaded. There is no account. Original RAW and JPEG files stay untouched. Subject and bird eye models stay off until you install that software, and each weight file is downloaded when that file is missing.
 
+## Contents
+
+- [What you can do](#what-you-can-do)
+- [Requirements](#requirements)
+  - [The app](#the-app)
+  - [Subject and bird eye detection](#subject-and-bird-eye-detection)
+- [Install](#install)
+  - [Windows 11](#windows-11)
+  - [From source](#from-source)
+  - [Install by hand](#install-by-hand)
+  - [exiftool](#exiftool)
+- [The window](#the-window)
+  - [Keyboard](#keyboard)
+- [How a frame gets its score](#how-a-frame-gets-its-score)
+  - [Sharpness](#sharpness)
+  - [Exposure](#exposure)
+  - [The number on the filmstrip](#the-number-on-the-filmstrip)
+  - [Which frame is recommended](#which-frame-is-recommended)
+  - [What leaves the score alone](#what-leaves-the-score-alone)
+- [Your files](#your-files)
+- [Subject detection](#subject-detection)
+- [Bird eye detection](#bird-eye-detection)
+- [For developers](#for-developers)
+- [Feedback](#feedback)
+- [License](#license)
+
 ![Outburst review window, with the recommended frame marked as a keeper](docs/images/outburst-review.png)
 
 The picture is the included sample, `examples/sample_burst`. Real feathers score higher than these drawn shapes. The sharp frame still beats the soft ones and the blown one.
@@ -302,6 +328,10 @@ pytest
 ```
 
 On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program is on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.3) page.
+
+## Feedback
+
+A note from a real cull is welcome. If a score keeps the wrong frame, Outburst cannot open a photograph, or the detection install stops, open an [issue](https://github.com/JacobGreen-13/outburst/issues). The useful details are the camera, the operating system, and the version in **Help → About Outburst**.
 
 ## License
 
