@@ -1,6 +1,6 @@
 """Small dialogs and message boxes for the review window.
 
-``headless`` is true when ``OUTBURST_HEADLESS`` is 1. ``notify`` shows a message, and ``ask`` returns False in that mode. ``ExportKeepersDialog.ask`` collects a folder and copy or hard-link mode. ``show_shortcuts`` and ``show_warnings`` open the help and scan-note dialogs.
+``headless`` is true when ``OUTBURST_HEADLESS`` is 1. ``notify`` shows a message, and ``ask`` returns False in that mode. ``accept_subject_license`` asks before Ultralytics is installed. ``ExportKeepersDialog.ask`` collects a folder and copy or hard-link mode. ``show_shortcuts`` and ``show_warnings`` open the help and scan-note dialogs.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from outburst.gui.shortcuts import shortcuts_html
+from outburst.subject import SUBJECT_LICENSE_TEXT
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,35 @@ def notify(parent: QWidget | None, title: str, text: str, level: str = "info") -
     box.setText(text)
     box.setIcon(QMessageBox.Icon.Warning if level == "warning" else QMessageBox.Icon.Information)
     box.exec()
+
+
+def accept_subject_license(parent: QWidget | None) -> bool:
+    """
+    Ask the photographer to accept the AGPL-3.0 terms for subject and bird-eye detection.
+
+    Inputs: parent, the widget that owns the dialog.
+    Output: True only when Accept and install is chosen.
+    Uses: the review window after the computer has been found compatible and before Ultralytics is installed or a model is downloaded.
+    Limitations: a headless process returns False and does not open a dialog. Declining does not install software or download models.
+    """
+
+    if headless() or parent is None:
+        return False
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Subject and bird eye detection")
+    browser = QTextBrowser()
+    browser.setPlainText(SUBJECT_LICENSE_TEXT)
+    browser.setMinimumSize(480, 220)
+    browser.setOpenExternalLinks(False)
+    buttons = QDialogButtonBox()
+    buttons.addButton("Accept and install", QDialogButtonBox.ButtonRole.AcceptRole)
+    buttons.addButton("Don't enable", QDialogButtonBox.ButtonRole.RejectRole)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(browser)
+    layout.addWidget(buttons)
+    return dialog.exec() == QDialog.DialogCode.Accepted
 
 
 def ask(parent: QWidget | None, title: str, text: str) -> bool:

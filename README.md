@@ -30,7 +30,7 @@ You need Python 3.11 or newer. Outburst runs on macOS (including Apple Silicon),
 | Windows | `Outburst.bat` |
 | Linux | `Outburst.desktop`, or run `./outburst.sh` |
 
-The first run creates `.venv`, installs the libraries (including subject and bird-eye detection), and opens the window. That first install downloads PyTorch and can take several minutes. Later runs open the window. An older environment installs the extra the next time you start the launcher, or the first time you turn either feature on.
+The first run creates `.venv`, installs Outburst, and opens the window. Subject detection and bird eye detection stay off, and their controls stay hidden. **Install subject and bird eye detection** checks this computer, then the internet connection. If either check fails, Outburst explains why and does not install the software or download the models. If both succeed, you accept the AGPL-3.0 license, and then Outburst installs Ultralytics and downloads the models. That install downloads PyTorch and can take several minutes. The detection controls appear after the modules are installed.
 
 ### Windows 11 installer
 
@@ -40,7 +40,7 @@ Windows 11 can install Outburst without Python or this source tree. On a Windows
 powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
 ```
 
-The setup program is `dist\installer\Outburst-Setup-0.1.0.exe`. It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. Subject detection and bird eye detection are not in this installer. The setup program is unsigned, so Windows SmartScreen asks for confirmation the first time.
+The setup program is `dist\installer\Outburst-Setup-0.1.0.exe`. It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. **Install subject and bird eye detection** still checks the computer and the internet connection first. This Windows copy cannot add PyTorch to the application, so on a compatible PC with a network connection it explains that and does not download the models. The setup program is unsigned, so Windows SmartScreen asks for confirmation the first time.
 
 GitHub Actions builds the same installer with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
 
@@ -164,7 +164,7 @@ Before the mix, sharpness is squeezed into the range 0 to 1 by dividing it by it
 
 Inside a burst, the highest score is the recommendation. If two scores match, the sharper whole frame wins, then the earlier filename. When a scan finishes, that frame is marked a keeper when the burst does not already have one.
 
-**Subject-aware sharpness** changes which sharpness number is used. When it is on and an animal is found, the sharpest patch inside that box, expanded by 12 percent, replaces the Center blend for that frame. **Center** does not apply to a frame that has a measured animal. When nothing is found, that frame keeps the Center blend. Turning the checkbox on scans the folder again and downloads the selected model when the file is missing. Turning it off rescores from the measurements already saved. Choosing another model can move the box, and that can change the score. **Show subject box** only hides the rectangle. The score still uses the box.
+**Subject-aware sharpness** changes which sharpness number is used. When it is on and an animal is found, the sharpest patch inside that box, expanded by 12 percent, replaces the Center blend for that frame. **Center** does not apply to a frame that has a measured animal. When nothing is found, that frame keeps the Center blend. The checkbox is hidden until **Install subject and bird eye detection** finishes. That button checks the computer and the internet connection, asks you to accept the AGPL-3.0 license, installs the detection software, and downloads the models. An incompatible computer or a missing connection stays on whole-frame scoring, with an explanation, and nothing is installed or downloaded. Turning the checkbox off rescores from the measurements already saved. Choosing another model can move the box, and that can change the score. **Show subject box** only hides the rectangle. The score still uses the box.
 
 **Bird eye detection** leaves the 0 to 100 score as it is and can change which frame is recommended. When two or more frames in the burst have an eye large enough to rate, the sharpest of those eyes becomes the recommendation, and an earlier filename breaks a tie. An eye is rated when the disk on the analysis preview is at least 16 pixels across. A smaller eye is noted and left out of the ranking. One rated eye, or none, leaves the usual score ranking in place. Turning the checkbox on or off scans the folder again. **Show eye circle** only hides the ring.
 
@@ -222,7 +222,7 @@ With two or more rated eyes in a burst, the sharpest eye is the best frame and O
 
 A detected eye is a gold ring labeled EYE. **Show eye circle** hides the ring without scanning again. The score and the zoom center stay. **Info** shows the eye sentence with the other measurements. The filmstrip says EYE. The burst row and the status bar count detected eyes, including frames in bursts hidden by **Minimum**.
 
-In an older environment that does not yet have Ultralytics, turning **Subject-aware sharpness** or **Bird eye detection** on installs it before the scan. The status bar says that PyTorch is downloading. You can also run `pip install "outburst[subject]"`.
+On a compatible computer, turning **Subject-aware sharpness** or **Bird eye detection** on asks you to accept the AGPL-3.0 license when that choice is not saved yet. Accepting installs Ultralytics when it is missing. The status bar says that PyTorch is downloading. You can also run `pip install "outburst[subject]"`. An incompatible computer does not install it and does not download a model.
 
 ## For developers
 

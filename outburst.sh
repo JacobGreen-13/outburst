@@ -17,8 +17,8 @@ Usage: ./outburst.sh [folder]
 
 The first run creates .venv, installs Outburst, and opens the window.
 Later runs open the window. Subject detection and bird eye detection
-are included. The first run downloads PyTorch and can take several
-minutes. The subject argument is still accepted.
+are installed from the window after this computer is checked and the
+license is accepted. The subject argument is still accepted.
 EOF
 }
 
@@ -101,7 +101,7 @@ fi
 
 if [[ "${OUTBURST_DRY_RUN:-}" == "1" ]]; then
   printf 'python=%s\n' "$PYTHON"
-  printf 'extras=[subject]\n'
+  printf 'extras=\n'
   if [[ $# -gt 0 ]]; then
     printf 'folder=%s\n' "$1"
   else
@@ -113,7 +113,6 @@ fi
 VENV="$ROOT/.venv"
 PY="$VENV/bin/python"
 STAMP="$VENV/.outburst-stamp"
-SUBJECT_STAMP="$VENV/.outburst-subject"
 
 if [[ ! -x "$PY" ]]; then
   log "Creating a Python environment..."
@@ -123,29 +122,20 @@ fi
 "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' \
   || die "The environment in .venv is older than Python 3.11. Delete .venv and run this script again."
 
-EXTRAS="[subject]"
-
 NEED_INSTALL=0
 if [[ ! -x "$VENV/bin/outburst" || ! -f "$STAMP" ]]; then
   NEED_INSTALL=1
 elif [[ "$ROOT/pyproject.toml" -nt "$STAMP" ]]; then
-  NEED_INSTALL=1
-elif [[ ! -f "$SUBJECT_STAMP" ]]; then
-  NEED_INSTALL=1
-elif ! "$PY" -c "import ultralytics" >/dev/null 2>&1; then
   NEED_INSTALL=1
 fi
 
 if [[ "$NEED_INSTALL" == "1" ]]; then
   version="$("$PYTHON" -c 'import platform, sys; print(sys.version.split()[0], platform.machine())')"
   log "Installing Outburst with Python ${version}."
-  log "Subject and bird eye detection are included. This downloads PyTorch and can take several minutes."
+  log "Subject and bird eye detection stay off until you install them in the window."
   "$PY" -m pip install --upgrade pip || log "Continuing with the current pip."
-  "$PY" -m pip install -e ".${EXTRAS}" || die "Installation failed. Check the messages above and run this script again."
+  "$PY" -m pip install -e . || die "Installation failed. Check the messages above and run this script again."
   touch "$STAMP"
-  if [[ -n "$EXTRAS" ]]; then
-    touch "$SUBJECT_STAMP"
-  fi
 fi
 
 if ! "$PY" -c "import PySide6" >/dev/null 2>&1; then

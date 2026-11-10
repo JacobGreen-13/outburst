@@ -1,6 +1,6 @@
 """Threshold, weights, and the optional subject-detection toggle.
 
-``ControlPanel`` is the Grouping and Scoring sections. Grouping starts collapsed and Scoring starts open. The getters read burst gap, sharpness, center, minimum frames, minimum score, subfolders, subject, bird eye detection, the subject-box and eye-circle marks, the model id, and whether each section is open. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark. ``set_score_effect`` shows how many frames Minimum score is leaving on screen.
+``ControlPanel`` is the Grouping and Scoring sections. Grouping starts collapsed and Scoring starts open. Subject and bird eye controls stay hidden until those modules are installed, and an install button is shown in their place. The getters read burst gap, sharpness, center, minimum frames, minimum score, subfolders, subject, bird eye detection, the subject-box and eye-circle marks, the model id, and whether each section is open. The setters restore those from settings without emitting a change. ``weights`` builds the score mix. ``refresh_models`` rewrites the model list with a ready or download mark. ``set_score_effect`` shows how many frames Minimum score is leaving on screen. ``set_detection_installed`` swaps the install button for the detection controls.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QSlider,
     QSpinBox,
@@ -41,6 +42,7 @@ class ControlPanel(QWidget):
     model_changed = Signal(str)
     minimum_changed = Signal(int)
     minimum_score_changed = Signal()
+    install_detection_clicked = Signal()
 
     def __init__(self) -> None:
         """
@@ -96,7 +98,7 @@ class ControlPanel(QWidget):
         self._subject = QCheckBox("Subject-aware sharpness")
         self._subject.setToolTip(
             "Score sharpness inside a detected animal. "
-            "Choosing a model turns this on. Rescan downloads that model if it is not in the models folder."
+            "The score uses that box when an animal is found, and the whole frame when it is not."
         )
         self._subject.toggled.connect(self.subject_toggled.emit)
         self._show_box = QCheckBox("Show subject box")
@@ -108,10 +110,9 @@ class ControlPanel(QWidget):
         self._show_box.toggled.connect(self.subject_box_toggled.emit)
         self._eye = QCheckBox("Bird eye detection")
         self._eye.setToolTip(
-            "Download the open-weight bird eye model (about 6 MB) and use the eye it finds. "
+            "Use the open-weight bird eye model. "
             "In a burst with two or more rated eyes, the sharpest eye becomes the best frame "
-            "and is marked a keeper. The model is birds only. It stays on this computer. "
-            "Turning this on or off rescans."
+            "and is marked a keeper. The model is birds only. It stays on this computer."
         )
         self._eye.toggled.connect(self.eye_toggled.emit)
         self._show_eye = QCheckBox("Show eye circle")
@@ -124,7 +125,7 @@ class ControlPanel(QWidget):
         self._model = QComboBox()
         self._model.setToolTip(
             "Subject model. Choosing one turns subject scoring on. "
-            "Rescan saves a model marked download into the models folder and scores with it."
+            "A model marked download is saved into the models folder."
         )
         self._model_label = QLabel()
         self._model_label.setObjectName("hint")
@@ -132,6 +133,26 @@ class ControlPanel(QWidget):
         self._model_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         self._rebuild_model_items()
         self._model.currentIndexChanged.connect(lambda index: self._emit_model(int(index)))
+
+        self._install_detection = QPushButton("Install subject and bird eye detection")
+        self._install_detection.setObjectName("installDetection")
+        self._install_detection.setToolTip(
+            "Check this computer and the internet connection, then accept the license. "
+            "Outburst installs subject and bird eye detection and downloads the models after that."
+        )
+        self._install_detection.clicked.connect(self.install_detection_clicked.emit)
+        self._detection = QWidget()
+        self._detection.setObjectName("detectionControls")
+        detection_layout = QVBoxLayout(self._detection)
+        detection_layout.setContentsMargins(0, 0, 0, 0)
+        detection_layout.setSpacing(6)
+        detection_layout.addWidget(self._subject)
+        detection_layout.addWidget(self._indented(self._show_box))
+        detection_layout.addWidget(self._eye)
+        detection_layout.addWidget(self._indented(self._show_eye))
+        detection_layout.addWidget(self._model)
+        detection_layout.addWidget(self._model_label)
+        self._detection.hide()
 
         self._score_effect = QLabel("")
         self._score_effect.setObjectName("hint")
@@ -155,12 +176,8 @@ class ControlPanel(QWidget):
         scoring_layout.addWidget(self._slider_row(self._sharpness_label, self._sharpness))
         scoring_layout.addWidget(self._slider_row(self._center_label, self._center))
         scoring_layout.addWidget(self._score_row())
-        scoring_layout.addWidget(self._subject)
-        scoring_layout.addWidget(self._indented(self._show_box))
-        scoring_layout.addWidget(self._eye)
-        scoring_layout.addWidget(self._indented(self._show_eye))
-        scoring_layout.addWidget(self._model)
-        scoring_layout.addWidget(self._model_label)
+        scoring_layout.addWidget(self._install_detection)
+        scoring_layout.addWidget(self._detection)
         self._scoring_toggle = self._disclosure("Scoring", self._scoring_body, open_=True)
 
         layout = QVBoxLayout(self)
@@ -628,6 +645,29 @@ class ControlPanel(QWidget):
         self._eye.blockSignals(True)
         self._eye.setChecked(checked)
         self._eye.blockSignals(False)
+
+    def detection_installed(self) -> bool:
+        """
+        Report whether the subject and bird eye controls are on screen.
+
+        Inputs: none.
+        Output: True when those controls are visible.
+        Uses: the review window after the modules are installed.
+        Limitations: this follows the visibility set by set_detection_installed. A collapsed Scoring section can hide them even when this returns True.
+        """
+        return not self._detection.isHidden()
+
+    def set_detection_installed(self, installed: bool) -> None:
+        """
+        Show the detection controls, or the install button.
+
+        Inputs: installed, whether subject and bird eye detection are already installed.
+        Output: no return value. The controls are shown when installed is True. The install button is shown when it is False.
+        Uses: opening the window, and the end of a successful install.
+        Limitations: this does not install software and does not change the checkbox values.
+        """
+        self._detection.setVisible(installed)
+        self._install_detection.setVisible(not installed)
 
     def set_show_subject_box(self, checked: bool) -> None:
         """
