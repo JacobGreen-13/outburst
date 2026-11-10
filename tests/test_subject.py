@@ -178,13 +178,122 @@ def test_subject_license_text_names_the_agpl_terms() -> None:
     assert "does not download" in SUBJECT_LICENSE_TEXT
 
 
-def test_frozen_app_does_not_pip_install_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_frozen_linux_app_does_not_pip_install_ultralytics(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
     monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
     assert subject_runtime_can_install() is False
     with pytest.raises(RuntimeError, match="not included"):
         install_subject_runtime()
+
+
+def test_frozen_windows_installs_a_private_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+    import io
+    import sys
+    import zipfile
+
+    from outburst.sidecar import EMBED_PYTHON_URL
+    from outburst.subject import subject_runtime_ready
+
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("python.exe", b"MZ")
+        archive.writestr("python312._pth", "python312.zip\n.\n\n#import site\n")
+    zip_bytes = payload.getvalue()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr("outburst.subject.platform.machine", lambda: "AMD64")
+    monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "outburst.sidecar.EMBED_PYTHON_SHA256",
+        hashlib.sha256(zip_bytes).hexdigest(),
+    )
+
+    class Response:
+        def __init__(self, body: bytes) -> None:
+            self._body = body
+
+        def read(self, size: int = -1) -> bytes:
+            if size < 0:
+                size = len(self._body)
+            chunk = self._body[:size]
+            self._body = self._body[size:]
+            return chunk
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+    def urlopen(request: object, timeout: float = 0) -> Response:
+        del timeout
+        url = getattr(request, "full_url", str(request))
+        assert url == EMBED_PYTHON_URL
+        return Response(zip_bytes)
+
+    commands: list[list[str]] = []
+
+    class Proc:
+        def __init__(self, args: list[str], **_kwargs: object) -> None:
+            commands.append([str(part) for part in args])
+            self.returncode = 0
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return 0
+
+        def communicate(self) -> tuple[str, str]:
+            return "", ""
+
+    monkeypatch.setattr("outburst.sidecar.urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("outburst.sidecar.subprocess.Popen", Proc)
+    assert subject_runtime_can_install() is True
+    install_subject_runtime()
+    assert subject_runtime_ready() is True
+    assert (tmp_path / "python" / "python.exe").is_file()
+    path_file = (tmp_path / "python" / "python312._pth").read_text(encoding="utf-8")
+    assert "import site" in path_file
+    assert "#import site" not in path_file
+    joined = "\n".join(" ".join(command) for command in commands)
+    assert "ultralytics>=8.3" in joined
+    assert "import ultralytics" in joined
+    assert str(tmp_path / "python" / "python.exe") in joined
+
+
+def test_private_python_scores_a_preview_batch(tmp_path: Path) -> None:
+    import sys
+
+    import numpy as np
+
+    from outburst.eyes import Eye
+    from outburst.sidecar import DetectionSession, SidecarEyeFinder, SidecarSubjectDetector
+
+    weights = tmp_path / "model.pt"
+    weights.write_bytes(b"not a real model")
+    session = DetectionSession(
+        python=Path(sys.executable),
+        extra_env={"OUTBURST_DETECT_STUB": "1"},
+    )
+    try:
+        image = np.zeros((8, 8, 3), dtype=np.uint8)
+        subject = SidecarSubjectDetector(weights, session)
+        boxes = subject.detect_many([image, image])
+        assert boxes[0] is not None and boxes[1] is not None
+        assert boxes[0].box == (8, 8, 40, 30)
+        assert boxes[0].label == "bird"
+        assert subject.detect(image) is not None
+        eyes = SidecarEyeFinder(weights, session).find_many([image])
+        assert isinstance(eyes[0], Eye)
+        assert eyes[0].x == 20
+        assert eyes[0].sharpness == 18.0
+    finally:
+        session.close()
 
 
 def test_install_subject_runtime_reports_a_pip_failure(monkeypatch: pytest.MonkeyPatch) -> None:
