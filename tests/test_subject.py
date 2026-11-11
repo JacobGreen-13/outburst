@@ -389,6 +389,79 @@ def test_private_python_scores_a_preview_batch(tmp_path: Path) -> None:
         session.close()
 
 
+def test_embeddable_python_runs_the_worker_without_pythonpath(tmp_path: Path) -> None:
+    import os
+    import stat
+
+    import numpy as np
+
+    from outburst.sidecar import DetectionSession, SidecarSubjectDetector, detection_source_dir
+
+    source = detection_source_dir()
+    fake = tmp_path / "python"
+    fake.write_text(
+        "\n".join(
+            [
+                "#!" + os.environ.get("OUTBURST_TEST_PYTHON", "/tmp/outburst-venv/bin/python"),
+                "import os",
+                "import sys",
+                "if '-c' not in sys.argv:",
+                "    sys.stderr.write('No module named outburst\\n')",
+                "    raise SystemExit(1)",
+                "code = sys.argv[sys.argv.index('-c') + 1]",
+                "blocked = os.environ.get('OUTBURST_BLOCK_SOURCE', '')",
+                "if blocked:",
+                "    blocked = os.path.abspath(blocked)",
+                "    sys.path = [entry for entry in sys.path if os.path.abspath(entry or '.') != blocked]",
+                "exec(compile(code, '<worker>', 'exec'))",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    weights = tmp_path / "model.pt"
+    weights.write_bytes(b"not a real model")
+    session = DetectionSession(
+        python=fake,
+        source=source,
+        extra_env={
+            "OUTBURST_DETECT_STUB": "1",
+            "OUTBURST_BLOCK_SOURCE": str(source),
+            "PYTHONPATH": str(tmp_path / "ignored"),
+        },
+    )
+    try:
+        image = np.zeros((8, 8, 3), dtype=np.uint8)
+        boxes = SidecarSubjectDetector(weights, session).detect_many([image])
+        assert boxes[0] is not None
+        assert boxes[0].label == "bird"
+    finally:
+        session.close()
+
+
+def test_worker_env_drops_the_frozen_app_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from outburst.sidecar import _worker_env
+
+    app = "/tmp/OutburstApp"
+    extracted = "/tmp/mei"
+    monkeypatch.setattr("outburst.sidecar.sys.frozen", True, raising=False)
+    monkeypatch.setattr("outburst.sidecar.sys._MEIPASS", extracted, raising=False)
+    monkeypatch.setattr("outburst.sidecar.sys.executable", app + "/Outburst.exe")
+    monkeypatch.setenv("PATH", os.pathsep.join([extracted, app, "/usr/bin"]))
+    monkeypatch.setenv("PYTHONPATH", "/should-not-pass")
+    monkeypatch.setenv("PYTHONHOME", "/also-not")
+    env = _worker_env({})
+    parts = env["PATH"].split(os.pathsep)
+    assert extracted not in parts
+    assert app not in parts
+    assert "/usr/bin" in parts
+    assert "PYTHONPATH" not in env
+    assert "PYTHONHOME" not in env
+
+
 def test_windowed_launcher_installs_with_console_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -132,7 +132,7 @@ def analyze_folder(
         cache = None
 
     try:
-        analyses, detection_failures = _score_all(
+        analyses, detection_failures, detection_error = _score_all(
             files,
             cache=cache,
             weights=weights,
@@ -147,10 +147,13 @@ def analyze_folder(
             cache.close()
 
     if detection_failures:
-        warnings.append(
+        message = (
             f"Subject detection failed on {detection_failures} file(s). "
             "Those frames use full-frame sharpness."
         )
+        if detection_error:
+            message = f"{message} {detection_error}"
+        warnings.append(message)
     missing = [item for item in analyses if item.frame.captured_at is None]
     if missing:
         preview = ", ".join(item.frame.path.name for item in missing[:5])
@@ -215,11 +218,11 @@ def _score_all(
     eye_finder: object | None,
     progress: ProgressCallback | None,
     should_cancel: Callable[[], bool] | None,
-) -> tuple[list[FrameAnalysis], int]:
+) -> tuple[list[FrameAnalysis], int, str]:
     """Reuse cache hits and measure the rest, preserving folder order.
 
     Inputs: files, the scanned photographs; cache, the score cache or None; weights, the current blend; detector, an optional subject detector; subject_key, the cache identity for the models; eye_finder, an optional bird-eye model; progress and should_cancel, optional callbacks.
-    Output: analyses in file order, and the count of frames whose subject detection failed.
+    Output: analyses in file order, the count of frames whose subject detection failed, and the first failure reason or an empty string.
     Uses: analyze_folder.
     Limitations: cache rows are read here. New cache rows are written later on the coordinating thread, not on the preview workers. Photographs are not opened for writing. The bird-eye model is not run on the preview workers.
     """
@@ -239,6 +242,7 @@ def _score_all(
             pending.append(scanned)
 
     measured: dict[Path, tuple[FrameAnalysis, int]] = {}
+    detection_errors: list[str] = []
     if pending:
         _report(progress, seen, total, "Reading capture times")
         capture_info = read_capture_info([item.path for item in pending])
@@ -254,6 +258,7 @@ def _score_all(
             done_offset=seen,
             total=total,
             should_cancel=should_cancel,
+            detection_errors=detection_errors,
         )
 
     detection_failures = 0
@@ -266,7 +271,8 @@ def _score_all(
         analysis, failed = measured[scanned.path]
         detection_failures += failed
         analyses.append(analysis)
-    return analyses, detection_failures
+    reason = detection_errors[0] if detection_errors else ""
+    return analyses, detection_failures, reason
 
 
 def _measure_pending(
@@ -282,10 +288,11 @@ def _measure_pending(
     done_offset: int,
     total: int,
     should_cancel: Callable[[], bool] | None,
+    detection_errors: list[str],
 ) -> dict[Path, tuple[FrameAnalysis, int]]:
     """Score cache misses. Preview work uses a small pool. The cache is written here.
 
-    Inputs: pending, the cache misses; capture_info, clocks keyed by path; cache, weights, detector, subject_key, and eye_finder, the measurement settings; progress, done_offset, and total, the status line; should_cancel, an optional cancel check.
+    Inputs: pending, the cache misses; capture_info, clocks keyed by path; cache, weights, detector, subject_key, and eye_finder, the measurement settings; progress, done_offset, and total, the status line; should_cancel, an optional cancel check; detection_errors, the list that receives the first subject-detection failure.
     Output: a dict from path to the analysis and a detection-failure count of 0 or 1.
     Uses: _score_all for files that were not in the cache.
     Limitations: without a detector or a bird-eye finder, workers score previews and persist runs on this thread. With either model, that model stays on this thread. Cache rows are written in persist, not on the workers. Originals are not written.
@@ -360,6 +367,7 @@ def _measure_pending(
         eye_finder=eye_finder,
         persist=persist,
         cancel=cancel,
+        detection_errors=detection_errors,
     )
     return found
 
@@ -383,13 +391,14 @@ def _measure_with_detector(
     eye_finder: object | None,
     persist: Callable[[int, tuple[FrameAnalysis, int]], None],
     cancel: Callable[[], None],
+    detection_errors: list[str],
 ) -> None:
     """Decode ahead on a pool, run models on this thread, then score.
 
     A model is not shared across threads. A batch is a few frames. Decode of
     the next frames keeps running while that batch is predicted.
 
-    Inputs: pending, the cache misses; capture_info, clocks; cache, weights, detector, subject_key, and eye_finder, the measurement settings; persist, the coordinating-thread callback that stores one result; cancel, the cancel check.
+    Inputs: pending, the cache misses; capture_info, clocks; cache, weights, detector, subject_key, and eye_finder, the measurement settings; persist, the coordinating-thread callback that stores one result; cancel, the cancel check; detection_errors, the list that receives the first subject-detection failure.
     Output: none. Results are delivered through persist in file order.
     Uses: _measure_pending when a subject detector or a bird-eye finder is active.
     Limitations: detect_many and find_many run on this caller thread, in batches of up to four frames. The models are not shared across threads. Cache rows stay in persist. Photographs are not written, and previews are not demosaiced.
@@ -456,7 +465,7 @@ def _measure_with_detector(
                     boxes: list[object] = [None] * len(images)
                     failures = [0] * len(images)
                 else:
-                    boxes, failures = _detect_batch(detector, images)
+                    boxes, failures = _detect_batch(detector, images, detection_errors)
                 eyes = _find_eyes(eye_finder, images)
                 for offset, index in enumerate(indexes):
                     loaded = decoded[index]
@@ -542,13 +551,14 @@ def _collect(in_flight: dict[Future, int], destination: dict) -> None:
 def _detect_batch(
     detector: SubjectDetector,
     images: list[np.ndarray | None],
+    errors: list[str],
 ) -> tuple[list[object], list[int]]:
     """Run subject detection for one batch on the caller thread.
 
-    Inputs: detector, the subject model; images, the BGR previews. A None entry is rejected.
+    Inputs: detector, the subject model; images, the BGR previews. A None entry is rejected. errors, the list that keeps the first failure reason.
     Output: one box or None per image, and a matching list of 0 or 1 failure flags.
     Uses: _measure_with_detector.
-    Limitations: detect_many is preferred and runs on this thread. The model is not shared across threads. A detection exception marks every frame in that batch as failed and returns no boxes. Those frames then use full-frame sharpness.
+    Limitations: detect_many is preferred and runs on this thread. The model is not shared across threads. A detection exception marks every frame in that batch as failed and returns no boxes. Those frames then use full-frame sharpness. The first reason is kept and later reasons are only logged.
     """
 
     ready = [image for image in images if image is not None]
@@ -558,11 +568,16 @@ def _detect_batch(
     if callable(many):
         try:
             found = list(many(ready))
-        except Exception:
+        except Exception as exc:
             log.warning("Subject detection failed for %d frame(s)", len(ready), exc_info=True)
+            _remember_detection_error(errors, exc)
             return [None] * len(ready), [1] * len(ready)
         if len(found) != len(ready):
             log.warning("Subject detection returned %d boxes for %d frames", len(found), len(ready))
+            _remember_detection_error(
+                errors,
+                f"Subject detection returned {len(found)} boxes for {len(ready)} frames.",
+            )
             found = (found + [None] * len(ready))[: len(ready)]
             return found, [1] * len(ready)
         return found, [0] * len(ready)
@@ -572,11 +587,31 @@ def _detect_batch(
         try:
             found.append(detector.detect(image))
             failures.append(0)
-        except Exception:
+        except Exception as exc:
             log.warning("Subject detection failed", exc_info=True)
+            _remember_detection_error(errors, exc)
             found.append(None)
             failures.append(1)
     return found, failures
+
+
+def _remember_detection_error(errors: list[str], reason: object) -> None:
+    """
+    Keep the first subject-detection failure for the scan note.
+
+    Inputs: errors, the list filled by the scan; reason, an exception or a short sentence.
+    Output: no return value. The first reason is stored as one line. Later calls leave the list alone.
+    Uses: _detect_batch.
+    Limitations: the stored text is at most 240 characters. The full traceback stays in the log.
+    """
+
+    if errors:
+        return
+    text = " ".join(str(reason).split())
+    if len(text) > 240:
+        text = text[:237] + "..."
+    if text:
+        errors.append(text)
 
 
 def _find_eyes(finder: object | None, images: list[np.ndarray]) -> list[object]:
