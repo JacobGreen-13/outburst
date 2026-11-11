@@ -22,6 +22,7 @@ from outburst.subject import (
     preferred_device,
     subject_runtime_can_install,
     subject_runtime_install_command,
+    subject_runtime_python,
     subject_runtime_ready,
 )
 
@@ -320,24 +321,51 @@ def test_private_python_scores_a_preview_batch(tmp_path: Path) -> None:
         session.close()
 
 
-def test_install_subject_runtime_reports_a_pip_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_windowed_launcher_installs_with_console_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pythonw = tmp_path / "pythonw.exe"
+    console = tmp_path / "python.exe"
+    pythonw.write_bytes(b"")
+    console.write_bytes(b"")
+    monkeypatch.setattr("outburst.subject.sys.platform", "win32")
+    monkeypatch.setattr("outburst.subject.sys.executable", str(pythonw))
+    assert subject_runtime_python() == str(console)
+    command = subject_runtime_install_command()
+    assert command[0] == str(console)
+    assert command[1:3] == ["-m", "pip"]
+    assert command[-1] == "ultralytics>=8.3"
+
+
+def test_install_subject_runtime_reports_a_pip_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class Proc:
-        returncode = 1
+        def __init__(self, args: list[str], stdout: object = None, **_kwargs: object) -> None:
+            del args
+            self.returncode = 1
+            if hasattr(stdout, "write"):
+                stdout.write("Could not find a version\n")  # type: ignore[attr-defined]
+                stdout.flush()  # type: ignore[attr-defined]
 
         def poll(self) -> int:
             return self.returncode
 
-        def communicate(self) -> tuple[str, str]:
-            return "", "Could not find a version"
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return self.returncode
 
-    monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: Proc())
+    monkeypatch.setattr("outburst.subject.default_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: Proc(*args, **kwargs))
     with pytest.raises(RuntimeError, match="Could not find a version"):
         install_subject_runtime()
 
 
-def test_install_subject_runtime_stops_when_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_subject_runtime_stops_when_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class Proc:
-        def __init__(self) -> None:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
             self.returncode: int | None = None
             self.terminated = False
 
@@ -349,15 +377,129 @@ def test_install_subject_runtime_stops_when_cancelled(monkeypatch: pytest.Monkey
             self.returncode = -15
 
         def wait(self, timeout: float | None = None) -> int:
+            del timeout
             assert self.returncode is not None
             return self.returncode
 
-        def communicate(self) -> tuple[str, str]:
-            raise AssertionError("cancelled install must not read pip output")
-
-    monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: Proc())
+    monkeypatch.setattr("outburst.subject.default_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: Proc(*args, **kwargs))
     with pytest.raises(SubjectRuntimeCancelled):
         install_subject_runtime(should_cancel=lambda: True)
+
+
+def test_install_subject_runtime_finishes_when_pip_writes_a_lot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+    import threading
+
+    script = tmp_path / "chatty.py"
+    script.write_text("print(('x' * 200 + '\\n') * 500)\n", encoding="utf-8")
+    monkeypatch.setattr("outburst.subject.default_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "outburst.subject.subject_runtime_install_command",
+        lambda: [sys.executable, str(script)],
+    )
+    finished = threading.Event()
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            install_subject_runtime()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    assert finished.wait(15), "pip output filled the pipe and the install never finished"
+    assert errors == []
+    assert "x" in (tmp_path / "install.log").read_text(encoding="utf-8")
+
+
+def test_private_command_does_not_stall_on_a_long_log(tmp_path: Path) -> None:
+    import sys
+    import threading
+
+    from outburst.sidecar import _run
+
+    script = tmp_path / "chatty.py"
+    script.write_text(
+        "import sys\nprint(('y' * 200 + '\\n') * 500)\nprint('err', file=sys.stderr)\n",
+        encoding="utf-8",
+    )
+    finished = threading.Event()
+    result: dict[str, tuple[int, str, str]] = {}
+
+    def run() -> None:
+        result["value"] = _run([sys.executable, str(script)], None)
+        finished.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    assert finished.wait(15), "command output filled the pipe and the install never finished"
+    code, stdout, stderr = result["value"]
+    assert code == 0
+    assert "y" * 200 in stdout
+    assert "err" in stderr
+
+
+def test_install_status_counts_bytes_received_during_pip(tmp_path: Path) -> None:
+    from outburst.sidecar import _report_install
+
+    cache = tmp_path / "pip-cache"
+    cache.mkdir()
+    (cache / "torch.whl").write_bytes(b"x" * (3 * 1024 * 1024))
+    log = tmp_path / "install.log"
+    log.write_text("--- installing ultralytics ---\nDownloading torch.whl\n", encoding="utf-8")
+    seen: list[str] = []
+    _report_install(seen.append, log, cache, 0)
+    assert seen == ["Downloading torch.whl — 3 MB received"]
+    seen.clear()
+    _report_install(seen.append, log, cache, 3 * 1024 * 1024)
+    log.write_text("--- installing ultralytics ---\n", encoding="utf-8")
+    seen.clear()
+    _report_install(seen.append, log, cache, 3 * 1024 * 1024)
+    assert seen == ["Installing Ultralytics and PyTorch — 0 MB received"]
+
+
+def test_python_download_reports_each_megabyte(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from outburst.sidecar import _download
+
+    body = b"z" * (1024 * 1024 + 10)
+
+    class Response:
+        def __init__(self) -> None:
+            self._body = body
+
+        def read(self, size: int = -1) -> bytes:
+            if size < 0:
+                size = len(self._body)
+            chunk = self._body[:size]
+            self._body = self._body[size:]
+            return chunk
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        "outburst.sidecar.urllib.request.urlopen",
+        lambda *_args, **_kwargs: Response(),
+    )
+    messages: list[str] = []
+    destination = tmp_path / "python-embed.zip"
+    _download(
+        "https://example.test/python.zip",
+        destination,
+        None,
+        messages.append,
+        "Downloading Python",
+    )
+    assert destination.read_bytes() == body
+    assert messages[0] == "Downloading Python, 0 MB"
+    assert messages[-1] == "Downloading Python, 1 MB"
 
 
 def test_missing_model_file_is_rejected(tmp_path: Path) -> None:

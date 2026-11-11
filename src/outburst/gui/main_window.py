@@ -1213,13 +1213,14 @@ class MainWindow(QMainWindow):
         worker.succeeded.connect(self._on_runtime_installed)
         worker.failed.connect(self._on_runtime_install_failed)
         worker.cancelled.connect(self._on_runtime_install_cancelled)
+        worker.status.connect(self.statusBar().showMessage)
         self._download_worker = worker
         self.controls.set_model_enabled(False)
         self._sync_actions()
         self.progress.setRange(0, 0)
         self.progress.setVisible(True)
         self.statusBar().showMessage(
-            "Installing subject and bird eye detection. This downloads PyTorch and can take several minutes."
+            "Installing subject and bird eye detection. PyTorch is a large download, and this line shows how much has arrived."
         )
         worker.start()
 

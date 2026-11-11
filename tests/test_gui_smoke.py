@@ -691,6 +691,9 @@ def test_a_missing_subject_runtime_installs_from_the_button(
     assert downloads == []
     assert scans == []
     assert "PyTorch" in window.statusBar().currentMessage()
+    window._download_worker.status.emit("Downloading Python, 4 MB")
+    qt_app.processEvents()
+    assert window.statusBar().currentMessage() == "Downloading Python, 4 MB"
     ready["ok"] = True
     window._on_runtime_installed()
     assert downloads == [DEFAULT_MODEL_ID]

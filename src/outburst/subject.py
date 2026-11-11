@@ -675,32 +675,59 @@ def subject_runtime_can_install() -> bool:
     return not bool(getattr(sys, "frozen", False))
 
 
+def subject_runtime_python() -> str:
+    """
+    Choose the interpreter that should run pip.
+
+    Inputs: none.
+    Output: the path of the console Python. On Windows this is python.exe beside a windowed launcher when that file exists.
+    Uses: subject_runtime_install_command.
+    Limitations: a frozen Windows app does not use this path. It installs into the private Python instead. Other platforms return the current interpreter.
+    """
+
+    current = Path(sys.executable)
+    if sys.platform != "win32":
+        return str(current)
+    if current.name.lower() == "python.exe":
+        return str(current)
+    console = current.with_name("python.exe")
+    if console.is_file():
+        return str(console)
+    return str(current)
+
+
 def subject_runtime_install_command() -> list[str]:
     """
     Build the pip command that installs Ultralytics into this interpreter.
 
     Inputs: none.
-    Output: the argument list, starting with this process's Python and ending with the ultralytics requirement.
+    Output: the argument list, starting with the console Python and ending with the ultralytics requirement.
     Uses: the review window and tests that check the install command.
-    Limitations: the command installs the library only. It does not download YOLO weights.
+    Limitations: the command installs the library only. It does not download YOLO weights. A windowed launcher such as pythonw.exe or outburst-gui.exe is replaced by the python.exe beside it, because pip stalls when that windowed program is the installer.
     """
 
-    import sys
+    return [
+        subject_runtime_python(),
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        SUBJECT_PIP_SPEC,
+    ]
 
-    return [sys.executable, "-m", "pip", "install", SUBJECT_PIP_SPEC]
 
-
-def install_subject_runtime(should_cancel: Callable[[], bool] | None = None) -> None:
+def install_subject_runtime(
+    should_cancel: Callable[[], bool] | None = None,
+    on_status: Callable[[str], None] | None = None,
+) -> None:
     """
     Install Ultralytics into the Python that is running Outburst.
 
-    Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels.
+    Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels. on_status, an optional callback that receives a short progress line while the download runs.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when pip exits with an error.
     Uses: the review window the first time subject or bird eye detection is turned on without Ultralytics.
-    Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. A packaged Windows app downloads a private Python, then installs Ultralytics there. A normal install downloads PyTorch and can take several minutes. It does not download model weights. The caller should stay off the window thread.
+    Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. A packaged Windows app downloads a private Python, then installs Ultralytics there. A normal install downloads PyTorch and can take several minutes. Pip output is appended to install.log in the cache, and the status line counts the bytes in the pip cache. It does not download model weights. The caller should stay off the window thread.
     """
-
-    import subprocess
 
     if not subject_runtime_can_install():
         raise RuntimeError(
@@ -710,31 +737,26 @@ def install_subject_runtime(should_cancel: Callable[[], bool] | None = None) -> 
     if uses_private_python():
         from outburst.sidecar import install_private_runtime
 
-        install_private_runtime(should_cancel)
+        install_private_runtime(should_cancel, on_status)
         return
-    process = subprocess.Popen(
+    from outburst.sidecar import _run_logged
+
+    if on_status is not None:
+        on_status(
+            "Installing Ultralytics and PyTorch. This download is large and can take several minutes."
+        )
+    log_path = default_cache_dir() / "install.log"
+    cache_dir = default_cache_dir() / "pip-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    code, _stdout, stderr = _run_logged(
         subject_runtime_install_command(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+        log_path,
+        should_cancel,
+        on_status=on_status,
+        env_extra={"PIP_CACHE_DIR": str(cache_dir)},
     )
-    while process.poll() is None:
-        if should_cancel is not None and should_cancel():
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=10)
-            raise SubjectRuntimeCancelled()
-        try:
-            process.wait(timeout=0.2)
-        except subprocess.TimeoutExpired:
-            continue
-        break
-    stdout, stderr = process.communicate()
-    if process.returncode != 0:
-        detail = (stderr or stdout or "pip install failed").strip()
+    if code != 0:
+        detail = (stderr or "pip install failed").strip()
         raise RuntimeError(detail[-800:])
 
 
