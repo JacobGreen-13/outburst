@@ -1,0 +1,44 @@
+Outburst for Debian and Ubuntu ships these components inside /opt/outburst. Each one stays a separate library.
+
+Outburst
+  License: MIT
+  Copyright (c) 2026 Outburst contributors
+  The text is in copyright beside this file.
+
+CPython
+  License: Python Software Foundation License
+  https://docs.python.org/3/license.html
+  The interpreter is the official standalone CPython build published by python-build-standalone.
+  You may replace /opt/outburst/python with a compatible build.
+
+PySide6 and Qt
+  License: GNU Lesser General Public License v3.0
+  https://www.gnu.org/licenses/lgpl-3.0.html
+  The Qt and PySide6 libraries are files under /opt/outburst/python. You may replace those libraries with compatible builds. Qt source is published by The Qt Company.
+
+rawpy and LibRaw
+  rawpy license: MIT
+  LibRaw license: GNU Lesser General Public License v2.1 or the Common Development and Distribution License 1.0
+  https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+  https://opensource.org/license/cddl-1-0
+  LibRaw is the library rawpy uses to read RAW photographs. You may replace that library with a compatible build.
+
+OpenCV (opencv-python-headless)
+  License: Apache License 2.0
+  https://www.apache.org/licenses/LICENSE-2.0
+
+NumPy
+  License: BSD 3-Clause
+  https://github.com/numpy/numpy/blob/main/LICENSE.txt
+
+exifread
+  License: BSD
+  https://github.com/ianare/exif-py/blob/develop/LICENSE.txt
+
+ExifTool
+  Copyright (c) Phil Harvey
+  License: GNU General Public License v1.0 or later, or the Artistic License (Perl)
+  https://exiftool.org/
+  ExifTool is a separate program installed by the libimage-exiftool-perl package. Outburst runs it to read capture times. Photographs are passed on the command line and are not uploaded.
+
+This package does not include Ultralytics, PyTorch, or the YOLO weights. The install button in Outburst puts those in the home directory, under ~/.local/share/Outburst/detection, and the model files under ~/.cache/outburst/models.

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def _run_gui(folder: Path | None) -> int:
     Inputs: folder, a burst folder to open, or None.
     Output: the integer exit code from the Qt event loop, or 1 when PySide6 cannot be imported.
     Uses: review-window startup.
-    Limitations: an existing QApplication is reused. The font size is raised to 12 only when the current point size is already positive. A folder is opened after the window is shown.
+    Limitations: an existing QApplication is reused. The font size is raised to 12 only when the current point size is already positive. A folder is opened after the window is shown. The Debian package sets the desktop file name so the window groups with its launcher.
     """
     try:
         from PySide6.QtGui import QFont
@@ -58,6 +59,8 @@ def _run_gui(folder: Path | None) -> int:
     from outburst.gui.styles import apply_theme, build_app_icon
 
     app = QApplication.instance() or QApplication([])
+    if os.environ.get("OUTBURST_PACKAGED") == "1":
+        app.setDesktopFileName("outburst")
     app.setApplicationName("Outburst")
     app.setOrganizationName("Outburst")
     app.setApplicationDisplayName("Outburst")
