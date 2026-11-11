@@ -128,14 +128,14 @@ for path in stage.iterdir():
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 PY
 
-echo "Checking that the window toolkit imports..."
-if ! QT_QPA_PLATFORM=offscreen "$PREFIX/bin/python3" -c "import outburst, PySide6.QtWidgets, cv2, numpy, rawpy, exifread"; then
-  echo "The build machine is missing a library the window loads. Install the packages in packaging/linux/build-packages.txt, then run this script again." >&2
+echo "Checking that the packaged modules import..."
+if ! "$PREFIX/bin/python3" -c "import outburst, cv2, numpy, rawpy, exifread"; then
+  echo "The packaged Python could not import Outburst." >&2
   exit 1
 fi
 
-QT_QPA_PLATFORM=offscreen "$PREFIX/bin/python3" \
-  "$ROOT/packaging/linux/make_icon.py" \
+# The icon is committed. packaging/linux/make_icon.py redraws it when the app mark changes.
+install -D -m 0644 "$ROOT/packaging/linux/outburst.png" \
   "$STAGE/usr/share/icons/hicolor/256x256/apps/outburst.png"
 
 install -D -m 0755 "$ROOT/packaging/linux/outburst" "$STAGE/usr/bin/outburst"

@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - cursor/deb-installer-112a
+      - cursor/deb-ci-fix-112a
     paths:
       - packaging/linux/**
       - .github/workflows/debian-package.yml
@@ -31,9 +31,6 @@ jobs:
     steps:
       - name: Check out Outburst
         uses: actions/checkout@v4
-
-      - name: Install the libraries the window loads
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $(tr '\n' ' ' < packaging/linux/build-packages.txt)
 
       - name: Build the package
         run: packaging/linux/build.sh
