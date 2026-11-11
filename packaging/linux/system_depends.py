@@ -1,11 +1,10 @@
 """Map libraries used by the packaged app to Debian package names.
 
-``packages_from_ldd`` reads one ``ldd`` transcript. ``packages_for_tree`` imports the app, reads the libraries in ``/proc/self/maps``, and adds the libraries named by the X11 and Wayland platform plugins. The build script prints the Depends line.
+``packages_from_ldd`` reads one ``ldd`` transcript. ``packages_for_tree`` reads the NEEDED entries of the app's libraries with ``readelf`` and adds the libraries named by the X11 and Wayland platform plugins. The build script prints the Depends line. The build machine does not have to load Qt.
 """
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -117,9 +116,20 @@ SONAME_PACKAGES: dict[str, str] = {
 
 EXIFTOOL_PACKAGE = "libimage-exiftool-perl"
 
-# The window opens through these plugins. Their libraries are not all loaded by an offscreen import.
+# Libraries the app loads, plus the plugins that open the window on X11 or Wayland.
 # The GTK theme plugin stays optional, so a system without GTK can still open the window.
-_PLATFORM_PLUGINS = (
+_APP_LIBRARIES = (
+    "bin/python3.12",
+    "lib/python3.12/site-packages/PySide6/QtCore.abi3.so",
+    "lib/python3.12/site-packages/PySide6/QtGui.abi3.so",
+    "lib/python3.12/site-packages/PySide6/QtWidgets.abi3.so",
+    "lib/python3.12/site-packages/PySide6/libpyside6.abi3.so*",
+    "lib/python3.12/site-packages/shiboken6/*.so*",
+    "lib/python3.12/site-packages/cv2/cv2*.so",
+    "lib/python3.12/site-packages/numpy/_core/_multiarray_umath*.so",
+    "lib/python3.12/site-packages/numpy/linalg/_umath_linalg*.so",
+    "lib/python3.12/site-packages/numpy/fft/_pocketfft_umath*.so",
+    "lib/python3.12/site-packages/rawpy/_rawpy*.so",
     "lib/python3.12/site-packages/PySide6/Qt/plugins/platforms/libqxcb.so",
     "lib/python3.12/site-packages/PySide6/Qt/plugins/platforms/libqwayland.so",
     "lib/python3.12/site-packages/PySide6/Qt/plugins/xcbglintegrations/libqxcb-egl-integration.so",
@@ -255,8 +265,8 @@ def packages_from_sonames(sonames: list[str]) -> list[str]:
 
     Inputs: sonames, names from readelf, including Qt libraries that ship inside the package.
     Output: package names, in first-seen order, without duplicates. Qt, shiboken, and libpython names are skipped.
-    Uses: platform_packages.
-    Limitations: an unmapped system soname raises RuntimeError. This does not install packages.
+    Uses: the Debian package tests.
+    Limitations: Qt, shiboken, and libpython names are skipped. An unmapped system soname raises RuntimeError. This does not install packages.
     """
 
     found: list[str] = []
@@ -283,7 +293,7 @@ def _needed_sonames(path: Path) -> list[str]:
 
     Inputs: path, an ELF file.
     Output: sonames in file order.
-    Uses: platform_packages.
+    Uses: packages_for_tree.
     Limitations: a missing readelf or a failed read raises RuntimeError.
     """
 
@@ -303,64 +313,107 @@ def _needed_sonames(path: Path) -> list[str]:
     return sonames
 
 
-def platform_packages(prefix: str) -> list[str]:
+def external_packages(sonames: list[str], bundled: set[str]) -> list[str]:
     """
-    Collect Debian packages required to open the window on X11 or Wayland.
+    Turn sonames that are not inside the package into Debian package names.
+
+    Inputs: sonames, NEEDED entries in first-seen order; bundled, file names shipped under the prefix.
+    Output: package names, in first-seen order, without duplicates.
+    Uses: packages_for_tree.
+    Limitations: a soname in bundled is skipped. An unmapped soname raises RuntimeError. This does not install packages.
+    """
+
+    found: list[str] = []
+    seen: set[str] = set()
+    problems: list[str] = []
+    for soname in sonames:
+        if soname in bundled:
+            continue
+        package = package_for_filename(soname)
+        if package is None:
+            problems.append(f"No Debian package is mapped for {soname}")
+            continue
+        if package not in seen:
+            seen.add(package)
+            found.append(package)
+    if problems:
+        raise RuntimeError("\n".join(dict.fromkeys(problems)))
+    return found
+
+
+def _bundled_names(prefix: Path) -> dict[str, Path]:
+    """
+    Index shared libraries shipped inside the package by file name.
 
     Inputs: prefix, the packaged Python directory.
-    Output: package names for the NEEDED entries of the xcb and Wayland plugins.
-    Uses: packages_for_tree.
-    Limitations: a plugin that is not in this prefix is skipped. The GTK theme plugin is not included.
+    Output: a map from file name to path. The first file of a given name wins.
+    Uses: packages_for_tree when it follows a NEEDED entry into the package.
+    Limitations: this indexes file names, which match the sonames Qt and the wheels publish. It does not read ELF headers.
     """
 
-    sonames: list[str] = []
-    for relative in _PLATFORM_PLUGINS:
-        path = Path(prefix) / relative
-        if path.is_file():
-            sonames.extend(_needed_sonames(path))
-    return packages_from_sonames(sonames)
+    index: dict[str, Path] = {}
+    for path in prefix.rglob("*"):
+        if path.is_file() and ".so" in path.name:
+            index.setdefault(path.name, path)
+    return index
+
+
+def _entry_files(prefix: Path) -> list[Path]:
+    """
+    Find the libraries the app and the window plugins load.
+
+    Inputs: prefix, the packaged Python directory.
+    Output: existing files, in the order of _APP_LIBRARIES.
+    Uses: packages_for_tree.
+    Limitations: a missing pattern raises RuntimeError. This does not follow NEEDED entries.
+    """
+
+    found: list[Path] = []
+    missing: list[str] = []
+    for pattern in _APP_LIBRARIES:
+        matches = sorted(prefix.glob(pattern))
+        if not matches:
+            missing.append(pattern)
+            continue
+        found.extend(matches)
+    if missing:
+        raise RuntimeError(
+            "The package is missing libraries the window needs:\n" + "\n".join(missing)
+        )
+    return found
 
 
 def packages_for_tree(prefix: str) -> list[str]:
     """
-    Collect Debian dependencies for the libraries the app actually loads.
+    Collect Debian dependencies for the libraries the app links.
 
     Inputs: prefix, the packaged Python directory.
     Output: package names, with the exiftool package last when it was not already present.
     Uses: packaging/linux/build.sh.
-    Limitations: the prefix Python imports Outburst, Qt widgets, OpenCV, NumPy, and rawpy on the offscreen platform, then the open libraries are read from /proc/self/maps. The X11 and Wayland platform plugins add the libraries a real window loads. An unmapped library raises RuntimeError.
+    Limitations: readelf supplies the NEEDED entries of the interpreter, Qt widgets, OpenCV, NumPy, rawpy, and the X11 and Wayland plugins. A library inside the prefix is followed instead of mapped. An unmapped system library raises RuntimeError. This does not load the libraries, so the build machine does not need a display stack.
     """
 
-    python = str(Path(prefix) / "bin" / "python3")
-    script = (
-        "import os, pathlib\n"
-        "os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')\n"
-        "import outburst\n"
-        "import PySide6.QtWidgets\n"
-        "import cv2, numpy, rawpy, exifread\n"
-        "paths = []\n"
-        "for line in pathlib.Path('/proc/self/maps').read_text(encoding='utf-8', errors='replace').splitlines():\n"
-        "    parts = line.split()\n"
-        "    if parts and parts[-1].startswith('/'):\n"
-        "        paths.append(parts[-1])\n"
-        "print('\\n'.join(paths))\n"
-    )
-    env = os.environ.copy()
-    env["QT_QPA_PLATFORM"] = "offscreen"
-    result = subprocess.run(
-        [python, "-c", script],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "Could not import the packaged app.").strip()
-        raise RuntimeError(detail[-800:])
-    found = packages_from_paths([line for line in result.stdout.splitlines() if line.strip()], prefix)
-    for package in platform_packages(prefix):
-        if package not in found:
-            found.append(package)
+    root = Path(prefix)
+    bundled = _bundled_names(root)
+    pending = _entry_files(root)
+    seen_files: set[str] = set()
+    external: list[str] = []
+    while pending:
+        path = pending.pop(0)
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        if key in seen_files:
+            continue
+        seen_files.add(key)
+        for soname in _needed_sonames(path):
+            inside = bundled.get(soname)
+            if inside is not None:
+                pending.append(inside)
+                continue
+            external.append(soname)
+    found = external_packages(external, set())
     if EXIFTOOL_PACKAGE not in found:
         found.append(EXIFTOOL_PACKAGE)
     return found

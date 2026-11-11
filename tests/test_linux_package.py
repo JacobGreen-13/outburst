@@ -65,6 +65,18 @@ def test_versioned_library_names_map_to_packages() -> None:
     ]
 
 
+def test_libraries_inside_the_package_are_not_dependencies() -> None:
+    assert _DEPENDS.external_packages(
+        ["libQt6Gui.so.6", "libc.so.6", "libQt6Gui.so.6"],
+        {"libQt6Gui.so.6"},
+    ) == ["libc6"]
+
+
+def test_icon_file_is_a_png() -> None:
+    data = (LINUX / "outburst.png").read_bytes()
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_xcb_plugin_sonames_become_packages() -> None:
     sonames = [
         "libQt6XcbQpa.so.6",
