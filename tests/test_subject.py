@@ -214,6 +214,73 @@ def test_frozen_linux_app_does_not_pip_install_ultralytics(monkeypatch: pytest.M
         install_subject_runtime()
 
 
+def test_private_runtime_without_a_stamp_is_reused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from outburst.sidecar import _python_exe, private_runtime_ready
+
+    monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path)
+    python = _python_exe(tmp_path)
+    python.parent.mkdir()
+    python.write_bytes(b"MZ")
+    monkeypatch.setattr("outburst.sidecar._interpreter_has_detection", lambda _path: True)
+    assert private_runtime_ready() is True
+    assert (tmp_path / ".outburst-subject-ready").is_file()
+
+
+def test_install_skips_pytorch_when_it_is_already_there(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from outburst.sidecar import _python_exe, install_private_runtime
+
+    monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path)
+    python = _python_exe(tmp_path)
+    python.parent.mkdir()
+    python.write_bytes(b"MZ")
+    (tmp_path / ".outburst-subject-ready").write_text("ultralytics\n", encoding="utf-8")
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("an installed runtime must not download PyTorch again")
+
+    monkeypatch.setattr("outburst.sidecar.subprocess.Popen", fail)
+    monkeypatch.setattr("outburst.sidecar.urllib.request.urlopen", fail)
+    install_private_runtime()
+
+
+def test_source_checkout_uses_an_existing_private_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from outburst.sidecar import _python_exe
+    from outburst.subject import subject_runtime_ready
+
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr("outburst.subject._in_process_runtime_ready", lambda: False)
+    python = _python_exe(tmp_path)
+    python.parent.mkdir()
+    python.write_bytes(b"MZ")
+    (tmp_path / ".outburst-subject-ready").write_text("ultralytics\n", encoding="utf-8")
+    assert subject_runtime_ready() is True
+
+
+def test_frozen_app_uses_a_venv_beside_the_program(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from outburst.sidecar import installed_detection_python
+    from outburst.subject import subject_runtime_ready
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "Outburst.exe"))
+    monkeypatch.setattr("outburst.subject.platform.machine", lambda: "AMD64")
+    monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path / "empty-detection")
+    venv_python = tmp_path / ".venv" / "Scripts" / "python.exe"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_bytes(b"MZ")
+    monkeypatch.setattr(
+        "outburst.sidecar._interpreter_has_detection",
+        lambda path: Path(path) == venv_python,
+    )
+    assert installed_detection_python() == venv_python
+    assert subject_runtime_ready() is True
+
+
 def test_frozen_windows_installs_a_private_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import hashlib
     import io
@@ -599,6 +666,22 @@ def test_models_dir_falls_back_to_the_cache(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr("outburst.subject.default_cache_dir", lambda: tmp_path / "cache")
     assert models_dir() == tmp_path / "cache" / "models"
     assert (tmp_path / "cache" / "models").is_dir()
+
+
+def test_models_dir_reuses_weights_already_in_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OUTBURST_MODELS", raising=False)
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text('[project]\nname = "outburst"\n', encoding="utf-8")
+    cache = tmp_path / "cache"
+    weights = cache / "models" / "yolo11n.pt"
+    weights.parent.mkdir(parents=True)
+    weights.write_bytes(_weights_bytes())
+    eye = cache / "models" / "eye_pose_v0.pt"
+    eye.write_bytes(_weights_bytes())
+    monkeypatch.chdir(project)
+    monkeypatch.setattr("outburst.subject.default_cache_dir", lambda: cache)
+    assert models_dir() == cache / "models"
 
 
 def test_ready_file_is_not_downloaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

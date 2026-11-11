@@ -121,17 +121,51 @@ def models_dir() -> Path:
     Inputs: none. OUTBURST_MODELS overrides the location when that environment variable is set.
     Output: the models directory, created if it was missing.
     Uses: model downloads and the path passed to the detector loader.
-    Limitations: creating the directory is the side effect. Photographs are not written. Without the override, a project models folder is used when the checkout is found, and the cache models folder otherwise.
+    Limitations: creating the chosen directory is the side effect. Photographs are not written. Without the override, a folder that already holds weights is used, whether that is the checkout, the cache, or the folder beside the program. An empty checkout still uses its own models folder.
     """
 
     override = os.environ.get("OUTBURST_MODELS")
     if override:
         path = Path(override).expanduser().resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    project = _discover_project_models()
+    candidates: list[Path] = []
+    if project is not None:
+        candidates.append(project)
+    candidates.append(default_cache_dir() / "models")
+    beside = Path(sys.executable).resolve().parent / "models"
+    if beside not in candidates:
+        candidates.append(beside)
+    best = candidates[0]
+    best_count = _ready_weights_count(best)
+    for candidate in candidates[1:]:
+        count = _ready_weights_count(candidate)
+        if count > best_count:
+            best = candidate
+            best_count = count
+    if best_count > 0:
+        chosen = best
+    elif project is not None:
+        chosen = project
     else:
-        discovered = _discover_project_models()
-        path = discovered if discovered is not None else default_cache_dir() / "models"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+        chosen = default_cache_dir() / "models"
+    chosen.mkdir(parents=True, exist_ok=True)
+    return chosen
+
+
+def _ready_weights_count(directory: Path) -> int:
+    """
+    Count catalog weights files that are already usable in one folder.
+
+    Inputs: directory, a candidate models folder. It does not have to exist.
+    Output: how many subject and bird-eye filenames in that folder pass model_is_ready.
+    Uses: models_dir when an upgrade should keep weights downloaded by an older install.
+    Limitations: this does not download files and does not create the folder. A partial download under the size limit counts as absent.
+    """
+
+    names = [BIRD_EYE_OPTION.filename, *[option.filename for option in MODEL_OPTIONS]]
+    return sum(1 for name in names if model_is_ready(directory / name))
 
 
 def model_path(option: ModelOption, directory: Path | None = None) -> Path:
@@ -654,20 +688,54 @@ def subject_runtime_ready() -> bool:
     Report whether Ultralytics can be used for detection.
 
     Inputs: none.
-    Output: True when a normal process can import ultralytics, or when a packaged Windows app has finished installing it into the private Python.
-    Uses: deciding whether subject detection and bird eye detection can load.
-    Limitations: a failed import is treated as missing. A packaged Windows app does not import Ultralytics inside Outburst.exe. This does not check that a weights file is present.
+    Output: True when this process can import ultralytics, or when a private Python or a .venv beside the program already has Ultralytics and PyTorch.
+    Uses: deciding whether subject detection and bird eye detection can load, including after a newer install.
+    Limitations: a packaged Windows app does not import Ultralytics inside Outburst.exe. A source process tries its own interpreter first. This does not check that a weights file is present.
+    """
+
+    if _in_process_runtime_ready():
+        return True
+    from outburst.sidecar import installed_detection_python
+
+    return installed_detection_python() is not None
+
+
+def _in_process_runtime_ready() -> bool:
+    """
+    Report whether this process can import Ultralytics itself.
+
+    Inputs: none.
+    Output: True when this is not a packaged Windows app and `import ultralytics` succeeds.
+    Uses: subject_runtime_ready and the detector loaders.
+    Limitations: a packaged Windows app returns False without trying the import. A failed import is False.
     """
 
     if uses_private_python():
-        from outburst.sidecar import private_runtime_ready
-
-        return private_runtime_ready()
+        return False
     try:
         import ultralytics  # noqa: F401
     except ImportError:
         return False
     return True
+
+
+def _detection_uses_sidecar() -> bool:
+    """
+    Report whether detection should run in a separate Python.
+
+    Inputs: none.
+    Output: True when this process cannot import Ultralytics and another interpreter already has it, or when this is a packaged Windows app.
+    Uses: load_yolo_detector and load_bird_eye_detector.
+    Limitations: a source process that can import Ultralytics stays in process. This does not start the worker.
+    """
+
+    if _in_process_runtime_ready():
+        return False
+    if uses_private_python():
+        return True
+    from outburst.sidecar import installed_detection_python
+
+    return installed_detection_python() is not None
 
 
 def subject_runtime_can_install() -> bool:
@@ -837,7 +905,7 @@ def install_subject_runtime(
     Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels. on_status, an optional callback that receives a short progress line while the download runs.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when pip exits with an error.
     Uses: the install button when subject and bird eye detection are not installed yet.
-    Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. A packaged Windows app downloads a private Python, then installs Ultralytics there. A source install keeps the OpenCV already loaded by this process, then installs the other packages with --no-deps, because replacing cv2.pyd while Outburst has it open is denied on Windows. A normal install downloads PyTorch and can take several minutes. Pip output is appended to install.log in the cache, and the status line counts the bytes in the pip cache. It does not download model weights. The caller should stay off the window thread.
+    Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. When Ultralytics and PyTorch are already installed, this returns without downloading them. A packaged Windows app downloads a private Python, then installs Ultralytics there. A source install keeps the OpenCV already loaded by this process, then installs the other packages with --no-deps, because replacing cv2.pyd while Outburst has it open is denied on Windows. A normal install downloads PyTorch and can take several minutes. Pip output is appended to install.log in the cache, and the status line counts the bytes in the pip cache. It does not download model weights. The caller should stay off the window thread.
     """
 
     if not subject_runtime_can_install():
@@ -845,6 +913,10 @@ def install_subject_runtime(
             "This install scores the whole frame. "
             "Subject-aware sharpness and bird eye detection are not included."
         )
+    if subject_runtime_ready():
+        if on_status is not None:
+            on_status("PyTorch and Ultralytics are already installed.")
+        return
     if uses_private_python():
         from outburst.sidecar import install_private_runtime
 
@@ -892,7 +964,7 @@ def load_yolo_detector(model_path: Path, device: str | None = None) -> SubjectDe
 
     if not model_path.is_file():
         raise FileNotFoundError(f"Subject model not found: {model_path}")
-    if uses_private_python():
+    if _detection_uses_sidecar():
         from outburst.sidecar import SidecarSubjectDetector
 
         return SidecarSubjectDetector(model_path)
