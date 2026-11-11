@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - cursor/deb-ci-fix-112a
+      - cursor/version-0-2-1-112a
     paths:
       - packaging/linux/**
       - .github/workflows/debian-package.yml
