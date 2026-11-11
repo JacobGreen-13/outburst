@@ -1,6 +1,6 @@
 """Locate a bird eye with an open-weight pose model and measure its sharpness.
 
-The checkbox is Bird eye detection. It downloads ``eye_pose_v0.pt`` (synthet/eye-pose-v0, YOLO11n-pose trained on CUB-200-2011) and reads the left-eye and right-eye keypoints. A keypoint below 0.35 confidence is ignored. Sharpness is the Laplacian variance inside a disk sized from the bird box, and it is stored only when that disk is at least 16 px across. This is birds only. It does not judge a blink or a catchlight, and it does not look for mammal eyes.
+The checkbox is Bird eye detection. The install button downloads ``eye_pose_v0.pt`` (synthet/eye-pose-v0, YOLO11n-pose trained on CUB-200-2011). This module reads the left-eye and right-eye keypoints. A keypoint below 0.35 confidence is ignored. Sharpness is the Laplacian variance inside a disk sized from the bird box, and it is stored only when that disk is at least 16 px across. This is birds only. It does not judge a blink or a catchlight, and it does not look for mammal eyes.
 
 ``measure_eye`` scores a disk the caller already located. ``eye_from_pose`` reads one pose result. ``pose_device`` keeps this model off MPS. ``load_bird_eye_detector`` opens weights that are already on disk. ``BirdEyeDetector.find_many`` runs a batch on one thread: the whole preview first, then overlapping regions when that preview has no eye.
 """
@@ -262,21 +262,22 @@ class BirdEyeDetector:
         """
 
         tiles: list[np.ndarray] = []
-        owners: list[tuple[int, int, int]] = []
+        owners: list[tuple[int, int, int, np.ndarray]] = []
         for index, eye in enumerate(parsed):
             if eye is not None:
                 continue
             for origin_x, origin_y, crop in _tiles(images[index]):
-                tiles.append(np.ascontiguousarray(crop))
-                owners.append((index, origin_x, origin_y))
+                tile = np.ascontiguousarray(crop)
+                tiles.append(tile)
+                owners.append((index, origin_x, origin_y, tile))
         if not tiles:
             return
         found = self._predict(tiles)
         best: dict[int, tuple[tuple[float, float], Eye]] = {}
-        for (index, origin_x, origin_y), result in zip(owners, found, strict=False):
+        for (index, origin_x, origin_y, tile), result in zip(owners, found, strict=False):
             if result is None:
                 continue
-            eye = eye_from_pose(result, crop)
+            eye = eye_from_pose(result, tile)
             if eye is None:
                 continue
             moved = measure_eye(images[index], eye.x + origin_x, eye.y + origin_y, eye.radius)
@@ -375,9 +376,18 @@ def _masked_sharpness(gray: np.ndarray, x: int, y: int, radius: int) -> float:
     Limitations: a disk with fewer than 40 Laplacian samples returns 0.0. The mask is clipped at the frame edge.
     """
 
-    lap = cv2.Laplacian(gray, cv2.CV_64F)
-    mask = np.zeros(gray.shape, dtype=np.uint8)
-    cv2.circle(mask, (x, y), radius, 255, -1)
+    pad = 1
+    height, width = gray.shape[:2]
+    x0 = max(0, x - radius - pad)
+    y0 = max(0, y - radius - pad)
+    x1 = min(width, x + radius + pad + 1)
+    y1 = min(height, y + radius + pad + 1)
+    crop = gray[y0:y1, x0:x1]
+    if crop.size == 0:
+        return 0.0
+    lap = cv2.Laplacian(crop, cv2.CV_64F)
+    mask = np.zeros(crop.shape, dtype=np.uint8)
+    cv2.circle(mask, (x - x0, y - y0), radius, 255, -1)
     values = lap[mask > 0]
     if values.size < 40:
         return 0.0

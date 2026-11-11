@@ -1,6 +1,6 @@
 """Background threads so the window stays responsive.
 
-``AnalyzeWorker`` scans a folder and can be aborted. It can pass a bird-eye weights path. ``ModelFetchWorker`` downloads one weights file, including the bird-eye pose model. ``RuntimeInstallWorker`` installs Ultralytics when subject or bird eye detection is turned on without that library. ``ExportWorker`` copies keepers two at a time and writes an ``.xmp`` beside each saved file. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
+``AnalyzeWorker`` scans a folder and can be aborted. It can pass a bird-eye weights path. ``ModelFetchWorker`` downloads one weights file, including the bird-eye pose model. ``RuntimeInstallWorker`` installs Ultralytics when the photographer uses Install subject and bird eye detection. ``ExportWorker`` copies keepers two at a time and writes an ``.xmp`` beside each saved file. ``SidecarWorker`` writes XMP for keepers and star-rated frames. Each ``run`` emits progress, then success or failure, on the Qt thread.
 """
 
 from __future__ import annotations

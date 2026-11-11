@@ -294,9 +294,9 @@ class MainWindow(QMainWindow):
         Drop cached measurements for the open folder and scan it again.
 
         Inputs: none.
-        Output: no return value. With no folder, nothing happens. Otherwise the preview and filmstrip are cleared, the folder cache is forgotten, and a scan starts, after a missing subject model or bird-eye model is downloaded when that option is on.
+        Output: no return value. With no folder, nothing happens. Otherwise the preview and filmstrip are cleared, the folder cache is forgotten, and a scan starts.
         Uses: the Rescan action.
-        Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not clear the review. The cleared frames stay hidden if the new scan is cancelled. A missing Ultralytics install is installed before the scan when subject or bird eye detection is on.
+        Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not clear the review. The cleared frames stay hidden if the new scan is cancelled. A missing model is not downloaded here. The install button is what adds the detection software and the default weights.
         """
         if self._folder is None:
             return
@@ -310,9 +310,6 @@ class MainWindow(QMainWindow):
             return
         self._suspend_review()
         self._forget_folder_cache(folder)
-        if self.controls.prefer_subject() and not self._model_ready():
-            self._begin_download(then_scan=True)
-            return
         self.open_path(folder)
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[no-untyped-def]
@@ -599,8 +596,7 @@ class MainWindow(QMainWindow):
         self.rescan_action.setIconText("Rescan")
         self.rescan_action.setToolTip(
             "Clear cached measurements for this folder and scan it again. "
-            "With subject scoring on, Rescan downloads the selected model if it is missing and scores with it. "
-            "Keeper marks stay."
+            "A missing detection model is not downloaded. Keeper marks stay."
         )
         self.export_action.setIconText("Save")
         self.export_action.setToolTip(
@@ -759,19 +755,23 @@ class MainWindow(QMainWindow):
         Start a background scan of the open folder.
 
         Inputs: none. The folder, recursion, gap, weights, cache, subject model, and bird eye detection are read from the window.
-        Output: no return value. The preview and filmstrip are cleared, the progress bar is shown, and the worker starts. A missing subject model or bird-eye model starts a download instead.
+        Output: no return value. The preview and filmstrip are cleared, the progress bar is shown, and the worker starts. A checked feature whose weights are missing is turned off for this scan.
         Uses: opening and rescanning a folder.
-        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. The subject model is downloaded before the bird-eye model when both are missing. A scan does not install Ultralytics. That install starts from the install button.
+        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. This scan does not install Ultralytics and does not download weights. That happens from the install button, and from choosing a subject model that is not on disk after detection is installed.
         """
         if self._folder is None:
             return
         self._suspend_review()
         if self.controls.prefer_subject() and not self._model_ready():
-            self._begin_download(then_scan=True)
-            return
+            self.controls.set_subject_checked(False)
+            self.statusBar().showMessage(
+                "Subject model is not installed. Use Install subject and bird eye detection."
+            )
         if self.controls.eye_scoring() and not self._bird_eye_ready():
-            self._begin_bird_eye_download(then_scan=True)
-            return
+            self.controls.set_eye_scoring(False)
+            self.statusBar().showMessage(
+                "Bird eye model is not installed. Use Install subject and bird eye detection."
+            )
         if self._downloading:
             self._download_then_scan = True
             return
@@ -947,9 +947,9 @@ class MainWindow(QMainWindow):
         Turn subject-aware sharpness on or off.
 
         Inputs: enabled, whether the checkbox is now checked.
-        Output: no return value. Turning it off forgets a pending follow-up scan and rescores the open library. Turning it on rescans when the model is ready and a folder is open, or downloads a missing model.
+        Output: no return value. Turning it off forgets a pending follow-up scan and rescores the open library. Turning it on rescans when the model is already installed and a folder is open.
         Uses: the Subject-aware sharpness checkbox.
-        Limitations: with no folder open, a ready model does not start a scan. A missing model downloads, and the scan follows only when a folder is open. The checkbox does not install Ultralytics.
+        Limitations: with no folder open, a ready model does not start a scan. A missing model stays off and does not download. The install button downloads YOLO11 Nano.
         """
         if not enabled:
             self._download_then_scan = False
@@ -959,24 +959,37 @@ class MainWindow(QMainWindow):
             if self._folder is not None:
                 self.rescan()
             return
-        self._begin_download(then_scan=self._folder is not None)
+        self.controls.set_subject_checked(False)
+        self.statusBar().showMessage(
+            "Subject model is not installed. Use Install subject and bird eye detection."
+        )
 
     def _on_model_changed(self, _model_id: str) -> None:
         """
         Switch to the selected subject model and turn subject scoring on.
 
         Inputs: _model_id, the id emitted by the combo. The argument is unused; the panel is read instead.
-        Output: no return value. Subject scoring is checked without re-entering its toggle. A missing model downloads. An open folder is rescanned.
+        Output: no return value. Subject scoring is checked without re-entering its toggle. A missing model downloads only after detection is installed. An open folder is rescanned when the file is already there.
         Uses: the subject model combo.
-        Limitations: with no folder, a missing model downloads and does not scan afterward. A ready model with no folder does not scan.
+        Limitations: with no folder, a missing installed model downloads and does not scan afterward. Choosing a model before detection is installed does not download it. A ready model with no folder does not scan.
         """
         if not self.controls.prefer_subject():
             self.controls.set_subject_checked(True)
-        if self._folder is None:
-            if not self._model_ready():
-                self._begin_download(then_scan=False)
+        if not self._model_ready():
+            if (
+                subject_runtime_ready()
+                and os.environ.get("OUTBURST_HEADLESS") != "1"
+                and self._subject_license_accepted()
+            ):
+                self._begin_download(then_scan=self._folder is not None)
+                return
+            self.controls.set_subject_checked(False)
+            self.statusBar().showMessage(
+                "Subject model is not installed. Use Install subject and bird eye detection."
+            )
             return
-        self.rescan()
+        if self._folder is not None:
+            self.rescan()
 
     def _model_ready(self) -> bool:
         """
@@ -1031,7 +1044,7 @@ class MainWindow(QMainWindow):
 
         Inputs: none. The setting subject_agpl_accepted is read.
         Output: True when that setting is true.
-        Uses: the subject and bird-eye opt-in before an install or a model download.
+        Uses: the install button, and a subject model chosen after detection is installed.
         Limitations: a missing setting is False. This does not show a dialog.
         """
 
@@ -1139,34 +1152,44 @@ class MainWindow(QMainWindow):
             self._store_subject_license_acceptance()
         return True
 
-    def _download_allowed(self) -> bool:
+    def _installed_detection_ready(self) -> bool:
         """
-        Check the network and the license before a model download.
+        Report whether the install button has finished its work.
 
         Inputs: none.
-        Output: True when a download can start. False when the feature is turned off instead.
-        Uses: a missing subject model or bird-eye model after the modules are installed.
-        Limitations: the install button checks these before it calls a download, and that path does not call this again. A declined license does not open a second dialog.
+        Output: True when Ultralytics can be used, the license is accepted, and YOLO11 Nano and the bird eye weights are on disk.
+        Uses: deciding whether to show the detection controls or the install button.
+        Limitations: a headless process does not require the saved license. A different subject model can still be missing. This does not download anything.
         """
 
+        if not subject_runtime_ready():
+            return False
+        if os.environ.get("OUTBURST_HEADLESS") != "1" and not self._subject_license_accepted():
+            return False
+        default = option_by_id(DEFAULT_MODEL_ID)
+        if default is None or not model_is_ready(model_path(default)):
+            return False
+        return model_is_ready(model_path(BIRD_EYE_OPTION))
+
+    def _optional_model_download_allowed(self) -> bool:
+        """
+        Allow a subject-model download the photographer chose after detection is installed.
+
+        Inputs: none.
+        Output: True when the modules are installed, the license is already accepted, and the network check succeeds.
+        Uses: the subject model combo when that weights file is not on disk.
+        Limitations: this does not show the license dialog and does not install software. An offline computer shows the network explanation and returns False.
+        """
+
+        if not subject_runtime_ready():
+            return False
+        if os.environ.get("OUTBURST_HEADLESS") != "1" and not self._subject_license_accepted():
+            return False
         online = internet_connection()
         if not online.online:
-            self._stop_subject_opt_in(
-                online.explanation,
-                "Subject and bird eye detection need an internet connection.",
-                dialog=True,
-            )
+            self._notify("Subject detection", online.explanation, "info")
+            self.statusBar().showMessage("Subject and bird eye detection need an internet connection.")
             return False
-        if not self._subject_license_accepted():
-            if not accept_subject_license(self):
-                self._stop_subject_opt_in(
-                    "Subject and bird eye detection stayed off. "
-                    "Outburst did not install that software or download the models.",
-                    "Subject and bird eye detection stayed off.",
-                    dialog=False,
-                )
-                return False
-            self._store_subject_license_acceptance()
         return True
 
     def _continue_detection_setup(self) -> None:
@@ -1174,16 +1197,18 @@ class MainWindow(QMainWindow):
         Show the detection controls and download any missing models.
 
         Inputs: none.
-        Output: no return value. The controls replace the install button once the modules import. A missing subject model downloads first, then the bird-eye model.
+        Output: no return value. A missing subject model downloads first, then the bird-eye model. The controls replace the install button after both files are saved.
         Uses: the install button after the modules are installed.
-        Limitations: the checkboxes stay off. No scan starts from this download. A missing module hides the controls again.
+        Limitations: the checkboxes stay off. No scan starts from this download. The controls stay hidden until YOLO11 Nano and the bird eye weights are both on disk.
         """
 
         if not subject_runtime_ready():
             self._setup_detection = False
             self.controls.set_detection_installed(False)
             return
-        self.controls.set_detection_installed(True)
+        default = option_by_id(DEFAULT_MODEL_ID)
+        if default is not None and self.controls.model_id() != default.id:
+            self.controls.set_model_id(default.id)
         if not self._model_ready():
             self._begin_download(then_scan=False)
             return
@@ -1191,6 +1216,7 @@ class MainWindow(QMainWindow):
             self._begin_bird_eye_download(then_scan=False)
             return
         self._setup_detection = False
+        self.controls.set_detection_installed(True)
         self.statusBar().showMessage("Subject and bird eye detection are installed.")
 
     def _begin_runtime_install(self, then_scan: bool) -> None:
@@ -1229,9 +1255,9 @@ class MainWindow(QMainWindow):
         Continue after Ultralytics is installed.
 
         Inputs: none.
-        Output: no return value. The install UI is cleared. A missing subject model or bird-eye model downloads next. Otherwise a requested scan starts.
+        Output: no return value. The install UI is cleared. The install button's download of YOLO11 Nano and the bird eye weights continues. A scan starts only when one was requested outside that button.
         Uses: the end of a successful Ultralytics install.
-        Limitations: the scan starts only when one was requested and a folder is open. Weights are still downloaded when the file is not ready.
+        Limitations: the scan starts only when one was requested and a folder is open. Checking a box does not reach this method.
         """
         follow = self._download_then_scan
         setup = self._setup_detection
@@ -1240,12 +1266,6 @@ class MainWindow(QMainWindow):
             self._continue_detection_setup()
             return
         self.statusBar().showMessage("Subject and bird eye detection are installed.")
-        if self.controls.prefer_subject() and not self._model_ready():
-            self._begin_download(then_scan=follow)
-            return
-        if self.controls.eye_scoring() and not self._bird_eye_ready():
-            self._begin_bird_eye_download(then_scan=follow)
-            return
         if follow and self._folder is not None:
             self._start_worker()
 
@@ -1309,18 +1329,15 @@ class MainWindow(QMainWindow):
 
         Inputs: then_scan, whether a scan should start after the download ends.
         Output: no return value. The combo is disabled, actions refresh, and the status names the model being downloaded.
-        Uses: subject scoring when the weights are not already in the models folder.
-        Limitations: a headless process turns subject scoring off, says the model is missing, and scans without it when then_scan is set and a folder is open. A download of the same model only updates whether to scan afterward.
+        Uses: the install button for YOLO11 Nano, and the subject model combo after detection is installed.
+        Limitations: a headless process outside the install button turns subject scoring off and does not download. A download of the same model only updates whether to scan afterward. Opening a folder does not call this.
         """
-        if os.environ.get("OUTBURST_HEADLESS") == "1":
+        if os.environ.get("OUTBURST_HEADLESS") == "1" and not self._setup_detection:
             self.controls.set_subject_checked(False)
-            self.statusBar().showMessage("Subject model is not in the models folder")
-            if then_scan and self._folder is not None:
-                self._start_worker()
+            self.statusBar().showMessage("Subject model is not installed.")
             return
-        if not self._setup_detection and not self._download_allowed():
-            if then_scan and self._folder is not None:
-                self._start_worker()
+        if not self._setup_detection and not self._optional_model_download_allowed():
+            self.controls.set_subject_checked(False)
             return
         option = option_by_id(self.controls.model_id())
         if option is None:
@@ -1357,18 +1374,10 @@ class MainWindow(QMainWindow):
 
         Inputs: then_scan, whether a scan should start after the download ends.
         Output: no return value. The model combo is disabled and the status names Bird eye detection.
-        Uses: turning Bird eye detection on when eye_pose_v0.pt is not in the models folder.
-        Limitations: a headless process turns bird eye detection off, says the model is missing, and scans without it when then_scan is set and a folder is open. Photos are not uploaded. The weights are AGPL-3.0, separate from Outburst.
+        Uses: the install button when eye_pose_v0.pt is not in the models folder.
+        Limitations: a call outside the install button returns without downloading. Photos are not uploaded. The weights are AGPL-3.0, separate from Outburst.
         """
-        if os.environ.get("OUTBURST_HEADLESS") == "1":
-            self.controls.set_eye_scoring(False)
-            self.statusBar().showMessage("Bird eye model is not in the models folder")
-            if then_scan and self._folder is not None:
-                self._start_worker()
-            return
-        if not self._setup_detection and not self._download_allowed():
-            if then_scan and self._folder is not None:
-                self._start_worker()
+        if not self._setup_detection:
             return
         option = BIRD_EYE_OPTION
         if self._downloading:
@@ -1458,8 +1467,8 @@ class MainWindow(QMainWindow):
         setup = self._setup_detection
         self._setup_detection = False
         self._finish_download_ui()
-        if setup and subject_runtime_ready():
-            self.controls.set_detection_installed(True)
+        if setup:
+            self.controls.set_detection_installed(False)
         self._notify("Could not download the model", message, "warning")
         if role == "bird-eye":
             if self.controls.eye_scoring():
@@ -1486,8 +1495,7 @@ class MainWindow(QMainWindow):
         self._finish_download_ui()
         if setup and not replace:
             self._setup_detection = False
-            if subject_runtime_ready():
-                self.controls.set_detection_installed(True)
+            self.controls.set_detection_installed(False)
         if replace:
             if role == "bird-eye":
                 self._begin_bird_eye_download(then_scan)
@@ -2610,9 +2618,9 @@ class MainWindow(QMainWindow):
         Rescan after bird eye detection is turned on or off.
 
         Inputs: enabled, whether the checkbox is now checked.
-        Output: no return value. Automatic keepers are cleared. Turning it off rescans. Turning it on rescans when the weights are ready, or downloads them first.
+        Output: no return value. Automatic keepers are cleared. Turning it off rescans. Turning it on rescans when the weights are already installed.
         Uses: the Bird eye detection checkbox.
-        Limitations: with no folder open, a missing model still downloads, and no scan follows. A ready model with no folder does not scan. The checkbox does not install Ultralytics.
+        Limitations: with no folder open, a ready model does not scan. A missing model stays off and does not download. The install button downloads eye_pose_v0.pt.
         """
         self._clear_automatic_keepers()
         if not enabled:
@@ -2623,7 +2631,10 @@ class MainWindow(QMainWindow):
             if self._folder is not None:
                 self.rescan()
             return
-        self._begin_bird_eye_download(then_scan=self._folder is not None)
+        self.controls.set_eye_scoring(False)
+        self.statusBar().showMessage(
+            "Bird eye model is not installed. Use Install subject and bird eye detection."
+        )
 
     def _eye_circle(self, analysis: FrameAnalysis) -> tuple[int, int, int] | None:
         """
@@ -3068,7 +3079,7 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: no return value. Burst gap, sharpness, center, subfolders, minimum, minimum score, subject, eye, subject box, eye circle, the Info panel, filmstrip order, Grouping, Scoring, and model id are applied. A saved folder becomes the next dialog start.
         Uses: opening the review window.
-        Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise. Subject and bird-eye detection stay off until the modules are installed. An interactive session also restores them as off until the license has been accepted.
+        Limitations: the saved folder is not scanned. A missing minimum uses 1 when an older show-single-bursts setting is true, and 2 otherwise. The detection controls stay hidden until Ultralytics, the license, YOLO11 Nano, and the bird eye weights are all in place. Until then the checkboxes are restored as off.
         """
         settings = QSettings("Outburst", "Outburst")
         self.controls.set_threshold(_as_float(settings.value("threshold"), 1.0))
@@ -3090,13 +3101,10 @@ class MainWindow(QMainWindow):
         if folder:
             self._dialog_start = Path(str(folder))
         self.controls.set_model_id(_saved_model_id(settings))
-        if not subject_runtime_ready():
+        if not self._installed_detection_ready():
             self.controls.set_subject_checked(False)
             self.controls.set_eye_scoring(False)
-        elif os.environ.get("OUTBURST_HEADLESS") != "1" and not self._subject_license_accepted():
-            self.controls.set_subject_checked(False)
-            self.controls.set_eye_scoring(False)
-        self.controls.set_detection_installed(subject_runtime_ready())
+        self.controls.set_detection_installed(self._installed_detection_ready())
         self._model_ready()
 
     def _save_settings(self) -> None:

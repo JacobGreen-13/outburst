@@ -403,15 +403,12 @@ def write_library_sidecars(
             minimum_frames=minimum_frames,
         )
     }
-    selected = set(
-        frames_for_sidecars(
-            library,
-            decisions,
-            stars=stars,
-            minimum_frames=minimum_frames,
-        )
-    )
     star_ratings = {} if stars is None else stars
+    selected = {
+        analysis.frame.path
+        for analysis in library.analyses
+        if analysis.frame.path in keepers or star_ratings.get(analysis.frame.path) is not None
+    }
     jobs: list[tuple[Path, dict[str, str | None]]] = []
     for analysis in library.analyses:
         frame = analysis.frame

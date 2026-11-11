@@ -525,7 +525,7 @@ class ControlPanel(QWidget):
         Inputs: none.
         Output: True when Bird eye detection is checked.
         Uses: the Scoring section and the scan worker.
-        Limitations: the checkbox does not rescan by itself. The review window downloads the weights when they are missing, then rescans.
+        Limitations: the checkbox does not rescan by itself. A missing weights file is not downloaded from this checkbox.
         """
         return self._eye.isChecked()
 

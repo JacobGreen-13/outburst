@@ -50,23 +50,24 @@ def score_bgr(
 
     if image.ndim != 3 or image.shape[2] != 3 or image.size == 0:
         raise ValueError("expected a color image")
-    sharpness = laplacian_variance(image)
-    center = laplacian_variance(center_crop(image, CENTER_CROP_FRACTION))
-    edges = tenengrad(image)
-    exposure, highlight_clip, shadow_clip = exposure_parts(image)
+    gray = _gray(image)
+    sharpness = laplacian_variance(gray)
+    center = center_crop(gray, CENTER_CROP_FRACTION)
+    edges = tenengrad(gray)
+    exposure, highlight_clip, shadow_clip = exposure_parts(gray)
     subject_sharpness = None
     if subject_box is not None:
-        region = crop_box(image, subject_box, SUBJECT_BOX_MARGIN)
+        region = crop_box(gray, subject_box, SUBJECT_BOX_MARGIN)
         if region.size > 0 and min(region.shape[0], region.shape[1]) >= 8:
             subject_sharpness = peak_window_sharpness(region)
     return Metrics(
         sharpness=sharpness,
-        center_sharpness=center,
+        center_sharpness=laplacian_variance(center),
         tenengrad=edges,
         exposure=exposure,
         highlight_clip=highlight_clip,
         shadow_clip=shadow_clip,
-        critical_sharpness=peak_window_sharpness(center_crop(image, CENTER_CROP_FRACTION)),
+        critical_sharpness=peak_window_sharpness(center),
         subject_sharpness=subject_sharpness,
         subject_box=subject_box if subject_sharpness is not None else None,
         subject_label=subject_label if subject_sharpness is not None else None,
