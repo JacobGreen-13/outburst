@@ -55,7 +55,7 @@ The Windows setup program and a source checkout have different requirements. Cul
 **Windows 11 setup program**
 
 - Windows 11, 64-bit, on an Intel or AMD processor.
-- The setup program is [Outburst-Setup-0.1.7.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.7) on the Releases page. It is about 80 MB.
+- The setup program is [Outburst-Setup-0.1.8.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.8) on the Releases page. It is about 80 MB.
 - It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. Open **Outburst** from the Start menu after setup.
 - The setup program is unsigned. The first time Windows SmartScreen appears, choose **More info**, then **Run anyway**.
 
@@ -109,7 +109,7 @@ Subject detection uses MPS on Apple Silicon when PyTorch provides it, CUDA on NV
 
 ### Windows 11
 
-1. Download [Outburst-Setup-0.1.7.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.7).
+1. Download [Outburst-Setup-0.1.8.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.8).
 2. If SmartScreen appears, choose **More info**, then **Run anyway**.
 3. Finish the setup. Open **Outburst** from the Start menu.
 4. In **Scoring**, press **Install subject and bird eye detection**.
@@ -127,7 +127,7 @@ To build that setup program on a Windows machine:
 powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
 ```
 
-The result is `dist\installer\Outburst-Setup-0.1.7.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
+The result is `dist\installer\Outburst-Setup-0.1.8.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
 
 ### From source
 
@@ -331,7 +331,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program is on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.7) page.
+On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program is on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.8) page.
 
 ## Feedback
 
