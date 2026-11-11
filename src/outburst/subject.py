@@ -16,6 +16,7 @@ import logging
 import os
 import platform
 import shutil
+import ssl
 import struct
 import sys
 import urllib.error
@@ -248,6 +249,22 @@ def _is_outburst_project(marker: Path) -> bool:
     return any(line.strip() in {'name = "outburst"', "name = 'outburst'"} for line in text.splitlines())
 
 
+def _https_context() -> ssl.SSLContext:
+    """TLS settings for downloads from GitHub, Hugging Face, and PyPI.
+
+    Inputs: none.
+    Output: a context that checks the server name against the certifi certificate bundle.
+    Uses: model downloads, the internet check, and the private Python download.
+    Limitations: the Windows certificate store is not used. Some of its entries make OpenSSL reject a normal GitHub or Hugging Face certificate with "unable to get issuer certificate". A network that replaces certificates with its own root is outside this bundle.
+    """
+
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def _stream_download(
     url: str,
     destination: Path,
@@ -264,7 +281,7 @@ def _stream_download(
 
     request = urllib.request.Request(url, headers={"User-Agent": "Outburst"})
     try:
-        response = urllib.request.urlopen(request, timeout=60)
+        response = urllib.request.urlopen(request, timeout=60, context=_https_context())
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"Could not download the model ({exc.code})") from exc
     except urllib.error.URLError as exc:
@@ -575,7 +592,7 @@ def internet_connection(*, timeout: float = 5.0, url: str = "https://pypi.org") 
 
     request = urllib.request.Request(url, method="HEAD")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=_https_context()) as response:
             response.read(64)
     except urllib.error.HTTPError:
         return OnlineStatus(True, "")
