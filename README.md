@@ -80,13 +80,13 @@ These are optional. Until they are installed, every frame is scored from the who
 
 **Computer**
 
-- 64-bit Windows 10 or Windows 11 on an Intel or AMD processor. The setup program itself is Windows 11.
-- 64-bit Linux on Intel, AMD, or ARM.
+- 64-bit Windows 10 or Windows 11 on an Intel or AMD processor, with an NVIDIA GPU. The setup program itself is Windows 11.
+- 64-bit Linux on Intel, AMD, or ARM, with an NVIDIA GPU.
 - An Apple Silicon Mac running macOS 14 or newer.
 - At least 5 GB free where the detection software will be installed.
 - An internet connection while the software and any missing model files are downloading.
 
-The install button stops when the computer is 32-bit, an Intel Mac, Windows on ARM, or another system outside that list. It also stops when free space is under 5 GB, or when the internet check fails. In each of those cases Outburst explains why, leaves the controls hidden, and leaves the model files where they are.
+The install button checks the computer before it offers the license. It stops when the computer is 32-bit, an Intel Mac, Windows on ARM, a Windows or Linux computer without an NVIDIA GPU, or another system outside that list. It also stops when free space is under 5 GB, or when the internet check fails. In each of those cases Outburst explains why, leaves the controls hidden, and leaves the model files where they are. The license is offered only after those checks pass.
 
 **Software the button adds**
 
@@ -112,7 +112,7 @@ All five weight files are AGPL-3.0. The install button downloads YOLO11 Nano and
 
 The four subject files come from the [Ultralytics assets v8.3.0 release](https://github.com/ultralytics/assets/releases/tag/v8.3.0). `eye_pose_v0.pt` is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. The direct file is [eye_pose_v0.pt](https://huggingface.co/synthet/eye-pose-v0/resolve/main/eye_pose_v0.pt).
 
-Subject detection uses MPS on Apple Silicon when PyTorch provides it, CUDA on NVIDIA, and the CPU otherwise. Bird eye detection uses CUDA or the CPU. On a Mac it stays on the CPU.
+Subject detection uses MPS on Apple Silicon when PyTorch provides it, and CUDA when an NVIDIA GPU is present. Bird eye detection uses CUDA on NVIDIA and the CPU on a Mac. A scan can fall back to the CPU when the GPU cannot be used after the software is installed.
 
 ## Install
 
@@ -330,7 +330,7 @@ A burst shorter than the minimum is not saved, so a pick on one of those frames 
 
 ## Subject detection
 
-In **Scoring**, press **Install subject and bird eye detection**. Outburst checks the computer, then the internet connection, and asks you to accept the AGPL-3.0 license. Accepting installs Ultralytics and PyTorch and downloads YOLO11 Nano and `eye_pose_v0.pt`. Declining leaves this section as that button. An incompatible computer or a missing connection explains why and leaves the model files where they are.
+In **Scoring**, press **Install subject and bird eye detection**. Outburst checks the computer for an NVIDIA GPU or Apple Silicon, then the internet connection, and only then asks you to accept the AGPL-3.0 license. Accepting installs Ultralytics and PyTorch and downloads YOLO11 Nano and `eye_pose_v0.pt`. Declining leaves this section as that button. An incompatible computer or a missing connection explains why and leaves the model files where they are.
 
 When the install finishes, the controls appear and **Subject-aware sharpness** stays off until you check it. The model list is YOLO11 Nano (the default), YOLO11 Small, YOLOv8 Nano, and YOLOv8 Small. The files, sizes, license, and source pages are in [Requirements](#requirements). Checking the box scores the open folder. Choosing another model downloads that file when it is missing, then scores the open folder. Cancel with Esc. Unchecking the box scores again from the measurements already cached.
 
@@ -342,7 +342,7 @@ On Apple Silicon the subject detector uses MPS when PyTorch provides it. On NVID
 
 ## Bird eye detection
 
-**Bird eye detection** is in the same Scoring section as subject detection, and it stays hidden until you press **Install subject and bird eye detection**. That button checks the computer and the internet connection, asks you to accept the AGPL-3.0 license, installs Ultralytics and PyTorch, and downloads `eye_pose_v0.pt` (about 6 MB) along with YOLO11 Nano. The checkbox stays off until you check it.
+**Bird eye detection** is in the same Scoring section as subject detection, and it stays hidden until you press **Install subject and bird eye detection**. That button checks the computer for an NVIDIA GPU or Apple Silicon, then the internet connection, and only then asks you to accept the AGPL-3.0 license. Accepting installs Ultralytics and PyTorch and downloads `eye_pose_v0.pt` (about 6 MB) along with YOLO11 Nano. The checkbox stays off until you check it.
 
 Checking it, or unchecking it, scans the open folder again. If `eye_pose_v0.pt` is missing, that check downloads it into the models folder. The file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. The weights are [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html). Photos stay on this computer. The eye finder stays on the CPU.
 

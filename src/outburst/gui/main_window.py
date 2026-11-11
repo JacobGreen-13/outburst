@@ -1117,6 +1117,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Subject and bird eye detection stayed off.")
             return False
         needs_install = subject_runtime_can_install() and not subject_runtime_ready()
+        self.statusBar().showMessage("Checking this computer.")
         support = subject_hardware_support(needs_install=needs_install)
         if not support.compatible:
             self._stop_subject_opt_in(
@@ -2714,9 +2715,10 @@ class MainWindow(QMainWindow):
             "<p>Outburst is a free, offline burst-culling app for wildlife and nature photographers. "
             "Your photos stay on this computer. Outburst never modifies the original files. "
             "Subject and bird eye detection stay hidden until you press "
-            "Install subject and bird eye detection. That button checks this computer and the "
-            "internet connection, asks you to accept the AGPL-3.0 license, then installs the "
-            "detection software and downloads YOLO11 Nano and the bird eye model.</p>",
+            "Install subject and bird eye detection. That button checks this computer for an "
+            "NVIDIA GPU or Apple Silicon, then the internet connection, and only then asks you "
+            "to accept the AGPL-3.0 license. Accepting installs the detection software and "
+            "downloads YOLO11 Nano and the bird eye model.</p>",
         )
 
     def _current_burst(self) -> Burst | None:
