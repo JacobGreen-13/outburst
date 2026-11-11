@@ -137,7 +137,7 @@ class ControlPanel(QWidget):
         self._install_detection = QPushButton("Install subject and bird eye detection")
         self._install_detection.setObjectName("installDetection")
         self._install_detection.setToolTip(
-            "Check this computer and the internet connection, then accept the license. "
+            "Check this computer for an NVIDIA GPU or Apple Silicon, then the internet connection, then accept the license. "
             "Outburst installs subject and bird eye detection and downloads the models after that."
         )
         self._install_detection.clicked.connect(self.install_detection_clicked.emit)

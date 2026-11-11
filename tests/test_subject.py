@@ -128,6 +128,51 @@ def test_subject_hardware_support_matches_the_published_builds() -> None:
         needs_install=False,
     )
     assert installed.compatible is True
+    cpu_only = subject_hardware_support(
+        system="win32",
+        machine="AMD64",
+        bits=64,
+        windows_major=11,
+        free_bytes=plenty,
+        nvidia_gpu=False,
+    )
+    assert cpu_only.compatible is False
+    assert "no NVIDIA GPU" in cpu_only.explanation
+    assert "Apple Silicon" in cpu_only.explanation
+    assert "will not install" in cpu_only.explanation
+    assert "download the models" in cpu_only.explanation
+    with_gpu = subject_hardware_support(
+        system="linux",
+        machine="x86_64",
+        bits=64,
+        free_bytes=plenty,
+        nvidia_gpu=True,
+    )
+    assert with_gpu.compatible is True
+
+
+def test_text_names_an_nvidia_gpu() -> None:
+    from outburst.subject import _text_names_nvidia
+
+    assert _text_names_nvidia("GPU 0: NVIDIA GeForce RTX 3060") is True
+    assert _text_names_nvidia("Intel(R) UHD Graphics") is False
+    assert _text_names_nvidia("No devices were found") is False
+
+
+def test_a_live_computer_without_an_nvidia_gpu_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from outburst.subject import subject_hardware_support
+
+    if sys.platform not in {"linux", "win32"}:
+        pytest.skip("Windows and Linux require an NVIDIA GPU")
+    monkeypatch.setattr("outburst.subject._nvidia_gpu_present", lambda: False)
+    monkeypatch.setattr("outburst.subject._processor_phrase", lambda: "an Intel processor")
+    support = subject_hardware_support()
+    assert support.compatible is False
+    assert "an Intel processor and no NVIDIA GPU" in support.explanation
+    assert "will not install" in support.explanation
+    assert "download the models" in support.explanation
 
 
 def test_internet_connection_reports_a_reachable_host(monkeypatch: pytest.MonkeyPatch) -> None:

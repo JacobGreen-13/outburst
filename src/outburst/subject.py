@@ -19,6 +19,7 @@ import platform
 import shutil
 import ssl
 import struct
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -510,6 +511,118 @@ def _free_bytes(path: Path) -> int | None:
         return None
 
 
+def _hidden_process_kwargs() -> dict[str, object]:
+    """Hide a console window when a hardware query runs inside the Windows app.
+
+    Inputs: none.
+    Output: subprocess keyword arguments on Windows, or an empty dict elsewhere.
+    Uses: the NVIDIA GPU check before the detection license.
+    Limitations: the flags apply only on Windows. They do not change the command.
+    """
+
+    if sys.platform != "win32" or not hasattr(subprocess, "STARTUPINFO"):
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+    }
+
+
+def _command_text(args: list[str], timeout: float = 5.0) -> str:
+    """Run one command and return its combined output.
+
+    Inputs: args, the program and its arguments. timeout, seconds to wait.
+    Output: stdout and stderr, or an empty string when the command cannot be run.
+    Uses: the NVIDIA GPU check.
+    Limitations: a missing program, a timeout, or a nonzero exit still returns whatever text arrived. This does not raise.
+    """
+
+    try:
+        completed = subprocess.run(
+            args,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **_hidden_process_kwargs(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return f"{completed.stdout}\n{completed.stderr}"
+
+
+def _text_names_nvidia(text: str) -> bool:
+    """Report whether a hardware listing names an NVIDIA GPU.
+
+    Inputs: text, output from nvidia-smi, a display adapter list, or lspci.
+    Output: True when the text names NVIDIA and does not say that no devices were found.
+    Uses: _nvidia_gpu_present.
+    Limitations: this is a text match. It does not prove that CUDA can load.
+    """
+
+    lowered = text.lower()
+    if "no devices were found" in lowered:
+        return False
+    return "nvidia" in lowered
+
+
+def _nvidia_gpu_present() -> bool:
+    """Report whether this computer has an NVIDIA GPU.
+
+    Inputs: none.
+    Output: True when nvidia-smi, a Windows display adapter, or a Linux device listing names NVIDIA.
+    Uses: subject_hardware_support on Windows and Linux before the detection license.
+    Limitations: Apple Silicon is handled separately and does not call this. A GPU with no driver can still be found from the adapter name or lspci. This does not import PyTorch.
+    """
+
+    if _text_names_nvidia(_command_text(["nvidia-smi", "-L"])):
+        return True
+    if sys.platform == "win32":
+        listing = _command_text(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
+            ]
+        )
+        return _text_names_nvidia(listing)
+    if sys.platform == "linux":
+        driver = Path("/proc/driver/nvidia/gpus")
+        if driver.is_dir() and any(driver.iterdir()):
+            return True
+        return _text_names_nvidia(_command_text(["lspci", "-nn"]))
+    return False
+
+
+def _processor_phrase() -> str:
+    """Name the processor for the hardware explanation.
+
+    Inputs: none. The live computer is read.
+    Output: a short phrase such as "an Intel processor".
+    Uses: the explanation when Windows or Linux has no NVIDIA GPU.
+    Limitations: an unrecognized processor becomes "this processor".
+    """
+
+    ident = os.environ.get("PROCESSOR_IDENTIFIER", "")
+    cpuinfo = ""
+    if sys.platform == "linux":
+        try:
+            cpuinfo = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            cpuinfo = ""
+    blob = f"{ident}\n{platform.processor()}\n{cpuinfo}"
+    if "GenuineIntel" in blob or "Intel64" in blob or "Intel(R)" in blob:
+        return "an Intel processor"
+    if "AuthenticAMD" in blob or blob.strip().startswith("AMD"):
+        return "an AMD processor"
+    return "this processor"
+
+
 def subject_hardware_support(
     *,
     system: str | None = None,
@@ -519,13 +632,14 @@ def subject_hardware_support(
     windows_major: int | None = None,
     free_bytes: int | None = None,
     needs_install: bool = True,
+    nvidia_gpu: bool | None = None,
 ) -> HardwareSupport:
     """Report whether subject and bird-eye detection can be installed here.
 
-    Inputs: optional overrides for the operating system, processor, pointer size, macOS version, Windows major version, and free bytes. needs_install includes the free-space check when True.
-    Output: HardwareSupport. compatible is True only for a 64-bit system PyTorch publishes wheels for, with enough free space when an install is still required. explanation is the text to show when compatible is False.
-    Uses: the review window before it installs Ultralytics or downloads a model.
-    Limitations: the live computer is read only for arguments left as None. A volume whose free space cannot be read does not fail the space check. This does not import PyTorch and does not start an install.
+    Inputs: optional overrides for the operating system, processor, pointer size, macOS version, Windows major version, free bytes, and whether an NVIDIA GPU is present. needs_install includes the free-space check when True.
+    Output: HardwareSupport. compatible is True for Apple Silicon on macOS 14 or newer, and for 64-bit Windows or Linux with an NVIDIA GPU, with enough free space when an install is still required. explanation is the text to show when compatible is False.
+    Uses: the review window before it shows the detection license.
+    Limitations: the live computer is read only for arguments left as None. A caller that supplies the operating system and leaves nvidia_gpu unset is checking the system and the processor only. A volume whose free space cannot be read does not fail the space check. This does not import PyTorch and does not start an install.
     """
 
     probe = system is None and machine is None and bits is None
@@ -589,13 +703,19 @@ def subject_hardware_support(
                 "This PC is running a Windows version older than Windows 10. Subject and bird eye detection "
                 "need Windows 10 or Windows 11. Outburst will not install that software or download the models.",
             )
+        gpu = _nvidia_requirement(nvidia_gpu, probe)
+        if gpu is not None:
+            return gpu
     elif system == "linux":
         if kind not in {"x86_64", "arm64"}:
             return HardwareSupport(
                 False,
                 f"This computer is Linux on {machine}. Subject and bird eye detection can be installed on "
-                "64-bit Linux for Intel, AMD, or ARM. Outburst will not install that software or download the models.",
+                "64-bit Linux for Intel, AMD, or ARM with an NVIDIA GPU. Outburst will not install that software or download the models.",
             )
+        gpu = _nvidia_requirement(nvidia_gpu, probe)
+        if gpu is not None:
+            return gpu
     else:
         return HardwareSupport(
             False,
@@ -613,6 +733,37 @@ def subject_hardware_support(
             "Outburst will not install that software or download the models.",
         )
     return HardwareSupport(True, "")
+
+
+def _nvidia_requirement(nvidia_gpu: bool | None, probe: bool) -> HardwareSupport | None:
+    """Require an NVIDIA GPU on Windows and Linux.
+
+    Inputs: nvidia_gpu, an explicit result, or None to read the live computer when probe is True. probe, whether this call is reading the live computer.
+    Output: a failing HardwareSupport when the GPU is absent. None when an NVIDIA GPU is present or this call is not asking about the GPU.
+    Uses: subject_hardware_support after the operating system is accepted.
+    Limitations: Apple Silicon does not call this. A caller that supplies the operating system and leaves nvidia_gpu unset skips this check.
+    """
+
+    present = nvidia_gpu
+    if present is None:
+        if not probe:
+            return None
+        present = _nvidia_gpu_present()
+    if present:
+        return None
+    if probe:
+        sentence = (
+            f"This computer has {_processor_phrase()} and no NVIDIA GPU. "
+            "Subject and bird eye detection need an NVIDIA GPU, or an Apple Silicon Mac. "
+            "Outburst will not install that software or download the models."
+        )
+    else:
+        sentence = (
+            "This computer has no NVIDIA GPU. "
+            "Subject and bird eye detection need an NVIDIA GPU, or an Apple Silicon Mac. "
+            "Outburst will not install that software or download the models."
+        )
+    return HardwareSupport(False, sentence)
 
 
 @dataclass(frozen=True)
