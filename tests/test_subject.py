@@ -219,7 +219,7 @@ def test_private_runtime_without_a_stamp_is_reused(tmp_path: Path, monkeypatch: 
 
     monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path)
     python = _python_exe(tmp_path)
-    python.parent.mkdir()
+    python.parent.mkdir(parents=True)
     python.write_bytes(b"MZ")
     monkeypatch.setattr("outburst.sidecar._interpreter_has_detection", lambda _path: True)
     assert private_runtime_ready() is True
@@ -231,7 +231,7 @@ def test_install_skips_pytorch_when_it_is_already_there(tmp_path: Path, monkeypa
 
     monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path)
     python = _python_exe(tmp_path)
-    python.parent.mkdir()
+    python.parent.mkdir(parents=True)
     python.write_bytes(b"MZ")
     (tmp_path / ".outburst-subject-ready").write_text("ultralytics\n", encoding="utf-8")
 
@@ -253,7 +253,7 @@ def test_source_checkout_uses_an_existing_private_python(tmp_path: Path, monkeyp
     monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path)
     monkeypatch.setattr("outburst.subject._in_process_runtime_ready", lambda: False)
     python = _python_exe(tmp_path)
-    python.parent.mkdir()
+    python.parent.mkdir(parents=True)
     python.write_bytes(b"MZ")
     (tmp_path / ".outburst-subject-ready").write_text("ultralytics\n", encoding="utf-8")
     assert subject_runtime_ready() is True
@@ -279,6 +279,52 @@ def test_frozen_app_uses_a_venv_beside_the_program(tmp_path: Path, monkeypatch: 
     )
     assert installed_detection_python() == venv_python
     assert subject_runtime_ready() is True
+
+
+def test_packaged_linux_uses_a_private_python(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from outburst.subject import subject_runtime_can_install, uses_private_python
+
+    monkeypatch.setenv("OUTBURST_PACKAGED", "1")
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    assert uses_private_python() is True
+    assert subject_runtime_can_install() is True
+
+
+def test_packaged_linux_creates_a_user_venv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from outburst.sidecar import install_private_runtime
+
+    monkeypatch.delenv("OUTBURST_PACKAGED", raising=False)
+    monkeypatch.setattr("outburst.sidecar.detection_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr("outburst.sidecar.sys.platform", "linux")
+
+    def fake_run(args: list[str], _should_cancel: object = None, **_kwargs: object) -> tuple[int, str, str]:
+        command = [str(part) for part in args]
+        if command[1:3] == ["-m", "venv"]:
+            python = Path(command[3]) / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.write_text("#!/bin/sh\n", encoding="utf-8")
+            python.chmod(0o755)
+            return 0, "", ""
+        if command[-3:] == ["-m", "pip", "--version"]:
+            return 0, "pip 24\n", ""
+        if command[-2:] == ["-c", "import ultralytics"]:
+            return 0, "", ""
+        raise AssertionError(command)
+
+    def fake_logged(args: list[str], *_args: object, **_kwargs: object) -> tuple[int, str, str]:
+        command = [str(part) for part in args]
+        assert "ultralytics>=8.3" in command
+        assert "https://www.python.org" not in " ".join(command)
+        return 0, "", ""
+
+    monkeypatch.setattr("outburst.sidecar._run", fake_run)
+    monkeypatch.setattr("outburst.sidecar._run_logged", fake_logged)
+    monkeypatch.setattr("outburst.sidecar.urllib.request.urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("linux does not download embeddable Python")))
+    install_private_runtime()
+    assert (tmp_path / "python" / "bin" / "python").is_file()
+    assert (tmp_path / ".outburst-subject-ready").is_file()
 
 
 def test_frozen_windows_installs_a_private_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

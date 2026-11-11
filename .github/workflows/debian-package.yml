@@ -1,0 +1,51 @@
+name: Debian package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - cursor/deb-installer-112a
+    paths:
+      - packaging/linux/**
+      - .github/workflows/debian-package.yml
+      - src/**
+      - pyproject.toml
+      - LICENSE
+      - README.md
+
+jobs:
+  package:
+    name: Debian package (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - name: Check out Outburst
+        uses: actions/checkout@v4
+
+      - name: Install the libraries the window loads
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $(tr '\n' ' ' < packaging/linux/build-packages.txt)
+
+      - name: Build the package
+        run: packaging/linux/build.sh
+        env:
+          OUTBURST_PYTHON_TARGET: ${{ matrix.target }}
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Outburst-Debian-${{ matrix.arch }}
+          path: |
+            dist/installer/*.deb
+            dist/installer/SHA256.txt
+          if-no-files-found: error
+          retention-days: 90

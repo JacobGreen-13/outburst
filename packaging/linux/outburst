@@ -1,0 +1,5 @@
+#!/bin/sh
+# Launch the Outburst copy installed by the Debian package.
+set -eu
+export OUTBURST_PACKAGED=1
+exec /opt/outburst/python/bin/python3 -m outburst.main "$@"

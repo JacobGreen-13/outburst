@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Outburst
+GenericName=Burst culling
+Comment=Local burst culling for wildlife and nature photographers
+Exec=outburst %f
+Icon=outburst
+Terminal=false
+Categories=Graphics;Photography;
+Keywords=RAW;burst;wildlife;culling;
+StartupNotify=true
+StartupWMClass=outburst

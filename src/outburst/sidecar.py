@@ -64,7 +64,7 @@ def detection_runtime_dir() -> Path:
     Inputs: none. OUTBURST_DETECTION_RUNTIME overrides the folder when it is set.
     Output: the directory, created if it was missing.
     Uses: the install button and the detection worker.
-    Limitations: on Windows the default is under LocalAppData\\Outburst\\detection. Photographs are not written here.
+    Limitations: on Windows the default is under LocalAppData\\Outburst\\detection. On Linux it is ~/.local/share/Outburst/detection. Photographs are not written here.
     """
 
     override = os.environ.get("OUTBURST_DETECTION_RUNTIME")
@@ -112,18 +112,22 @@ def install_private_runtime(
     Inputs: should_cancel, an optional check polled while downloads and pip run. None never cancels. on_status, an optional callback that receives a short progress line.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when a download or pip fails.
     Uses: the install button on a packaged Windows app.
-    Limitations: the Python build is the official 64-bit Windows embeddable package. An interpreter that already imports Ultralytics and PyTorch is left in place. PyTorch comes in with Ultralytics and can take several minutes. The status line names the step and counts bytes in the pip cache. Model weights are not downloaded here.
+    Limitations: on Windows the Python build is the official 64-bit embeddable package. On Linux the Debian package creates a user-owned environment from the Python shipped in /opt/outburst. An interpreter that already imports Ultralytics and PyTorch is left in place. PyTorch comes in with Ultralytics and can take several minutes. The status line names the step and counts bytes in the pip cache. Model weights are not downloaded here.
     """
 
     root = detection_runtime_dir()
-    python = _python_exe(root)
     if private_runtime_ready():
         _report(on_status, "PyTorch and Ultralytics are already installed.")
         return
-    if not python.is_file():
-        _report(on_status, "Downloading Python for subject and bird eye detection")
-        _download_embeddable(root, should_cancel, on_status)
-    _enable_site(root)
+    if sys.platform == "win32":
+        python = _python_exe(root)
+        if not python.is_file():
+            _report(on_status, "Downloading Python for subject and bird eye detection")
+            _download_embeddable(root, should_cancel, on_status)
+        _enable_site(root)
+    else:
+        _ensure_user_venv(root, should_cancel, on_status)
+    python = _python_exe(root)
     if not _command_ok([str(python), "-m", "pip", "--version"], should_cancel):
         _report(on_status, "Installing pip")
         _install_pip(python, root, should_cancel, on_status)
@@ -536,13 +540,41 @@ def _python_exe(root: Path) -> Path:
     Path of the private interpreter.
 
     Inputs: root, the detection folder.
-    Output: python.exe inside the python subfolder on Windows, or python on other systems.
+    Output: python.exe inside the python subfolder on Windows, or python inside python/bin on other systems.
     Uses: the install and the ready check.
     Limitations: the file is not created here.
     """
 
-    name = "python.exe" if sys.platform == "win32" else "python"
-    return root / "python" / name
+    if sys.platform == "win32":
+        return root / "python" / "python.exe"
+    return root / "python" / "bin" / "python"
+
+
+def _ensure_user_venv(
+    root: Path,
+    should_cancel: object | None,
+    on_status: Callable[[str], None] | None,
+) -> None:
+    """
+    Create the user-owned detection environment on Linux.
+
+    Inputs: root, the detection folder; should_cancel, the cancel check; on_status, an optional progress line.
+    Output: no return value. A venv is created at root/python when its interpreter is missing. Raises RuntimeError when venv fails.
+    Uses: install_private_runtime for the Debian package.
+    Limitations: the base interpreter is the one running Outburst. This does not download Python and does not install Ultralytics. An environment that is already there is left in place.
+    """
+
+    python = _python_exe(root)
+    if python.is_file():
+        return
+    base = Path(sys.executable)
+    if not base.is_file():
+        raise RuntimeError("Outburst could not find its Python to create the detection environment.")
+    _report(on_status, "Creating a Python environment for subject and bird eye detection")
+    code, _stdout, stderr = _run([str(base), "-m", "venv", str(root / "python")], should_cancel)
+    if code != 0 or not python.is_file():
+        detail = (stderr or "Could not create the detection environment.").strip()
+        raise RuntimeError(detail[-800:])
 
 
 def _download_embeddable(

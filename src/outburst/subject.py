@@ -540,7 +540,12 @@ def subject_hardware_support(
     if probe and system == "win32" and windows_major is None:
         windows_major = sys.getwindowsversion().major
     if probe and needs_install and free_bytes is None:
-        free_bytes = _free_bytes(Path(sys.prefix))
+        if os.environ.get("OUTBURST_PACKAGED") == "1":
+            from outburst.sidecar import detection_runtime_dir
+
+            free_bytes = _free_bytes(detection_runtime_dir())
+        else:
+            free_bytes = _free_bytes(Path(sys.prefix))
 
     if bits < 64:
         return HardwareSupport(
@@ -659,11 +664,13 @@ def uses_private_python() -> bool:
     """Report whether detection runs in a private Python next to this app.
 
     Inputs: none.
-    Output: True for a frozen 64-bit Windows app. False for a normal Python process and for a frozen app on another system.
+    Output: True for the Debian package and for a frozen 64-bit Windows app. False for a normal Python process and for a frozen app on another system.
     Uses: the install button and the detector loaders.
     Limitations: this does not check that the private Python has been downloaded yet. ``subject_runtime_ready`` does that.
     """
 
+    if os.environ.get("OUTBURST_PACKAGED") == "1":
+        return True
     return bool(getattr(sys, "frozen", False)) and _windows_embed_supported()
 
 
@@ -742,9 +749,9 @@ def subject_runtime_can_install() -> bool:
     """Report whether this process can add Ultralytics.
 
     Inputs: none.
-    Output: True for a normal Python process and for a packaged 64-bit Windows app. False for a frozen app that cannot host a private Python.
+    Output: True for a normal Python process, the Debian package, and a packaged 64-bit Windows app. False for a frozen app that cannot host a private Python.
     Uses: the review window before it offers to install subject detection.
-    Limitations: this does not check that pip or a network connection is available. A packaged Windows app installs into a private Python rather than into Outburst.exe.
+    Limitations: this does not check that pip or a network connection is available. A packaged app installs into a private Python rather than into the copy under /opt or inside Outburst.exe.
     """
 
     if uses_private_python():
@@ -905,7 +912,7 @@ def install_subject_runtime(
     Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels. on_status, an optional callback that receives a short progress line while the download runs.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when pip exits with an error.
     Uses: the install button when subject and bird eye detection are not installed yet.
-    Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. When Ultralytics and PyTorch are already installed, this returns without downloading them. A packaged Windows app downloads a private Python, then installs Ultralytics there. A source install keeps the OpenCV already loaded by this process, then installs the other packages with --no-deps, because replacing cv2.pyd while Outburst has it open is denied on Windows. A normal install downloads PyTorch and can take several minutes. Pip output is appended to install.log in the cache, and the status line counts the bytes in the pip cache. It does not download model weights. The caller should stay off the window thread.
+    Limitations: a frozen app that is not 64-bit Windows and is not the Debian package raises RuntimeError and does not start pip. When Ultralytics and PyTorch are already installed, this returns without downloading them. A packaged Windows app downloads a private Python, then installs Ultralytics there. The Debian package creates a user-owned environment under ~/.local/share/Outburst/detection and installs Ultralytics there. A source install keeps the OpenCV already loaded by this process, then installs the other packages with --no-deps, because replacing cv2.pyd while Outburst has it open is denied on Windows. A normal install downloads PyTorch and can take several minutes. Pip output is appended to install.log in the cache, and the status line counts the bytes in the pip cache. It does not download model weights. The caller should stay off the window thread.
     """
 
     if not subject_runtime_can_install():
