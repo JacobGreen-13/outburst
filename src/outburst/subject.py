@@ -836,7 +836,7 @@ def install_subject_runtime(
 
     Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels. on_status, an optional callback that receives a short progress line while the download runs.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when pip exits with an error.
-    Uses: the review window the first time subject or bird eye detection is turned on without Ultralytics.
+    Uses: the install button when subject and bird eye detection are not installed yet.
     Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. A packaged Windows app downloads a private Python, then installs Ultralytics there. A source install keeps the OpenCV already loaded by this process, then installs the other packages with --no-deps, because replacing cv2.pyd while Outburst has it open is denied on Windows. A normal install downloads PyTorch and can take several minutes. Pip output is appended to install.log in the cache, and the status line counts the bytes in the pip cache. It does not download model weights. The caller should stay off the window thread.
     """
 

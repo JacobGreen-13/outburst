@@ -387,7 +387,7 @@ def test_choosing_a_model_turns_subject_scoring_on_and_rescans_with_it(
     qt_app.processEvents()
 
 
-def test_rescan_downloads_the_selected_model_before_scoring(
+def test_rescan_and_the_checkboxes_do_not_download_a_missing_model(
     qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from outburst.gui.main_window import MainWindow
@@ -403,20 +403,55 @@ def test_rescan_downloads_the_selected_model_before_scoring(
         calls.append((self.controls.model_id(), then_scan, self.controls.prefer_subject()))
 
     monkeypatch.setattr(MainWindow, "_begin_download", spy_download)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: True)
     window = MainWindow(cache_dir=tmp_path / "cache")
     window.present(library)
     qt_app.processEvents()
 
     window.controls._model.setCurrentIndex(window.controls._model.findData("yolov8s"))
     qt_app.processEvents()
-    assert calls == [("yolov8s", True, True)]
+    assert calls == []
+    assert window.controls.prefer_subject() is False
 
-    calls.clear()
     window.controls.set_model_id("yolo11n")
     window.controls.set_subject_checked(True)
     window.rescan()
     qt_app.processEvents()
-    assert calls == [("yolo11n", True, True)]
+    assert calls == []
+    assert window.controls.prefer_subject() is False
+    window.close()
+    qt_app.processEvents()
+
+
+def test_choosing_a_model_downloads_it_after_detection_is_installed(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import QSettings
+
+    from outburst.gui.main_window import MainWindow
+    from outburst.pipeline import analyze_folder
+
+    monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
+    _isolate_settings(tmp_path / "settings")
+    monkeypatch.setenv("OUTBURST_MODELS", str(tmp_path / "models"))
+    saved = QSettings("Outburst", "Outburst")
+    saved.setValue("subject_agpl_accepted", True)
+    saved.sync()
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    calls: list[tuple[str, bool]] = []
+
+    def spy_download(self: MainWindow, then_scan: bool) -> None:
+        calls.append((self.controls.model_id(), then_scan))
+
+    monkeypatch.setattr(MainWindow, "_begin_download", spy_download)
+    monkeypatch.setattr("outburst.gui.main_window.subject_runtime_ready", lambda: True)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.present(library)
+    qt_app.processEvents()
+    window.controls._model.setCurrentIndex(window.controls._model.findData("yolov8s"))
+    qt_app.processEvents()
+    assert calls == [("yolov8s", True)]
     window.close()
     qt_app.processEvents()
 
@@ -699,7 +734,7 @@ def test_a_missing_subject_runtime_installs_from_the_button(
     assert downloads == [DEFAULT_MODEL_ID]
     assert window.controls.prefer_subject() is False
     assert window.controls.eye_scoring() is False
-    assert window.controls.detection_installed() is True
+    assert window.controls.detection_installed() is False
     models["subject"] = True
     window._on_download_succeeded(str(tmp_path / "yolo11n.pt"))
     assert downloads == [DEFAULT_MODEL_ID, BIRD_EYE_OPTION.id]
@@ -708,6 +743,7 @@ def test_a_missing_subject_runtime_installs_from_the_button(
     assert scans == []
     assert window.controls.prefer_subject() is False
     assert window.controls.eye_scoring() is False
+    assert window.controls.detection_installed() is True
     assert window.controls._install_detection.isHidden()
     assert "are installed" in window.statusBar().currentMessage()
     window.close()

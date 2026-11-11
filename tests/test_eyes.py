@@ -215,6 +215,34 @@ def test_pose_device_keeps_the_bird_eye_model_off_mps() -> None:
     assert pose_device("cuda") == "cuda"
 
 
+def test_a_window_eye_is_read_from_that_window() -> None:
+    tall = np.zeros((600, 600, 3), dtype=np.uint8)
+    tall[400, 20] = (255, 0, 0)
+    short = np.zeros((120, 600, 3), dtype=np.uint8)
+
+    class Model:
+        def predict(self, images, verbose, device, imgsz):  # type: ignore[no-untyped-def]
+            del verbose, device, imgsz
+            results = []
+            for frame in images:
+                marked = (
+                    frame.shape[0] == 512
+                    and frame.shape[1] == 512
+                    and int(frame[400, 20, 0]) == 255
+                )
+                if marked:
+                    results.append(_pose_at(20, 400))
+                else:
+                    results.append(_pose([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], [0.0, 0.0, 0.0]))
+            return results
+
+    found = BirdEyeDetector(Model(), "cpu").find_many([tall, short])
+    assert found[0] is not None
+    assert found[0].x == 20
+    assert found[0].y == 400
+    assert found[1] is None
+
+
 def test_finder_keeps_bgr_and_reads_an_eye_from_a_window() -> None:
     image = np.zeros((700, 1000, 3), dtype=np.uint8)
     image[500, 800] = (255, 0, 0)

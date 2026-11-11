@@ -137,7 +137,7 @@ The result is `dist\installer\Outburst-Setup-0.1.7.exe`. GitHub Actions builds t
 | Windows | `Outburst.bat` |
 | Linux | `Outburst.desktop`, or run `./outburst.sh` |
 
-The first run creates `.venv`, installs Outburst, and opens the window. Subject and bird eye controls stay hidden. **Install subject and bird eye detection** follows the same computer check, internet check, and AGPL-3.0 acceptance as the Windows app. Accepting installs Ultralytics and PyTorch into that `.venv`, then downloads the models. The OpenCV already loaded by Outburst stays in place, so the install can finish while the window is open. The status bar names the step and shows how many megabytes have arrived. PyTorch is a large download, so that count keeps climbing for several minutes. The detection controls appear after the modules are installed. The checkboxes stay off until you turn them on.
+The first run creates `.venv`, installs Outburst, and opens the window. Subject and bird eye controls stay hidden. **Install subject and bird eye detection** follows the same computer check, internet check, and AGPL-3.0 acceptance as the Windows app. Accepting installs Ultralytics and PyTorch into that `.venv`, then downloads the models. The OpenCV already loaded by Outburst stays in place, so the install can finish while the window is open. The status bar names the step and shows how many megabytes have arrived. PyTorch is a large download, so that count keeps climbing for several minutes. The detection controls appear after the software and both model files are in place. The checkboxes stay off until you turn them on.
 
 ```bash
 ./outburst.sh examples/sample_burst
@@ -167,7 +167,7 @@ pip install -e .
 outburst
 ```
 
-That installs the app. Detection stays on the **Install subject and bird eye detection** button. To put Ultralytics and PyTorch into the environment before you open the window, use `pip install -e ".[subject]"` instead. The models still download the first time you use them, after you accept the AGPL-3.0 license.
+That installs the app. Detection stays on the **Install subject and bird eye detection** button. That button is what checks the computer, asks for the AGPL-3.0 license, installs Ultralytics and PyTorch, and downloads YOLO11 Nano and `eye_pose_v0.pt`. Opening a folder, checking a box, or scanning does not do those steps. To put Ultralytics and PyTorch into the environment before you open the window, use `pip install -e ".[subject]"`. The model files still come from the install button. Choosing another subject model after that downloads that file.
 
 Open a folder immediately with `outburst examples/sample_burst`. Redraw the sample with `python examples/generate_sample_burst.py`.
 
