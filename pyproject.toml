@@ -27,6 +27,7 @@ classifiers = [
     "Topic :: Multimedia :: Graphics :: Viewers",
 ]
 dependencies = [
+    "certifi>=2024.8.30",
     "exifread>=3.0",
     "numpy>=1.26",
     "opencv-python-headless>=4.9",

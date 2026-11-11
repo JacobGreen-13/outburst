@@ -552,13 +552,15 @@ def _download(url: str, destination: Path, should_cancel: object | None) -> None
     Inputs: url, the address; destination, the file to write; should_cancel, the cancel check.
     Output: no return value. The file is replaced.
     Uses: the Python zip and get-pip.py.
-    Limitations: a cancel leaves a partial file for the caller to remove. The request uses a 60 second timeout for the connection.
+    Limitations: a cancel leaves a partial file for the caller to remove. The request uses a 60 second timeout and the certifi certificate bundle.
     """
 
-    from outburst.subject import SubjectRuntimeCancelled
+    from outburst.subject import SubjectRuntimeCancelled, _https_context
 
     request = urllib.request.Request(url, headers={"User-Agent": "Outburst"})
-    with urllib.request.urlopen(request, timeout=60) as response, destination.open("wb") as handle:
+    with urllib.request.urlopen(
+        request, timeout=60, context=_https_context()
+    ) as response, destination.open("wb") as handle:
         while True:
             if callable(should_cancel) and should_cancel():
                 raise SubjectRuntimeCancelled()

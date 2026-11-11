@@ -1,9 +1,9 @@
 ; Windows 11 setup for the frozen Outburst folder.
-; Build with: ISCC.exe /DMyAppVersion=0.1.4 packaging\windows\Outburst.iss
+; Build with: ISCC.exe /DMyAppVersion=0.1.5 packaging\windows\Outburst.iss
 ; The frozen folder must already exist at dist\Outburst.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.4"
+  #define MyAppVersion "0.1.5"
 #endif
 
 #define MyAppName "Outburst"

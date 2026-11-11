@@ -252,8 +252,8 @@ def test_frozen_windows_installs_a_private_python(tmp_path: Path, monkeypatch: p
         def __exit__(self, *_args: object) -> bool:
             return False
 
-    def urlopen(request: object, timeout: float = 0) -> Response:
-        del timeout
+    def urlopen(request: object, timeout: float = 0, context: object = None) -> Response:
+        del timeout, context
         url = getattr(request, "full_url", str(request))
         assert url == EMBED_PYTHON_URL
         return Response(zip_bytes)
@@ -416,6 +416,31 @@ def test_ready_file_is_not_downloaded(tmp_path: Path, monkeypatch: pytest.Monkey
     assert model_is_ready(ready)
 
 
+def test_model_download_verifies_with_the_certifi_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import ssl
+
+    import certifi
+
+    option = option_by_id("yolo11n")
+    assert option is not None
+    seen: list[ssl.SSLContext] = []
+
+    def opener(request: object, timeout: int = 60, context: ssl.SSLContext | None = None) -> _Body:
+        del request, timeout
+        assert context is not None
+        seen.append(context)
+        return _Body(_weights_bytes())
+
+    monkeypatch.setattr("outburst.subject.urllib.request.urlopen", opener)
+    ensure_model(option, tmp_path)
+    expected = ssl.create_default_context(cafile=certifi.where())
+    assert seen[0].verify_mode == ssl.CERT_REQUIRED
+    assert seen[0].check_hostname is True
+    assert seen[0].cert_store_stats() == expected.cert_store_stats()
+
+
 def test_missing_model_is_downloaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     option = option_by_id("yolo11s")
     assert option is not None
@@ -560,8 +585,9 @@ class _Body:
 
 
 def _opener(payload: bytes, expected_url: str):
-    def opener(request: object, timeout: int = 60) -> _Body:
+    def opener(request: object, timeout: int = 60, context: object = None) -> _Body:
         assert timeout == 60
+        assert context is not None
         assert getattr(request, "full_url", None) == expected_url
         return _Body(payload)
 

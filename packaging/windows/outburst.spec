@@ -60,7 +60,7 @@ version_file.write_text(
 datas: list = [(str(root / "src" / "outburst"), "detection_src/outburst")]
 binaries: list = []
 hiddenimports = collect_submodules("outburst")
-for package in ("rawpy", "cv2"):
+for package in ("rawpy", "cv2", "certifi"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas.extend(package_datas)
     binaries.extend(package_binaries)
