@@ -138,6 +138,26 @@ def test_subject_detection_stays_on_the_calling_thread(tmp_path: Path) -> None:
     assert all(item.metrics is not None and item.metrics.subject_label == "bird" for item in library.analyses)
 
 
+def test_a_failed_detector_names_the_reason(tmp_path: Path) -> None:
+    folder = tmp_path / "birds"
+    folder.mkdir()
+    write_jpeg(folder / "bird.jpg", sharp_frame(), datetime(2024, 3, 1, 8, 0, 0))
+
+    class BrokenDetector:
+        def detect_many(self, images):  # type: ignore[no-untyped-def]
+            raise RuntimeError("No module named outburst")
+
+    library = analyze_folder(
+        folder,
+        cache_dir=tmp_path / "cache",
+        detector=BrokenDetector(),
+        weights=Weights(prefer_subject=True),
+    )
+    assert any("No module named outburst" in note for note in library.warnings)
+    assert library.analyses[0].metrics is not None
+    assert library.analyses[0].metrics.subject_label is None
+
+
 def test_cancel_stops_before_a_library_is_returned(tmp_path: Path) -> None:
     from outburst.pipeline import CancelledError
 

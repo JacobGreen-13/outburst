@@ -190,7 +190,7 @@ class DetectionSession:
         """
         Remember which Python will score previews.
 
-        Inputs: python, the private interpreter. The detection folder is used when python is omitted. source, the folder on PYTHONPATH. extra_env, variables added for the worker, such as the stub flag.
+        Inputs: python, the private interpreter. The detection folder is used when python is omitted. source, the folder inserted on the worker's sys.path. extra_env, variables added for the worker, such as the stub flag.
         Output: no return value. The process starts on the first request.
         Uses: SidecarSubjectDetector and SidecarEyeFinder.
         Limitations: constructing the session does not download Python or start a process.
@@ -313,26 +313,22 @@ class DetectionSession:
         Inputs: none.
         Output: no return value. A dead process is replaced and its loaded paths are cleared.
         Uses: every request.
-        Limitations: the caller must hold the session lock. This does not load a model.
+        Limitations: the caller must hold the session lock. This does not load a model. The embeddable Python ignores PYTHONPATH, so the source folder is inserted on sys.path in the launch command. The frozen app's folder is removed from PATH so its DLLs are not loaded by the private Python.
         """
 
         if self._process is not None and self._process.poll() is None:
             return
         self._loaded_subject = None
         self._loaded_eye = None
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(self._source)
-        env["PYTHONNOUSERSITE"] = "1"
-        env["PYTHONIOENCODING"] = "utf-8"
-        env.update(self._extra_env)
         self._stderr = []
         process = subprocess.Popen(
-            [str(self._python), "-u", "-m", "outburst.detect_worker"],
+            _worker_command(self._python, self._source),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            env=env,
+            env=_worker_env(self._extra_env),
+            cwd=str(self._python.resolve().parent),
             **_hidden_windows_kwargs(),
         )
         self._process = process
@@ -1033,6 +1029,73 @@ def _eye_from_payload(item: object) -> object:
         int(item.get("radius", 0)),
         None if sharpness is None else float(sharpness),
     )
+
+
+def _worker_command(python: Path, source: Path) -> list[str]:
+    """
+    Build the command that starts detect_worker in one interpreter.
+
+    Inputs: python, the interpreter; source, the folder that contains the outburst package.
+    Output: an argument list. The command inserts source on sys.path and then runs the worker.
+    Uses: DetectionSession when the worker is not running.
+    Limitations: this does not start a process. The embeddable Python's path file ignores PYTHONPATH, so the source folder is placed in the command itself.
+    """
+
+    source_literal = json.dumps(str(source))
+    code = (
+        "import sys; "
+        f"sys.path.insert(0, {source_literal}); "
+        "from outburst.detect_worker import main; "
+        "main()"
+    )
+    return [str(python), "-u", "-c", code]
+
+
+def _worker_env(extra: dict[str, str]) -> dict[str, str]:
+    """
+    Environment for the detection worker.
+
+    Inputs: extra, variables added after the base environment, such as the stub flag.
+    Output: a copy of the current environment with PYTHONPATH and PYTHONHOME removed, and with the frozen app's directories removed from PATH.
+    Uses: DetectionSession when the worker starts.
+    Limitations: extra wins when it repeats a name. This does not insert the source folder. The launch command does that.
+    """
+
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    env["PYTHONNOUSERSITE"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    _remove_frozen_path_entries(env)
+    env.update(extra)
+    return env
+
+
+def _remove_frozen_path_entries(env: dict[str, str]) -> None:
+    """
+    Drop the packaged app's directories from PATH.
+
+    Inputs: env, the environment that will be passed to the worker. PATH is edited in place.
+    Output: no return value. The frozen program directory and its extracted folder are removed when this process is packaged.
+    Uses: _worker_env.
+    Limitations: a normal interpreter leaves PATH unchanged. Other variables are left as they are.
+    """
+
+    if not getattr(sys, "frozen", False):
+        return
+    blocked = {os.path.normcase(os.path.abspath(os.path.dirname(sys.executable)))}
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        blocked.add(os.path.normcase(os.path.abspath(meipass)))
+    path = env.get("PATH", "")
+    kept = [
+        entry
+        for entry in path.split(os.pathsep)
+        if entry and os.path.normcase(os.path.abspath(entry)) not in blocked
+    ]
+    env["PATH"] = os.pathsep.join(kept)
 
 
 def _drain(process: subprocess.Popen[str], lines: list[str]) -> None:
