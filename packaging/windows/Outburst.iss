@@ -1,9 +1,9 @@
 ; Windows 11 setup for the frozen Outburst folder.
-; Build with: ISCC.exe /DMyAppVersion=0.1.8 packaging\windows\Outburst.iss
+; Build with: ISCC.exe /DMyAppVersion=0.1.9 packaging\windows\Outburst.iss
 ; The frozen folder must already exist at dist\Outburst.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.8"
+  #define MyAppVersion "0.1.9"
 #endif
 
 #define MyAppName "Outburst"
@@ -39,6 +39,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Add a desktop shortcut"; GroupDescription: "Shortcuts:"
+
+[Dirs]
+; Detection software and the measurement cache are created by the app, and a newer setup keeps them.
+Name: "{app}\detection"; Flags: uninsneveruninstall
+Name: "{app}\Cache"; Flags: uninsneveruninstall
 
 [Files]
 Source: "..\..\dist\Outburst\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

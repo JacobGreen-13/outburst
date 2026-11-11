@@ -55,7 +55,7 @@ The Windows setup program and a source checkout have different requirements. Cul
 **Windows 11 setup program**
 
 - Windows 11, 64-bit, on an Intel or AMD processor.
-- The setup program is [Outburst-Setup-0.1.8.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.8) on the Releases page. It is about 80 MB.
+- The setup program is [Outburst-Setup-0.1.9.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.9) on the Releases page. It is about 80 MB.
 - It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. Open **Outburst** from the Start menu after setup.
 - The setup program is unsigned. The first time Windows SmartScreen appears, choose **More info**, then **Run anyway**.
 
@@ -109,9 +109,9 @@ Subject detection uses MPS on Apple Silicon when PyTorch provides it, CUDA on NV
 
 ### Windows 11
 
-1. Download [Outburst-Setup-0.1.8.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.8).
+1. Download [Outburst-Setup-0.1.9.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.9).
 2. If SmartScreen appears, choose **More info**, then **Run anyway**.
-3. Finish the setup. Open **Outburst** from the Start menu.
+3. Finish the setup. Open **Outburst** from the Start menu. A newer setup keeps PyTorch, Ultralytics, and the model files from the previous install, and the detection controls appear when those are already on this computer.
 4. In **Scoring**, press **Install subject and bird eye detection**.
 5. Outburst checks the computer, then the internet connection. A failed check explains itself and stops there.
 6. Read the AGPL-3.0 notice and choose **Install**.
@@ -127,7 +127,7 @@ To build that setup program on a Windows machine:
 powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
 ```
 
-The result is `dist\installer\Outburst-Setup-0.1.8.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
+The result is `dist\installer\Outburst-Setup-0.1.9.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
 
 ### From source
 
@@ -137,7 +137,7 @@ The result is `dist\installer\Outburst-Setup-0.1.8.exe`. GitHub Actions builds t
 | Windows | `Outburst.bat` |
 | Linux | `Outburst.desktop`, or run `./outburst.sh` |
 
-The first run creates `.venv`, installs Outburst, and opens the window. Subject and bird eye controls stay hidden. **Install subject and bird eye detection** follows the same computer check, internet check, and AGPL-3.0 acceptance as the Windows app. Accepting installs Ultralytics and PyTorch into that `.venv`, then downloads the models. The OpenCV already loaded by Outburst stays in place, so the install can finish while the window is open. The status bar names the step and shows how many megabytes have arrived. PyTorch is a large download, so that count keeps climbing for several minutes. The detection controls appear after the software and both model files are in place. The checkboxes stay off until you turn them on.
+The first run creates `.venv`, installs Outburst, and opens the window. Subject and bird eye controls stay hidden. **Install subject and bird eye detection** follows the same computer check, internet check, and AGPL-3.0 acceptance as the Windows app. Accepting installs Ultralytics and PyTorch into that `.venv`, then downloads the models. The OpenCV already loaded by Outburst stays in place, so the install can finish while the window is open. The status bar names the step and shows how many megabytes have arrived. PyTorch is a large download, so that count keeps climbing for several minutes. The detection controls appear after the software and both model files are in place. A newer copy uses PyTorch and the model files already on this computer, including the private Python from the Windows setup and a `.venv` beside the program. The checkboxes stay off until you turn them on.
 
 ```bash
 ./outburst.sh examples/sample_burst
@@ -331,7 +331,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program is on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.8) page.
+On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program is on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.9) page.
 
 ## Feedback
 

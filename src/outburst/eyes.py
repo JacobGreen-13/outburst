@@ -169,9 +169,9 @@ def load_bird_eye_detector(model_path: Path, device: str | None = None) -> EyeFi
 
     if not model_path.is_file():
         raise FileNotFoundError(f"Bird eye model not found: {model_path}")
-    from outburst.subject import uses_private_python
+    from outburst.subject import _detection_uses_sidecar
 
-    if uses_private_python():
+    if _detection_uses_sidecar():
         from outburst.sidecar import SidecarEyeFinder
 
         return SidecarEyeFinder(model_path)

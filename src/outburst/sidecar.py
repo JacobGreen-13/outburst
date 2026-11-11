@@ -36,6 +36,25 @@ EMBED_PYTHON_SHA256 = "0d57bb6cb078b74d23dbfe91f77d6780d45bed328911609f1f7ee2ba1
 GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 _STAMP_NAME = ".outburst-subject-ready"
 _SESSION: DetectionSession | None = None
+_DETECTION_PROBE: dict[str, bool] = {}
+
+
+def installed_detection_python() -> Path | None:
+    """
+    Find an interpreter that already has Ultralytics and PyTorch.
+
+    Inputs: none.
+    Output: the private Python when it can import those libraries, or a .venv beside a frozen program that can. None when neither is usable.
+    Uses: subject_runtime_ready and the detection worker after an upgrade.
+    Limitations: the private Python is checked before the .venv. A normal source interpreter is not returned here. The import probe runs only when the ready stamp is missing, and its result is remembered for this process.
+    """
+
+    if private_runtime_ready():
+        return _python_exe(detection_runtime_dir())
+    sibling = _venv_beside_app()
+    if sibling is not None and _interpreter_has_detection(sibling):
+        return sibling
+    return None
 
 
 def detection_runtime_dir() -> Path:
@@ -66,13 +85,21 @@ def private_runtime_ready() -> bool:
     Report whether the private Python already has Ultralytics.
 
     Inputs: none.
-    Output: True when python.exe and the ready stamp are both in the detection folder.
-    Uses: the packaged app before it shows the detection controls.
-    Limitations: this does not import Ultralytics in the frozen process. A deleted stamp reports not ready.
+    Output: True when the private Python exists and the ready stamp is present, or when that Python can import Ultralytics and PyTorch.
+    Uses: the packaged app before it shows the detection controls, and an upgrade that should keep the previous detection install.
+    Limitations: this does not import Ultralytics in the frozen process. A missing stamp is replaced after a successful import. A Python that cannot import those libraries stays not ready.
     """
 
     root = detection_runtime_dir()
-    return _python_exe(root).is_file() and (root / _STAMP_NAME).is_file()
+    python = _python_exe(root)
+    if not python.is_file():
+        return False
+    if (root / _STAMP_NAME).is_file():
+        return True
+    if not _interpreter_has_detection(python):
+        return False
+    (root / _STAMP_NAME).write_text("ultralytics\n", encoding="utf-8")
+    return True
 
 
 def install_private_runtime(
@@ -85,11 +112,14 @@ def install_private_runtime(
     Inputs: should_cancel, an optional check polled while downloads and pip run. None never cancels. on_status, an optional callback that receives a short progress line.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when a download or pip fails.
     Uses: the install button on a packaged Windows app.
-    Limitations: the Python build is the official 64-bit Windows embeddable package. PyTorch comes in with Ultralytics and can take several minutes. The status line names the step and counts bytes in the pip cache. Model weights are not downloaded here.
+    Limitations: the Python build is the official 64-bit Windows embeddable package. An interpreter that already imports Ultralytics and PyTorch is left in place. PyTorch comes in with Ultralytics and can take several minutes. The status line names the step and counts bytes in the pip cache. Model weights are not downloaded here.
     """
 
     root = detection_runtime_dir()
     python = _python_exe(root)
+    if private_runtime_ready():
+        _report(on_status, "PyTorch and Ultralytics are already installed.")
+        return
     if not python.is_file():
         _report(on_status, "Downloading Python for subject and bird eye detection")
         _download_embeddable(root, should_cancel, on_status)
@@ -457,9 +487,52 @@ def default_session() -> DetectionSession:
 
     global _SESSION
     if _SESSION is None:
-        _SESSION = DetectionSession()
+        python = installed_detection_python()
+        _SESSION = DetectionSession(python=python) if python is not None else DetectionSession()
         atexit.register(_SESSION.close)
     return _SESSION
+
+
+def _venv_beside_app() -> Path | None:
+    """
+    Path of a source environment sitting next to a frozen program.
+
+    Inputs: none.
+    Output: python.exe inside .venv\\Scripts on Windows, or python inside .venv/bin elsewhere, when that file exists. None for a normal interpreter or a missing environment.
+    Uses: installed_detection_python when the setup program was installed into a source folder that already has PyTorch.
+    Limitations: a frozen program is required. The file is not created here, and this does not check that Ultralytics imports.
+    """
+
+    if not getattr(sys, "frozen", False):
+        return None
+    root = Path(sys.executable).resolve().parent / ".venv"
+    name = "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    candidate = root / name
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def _interpreter_has_detection(python: Path) -> bool:
+    """
+    Report whether one interpreter can import Ultralytics and PyTorch.
+
+    Inputs: python, the interpreter to run.
+    Output: True when `import ultralytics, torch` exits 0. The result is remembered for this process.
+    Uses: private_runtime_ready when the stamp is missing, and a .venv beside a frozen program.
+    Limitations: a missing file is False. The probe can take a minute the first time PyTorch loads. A later call uses the remembered result.
+    """
+
+    key = str(python)
+    cached = _DETECTION_PROBE.get(key)
+    if cached is not None:
+        return cached
+    if not python.is_file():
+        _DETECTION_PROBE[key] = False
+        return False
+    ready = _command_ok([str(python), "-c", "import ultralytics, torch"], None)
+    _DETECTION_PROBE[key] = ready
+    return ready
 
 
 def _python_exe(root: Path) -> Path:
