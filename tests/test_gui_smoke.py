@@ -1016,7 +1016,10 @@ def test_star_keys_are_saved_apart_from_the_pick_flag(qt_app, tmp_path: Path) ->
     qt_app.processEvents()
     assert window._stars[written["sharp"]] == 4
     assert window._decisions[written["sharp"]] == "keep"
-    assert "★★★★☆" in window.viewer.info.text()
+    assert "★" not in window.viewer.info.text()
+    assert "4 stars" in window.viewer.info.text()
+    selected = next(card for card in window.filmstrip._cards if card._selected)
+    assert "★" not in selected.score.text()
     assert window.viewer.star_buttons[3].property("filled") == "true"
     assert window.viewer.star_buttons[4].property("filled") == "false"
     QTest.keyClick(window, Qt.Key.Key_4)

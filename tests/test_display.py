@@ -123,7 +123,7 @@ def test_html_escapes_filenames_and_marks_the_recommendation() -> None:
         subject_active=False,
         stars=2,
     )
-    assert "★★☆☆☆" in rated
+    assert "★" not in rated
     assert "2 stars" in rated
     assert "No flag" in rated
     assert "Burst 4" in html

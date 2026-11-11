@@ -2358,7 +2358,6 @@ class MainWindow(QMainWindow):
                     None if analysis is None else analysis.composite,
                     None if analysis is None else analysis.metrics,
                     best_composite=None if index == best else best_composite,
-                    stars=self._stars.get(frame.path),
                 ),
                 badge=thumb_badge(index == best, decision),
                 thumb_path=None if analysis is None else analysis.thumb_path,

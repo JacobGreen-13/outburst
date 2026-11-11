@@ -2,7 +2,7 @@
 
 Kept outside the Qt layer so the wording can be tested without a display.
 
-``filmstrip_order``, ``visible_bursts``, and ``visible_frame_indexes`` choose which frames appear and in what order. ``frame_meets_minimum_score`` compares a frame with the minimum score using the number on the filmstrip. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``star_glyphs``, ``frame_info_html``, ``frame_info_parts``, and ``format_captured`` build the labels. ``detected_eye_count`` counts frames with a bird eye. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
+``filmstrip_order``, ``visible_bursts``, and ``visible_frame_indexes`` choose which frames appear and in what order. ``frame_meets_minimum_score`` compares a frame with the minimum score using the number on the filmstrip. ``burst_list_text``, ``score_caption``, ``thumb_badge``, ``frame_info_html``, ``frame_info_parts``, and ``format_captured`` build the labels. ``detected_eye_count`` counts frames with a bird eye. ``obvious_misses`` and ``clip_status`` find the frames G can reject.
 """
 
 from __future__ import annotations
@@ -185,32 +185,18 @@ def burst_list_text(
     return f"{human_burst_name(burst.id)}  ·  {count}\n{when}  ·  best {score}{eye}{suffix}"
 
 
-def star_glyphs(stars: int | None) -> str:
-    """Five stars, filled up to `stars`. None and 0 are empty.
-
-    Inputs: a star count, or None.
-    Output: five star characters, filled then empty.
-    Uses: the preview panel mark line.
-    Limitations: counts outside 0 through 5 are clamped.
-    """
-
-    count = 0 if stars is None else max(0, min(5, int(stars)))
-    return "★" * count + "☆" * (5 - count)
-
-
 def score_caption(
     composite: float | None,
     metrics: Metrics | None,
     *,
     best_composite: float | None,
-    stars: int | None = None,
 ) -> str:
     """Score for a filmstrip card, with CLIP or SOFT when the frame needs a look.
 
-    Inputs: this frame's score, its metrics, the burst's best score, and an optional star count.
-    Output: a short caption such as a percent, EYE, CLIP, SOFT, and a star count.
+    Inputs: this frame's score, its metrics, and the burst's best score.
+    Output: a short caption such as a percent, EYE, CLIP, or SOFT.
     Uses: the review window filmstrip cards.
-    Limitations: a None score or missing metrics omits the matching note. EYE is shown when an eye center was stored, including an eye too small to rate.
+    Limitations: a None score or missing metrics omits the matching note. EYE is shown when an eye center was stored, including an eye too small to rate. The star rating stays on the rating buttons.
     """
 
     text = score_percent(composite)
@@ -227,8 +213,6 @@ def score_caption(
         notes.append("SOFT")
     if notes:
         text = f"{text}  {' '.join(notes)}"
-    if stars:
-        text = f"{text}  ★{stars}"
     return text
 
 
@@ -458,8 +442,7 @@ def frame_info_parts(
     else:
         star_note = f"{stars} star" if stars == 1 else f"{stars} stars"
     mark_line = (
-        f'<div style="color:#e6c15a; margin-top:4px;">{star_glyphs(stars)}'
-        f' &nbsp;·&nbsp; <span style="color:#d0d0d0;">{escape(flag)}</span>'
+        f'<div style="margin-top:4px;"><span style="color:#d0d0d0;">{escape(flag)}</span>'
         f' &nbsp;·&nbsp; <span style="color:#9a9a9a;">{escape(star_note)}</span></div>'
     )
     title = (
