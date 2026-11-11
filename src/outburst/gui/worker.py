@@ -191,6 +191,7 @@ class RuntimeInstallWorker(QThread):
     succeeded = Signal()
     failed = Signal(str)
     cancelled = Signal()
+    status = Signal(str)
 
     def __init__(self) -> None:
         """
@@ -220,12 +221,15 @@ class RuntimeInstallWorker(QThread):
         Install Ultralytics and emit success, failure, or cancellation.
 
         Inputs: none.
-        Output: no return value. Emits succeeded when the import works, failed with the pip error, or cancelled.
+        Output: no return value. Emits succeeded when the import works, failed with the pip error, or cancelled. Emits status with the current install step.
         Uses: the review window before a scan that needs subject or bird eye detection.
         Limitations: the download includes PyTorch and can take several minutes. Model weights are not downloaded here. An abort after a successful install emits cancelled and does not emit success.
         """
         try:
-            install_subject_runtime(should_cancel=lambda: self._abort)
+            install_subject_runtime(
+                should_cancel=lambda: self._abort,
+                on_status=self.status.emit,
+            )
         except SubjectRuntimeCancelled:
             self.cancelled.emit()
             return
