@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - cursor/windows-installer-112a
+      - cursor/version-0-2-1-112a
     paths:
       - packaging/windows/**
       - .github/workflows/windows-installer.yml

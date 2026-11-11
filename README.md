@@ -56,14 +56,14 @@ The Windows setup program, the Debian package, and a source checkout have differ
 **Windows 11 setup program**
 
 - Windows 11, 64-bit, on an Intel or AMD processor.
-- The setup program is [Outburst-Setup-0.2.0.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.0) on the Releases page. It is about 80 MB.
+- The setup program is [Outburst-Setup-0.2.1.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.1) on the Releases page. It is about 80 MB.
 - It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. Open **Outburst** from the Start menu after setup.
 - The setup program is unsigned. The first time Windows SmartScreen appears, choose **More info**, then **Run anyway**.
 
 **Debian and Ubuntu package**
 
 - Debian 12 or newer, or Ubuntu 22.04 or newer, 64-bit, on Intel, AMD, or ARM.
-- The packages are [outburst_0.2.0_amd64.deb](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.0) and [outburst_0.2.0_arm64.deb](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.0) on the Releases page.
+- The packages are [outburst_0.2.1_amd64.deb](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.1) and [outburst_0.2.1_arm64.deb](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.1) on the Releases page.
 - The package installs under `/opt/outburst`, adds **Outburst** to the application menu, and uses the ExifTool package from the distribution.
 - PyTorch and the model files stay in the home directory, so installing a newer package keeps a detection setup that is already there.
 
@@ -118,7 +118,7 @@ Subject detection uses MPS on Apple Silicon when PyTorch provides it, and CUDA w
 
 ### Windows 11
 
-1. Download [Outburst-Setup-0.2.0.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.0).
+1. Download [Outburst-Setup-0.2.1.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.1).
 2. If SmartScreen appears, choose **More info**, then **Run anyway**.
 3. Finish the setup. Open **Outburst** from the Start menu. A newer setup keeps PyTorch, Ultralytics, and the model files from the previous install, and the detection controls appear when those are already on this computer.
 4. In **Scoring**, press **Install subject and bird eye detection**.
@@ -136,15 +136,15 @@ To build that setup program on a Windows machine:
 powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
 ```
 
-The result is `dist\installer\Outburst-Setup-0.2.0.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
+The result is `dist\installer\Outburst-Setup-0.2.1.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
 
 ### Debian and Ubuntu
 
-1. Download `outburst_0.2.0_amd64.deb` for Intel or AMD, or `outburst_0.2.0_arm64.deb` for ARM, from the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.0) page.
+1. Download `outburst_0.2.1_amd64.deb` for Intel or AMD, or `outburst_0.2.1_arm64.deb` for ARM, from the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.1) page.
 2. Install it. Apt installs the libraries the package needs, including ExifTool:
 
 ```bash
-sudo apt install ./outburst_0.2.0_amd64.deb
+sudo apt install ./outburst_0.2.1_amd64.deb
 ```
 
 3. Open **Outburst** from the application menu, or run `outburst`. A newer package keeps PyTorch, Ultralytics, and the model files already in the home directory, and the detection controls appear when those are already on this computer.
@@ -156,7 +156,7 @@ To build the package on Debian or Ubuntu:
 packaging/linux/build.sh
 ```
 
-The result is `dist/installer/outburst_0.2.0_amd64.deb` on Intel or AMD, and `dist/installer/outburst_0.2.0_arm64.deb` on ARM. The build machine needs the window libraries listed in [`packaging/linux/build-packages.txt`](packaging/linux/build-packages.txt). A desktop install already has them. GitHub Actions installs that list, then builds both packages with [`.github/workflows/debian-package.yml`](.github/workflows/debian-package.yml).
+The result is `dist/installer/outburst_0.2.1_amd64.deb` on Intel or AMD, and `dist/installer/outburst_0.2.1_arm64.deb` on ARM. GitHub Actions builds both with [`.github/workflows/debian-package.yml`](.github/workflows/debian-package.yml). The script reads the window libraries from the packaged binaries.
 
 ### From source
 
@@ -360,7 +360,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program and the Debian package are on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.0) page.
+On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program and the Debian package are on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.2.1) page.
 
 ## Feedback
 
