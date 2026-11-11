@@ -1269,7 +1269,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Subject and bird eye detection stayed off.")
         hint = ""
         if not uses_private_python():
-            hint = "From the Outburst folder, run:\npip install \"outburst[subject]\"\n\n"
+            hint = (
+                "Close Outburst, then from the Outburst folder run:\n"
+                'pip install "outburst[subject]"\n\n'
+            )
         self._notify(
             "Subject detection",
             "Subject and bird eye detection could not be installed.\n\n"

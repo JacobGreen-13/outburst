@@ -12,6 +12,7 @@ full frame.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
@@ -394,6 +395,14 @@ def make_subject_key(model_path: Path) -> str:
 
 
 SUBJECT_PIP_SPEC = "ultralytics>=8.3"
+_CV2_DISTRIBUTIONS = frozenset(
+    {
+        "opencv-python",
+        "opencv-python-headless",
+        "opencv-contrib-python",
+        "opencv-contrib-python-headless",
+    }
+)
 SUBJECT_INSTALL_FREE_BYTES = 5 * 1024**3
 ULTRALYTICS_SOURCE_URL = "https://github.com/ultralytics/ultralytics"
 ULTRALYTICS_LICENSE_URL = "https://github.com/ultralytics/ultralytics/blob/main/LICENSE"
@@ -716,6 +725,108 @@ def subject_runtime_install_command() -> list[str]:
     ]
 
 
+def _distribution_name(name: str) -> str:
+    """
+    Normalize a distribution name for comparison.
+
+    Inputs: name, the name from a pip report or a requirement.
+    Output: the name in lowercase with underscores replaced by hyphens.
+    Uses: packages_keeping_loaded_cv2.
+    Limitations: this follows the simple PEP 503 folding. It does not apply other punctuation rules.
+    """
+
+    return name.lower().replace("_", "-")
+
+
+def _loaded_cv2_stays() -> bool:
+    """
+    Report whether this process already has OpenCV loaded.
+
+    Inputs: none.
+    Output: True when cv2 imports. False when it does not.
+    Uses: the source install, so pip does not replace cv2.pyd while Outburst has it open.
+    Limitations: a failed import is treated as missing. A packaged Windows app installs into a private Python and does not call this.
+    """
+
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def packages_keeping_loaded_cv2(report: object) -> list[str] | None:
+    """
+    List the packages in a pip install report, leaving out OpenCV distributions.
+
+    Inputs: report, the JSON object written by pip install --report.
+    Output: name==version pins for every planned package except OpenCV, or None when the report has no install list.
+    Uses: the source install while Outburst already has cv2 open.
+    Limitations: an OpenCV distribution is omitted even when the report planned an upgrade. The caller installs the returned pins with --no-deps so pip does not pull opencv-python back in. An empty list means the plan contained only OpenCV.
+    """
+
+    if not isinstance(report, dict):
+        return None
+    planned = report.get("install")
+    if not isinstance(planned, list):
+        return None
+    packages: list[str] = []
+    for item in planned:
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = item
+        name = metadata.get("name")
+        version = metadata.get("version")
+        if not isinstance(name, str) or not isinstance(version, str) or not version:
+            continue
+        if _distribution_name(name) in _CV2_DISTRIBUTIONS:
+            continue
+        packages.append(f"{name}=={version}")
+    return packages
+
+
+def _command_keeping_loaded_cv2(
+    command: list[str],
+    should_cancel: Callable[[], bool] | None,
+    on_status: Callable[[str], None] | None,
+) -> list[str] | None:
+    """
+    Resolve Ultralytics and return a pip command that leaves the loaded OpenCV in place.
+
+    Inputs: command, the normal pip install command; should_cancel, the cancel check; on_status, an optional progress line.
+    Output: a pip command with --no-deps and exact versions, an empty list when the plan would only install OpenCV, or None when the plan could not be read. None tells the caller to run command unchanged.
+    Uses: install_subject_runtime for a source checkout.
+    Limitations: the dry run needs network access to resolve versions. A dry run that fails returns None. OpenCV distributions are omitted because replacing cv2.pyd while this process has it open raises Windows access denied.
+    """
+
+    if command[-1:] != [SUBJECT_PIP_SPEC] or not _loaded_cv2_stays():
+        return None
+    if on_status is not None:
+        on_status(
+            "Resolving Ultralytics and PyTorch. "
+            "The OpenCV already loaded by Outburst stays in place."
+        )
+    report_path = default_cache_dir() / "pip-plan.json"
+    dry_run = command[:-1] + ["--dry-run", "--report", str(report_path), command[-1]]
+    from outburst.sidecar import _run
+
+    code, _stdout, _stderr = _run(dry_run, should_cancel)
+    if code != 0:
+        return None
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    packages = packages_keeping_loaded_cv2(payload)
+    if packages is None:
+        return None
+    if not packages:
+        return []
+    return command[:-1] + ["--no-deps", *packages]
+
+
 def install_subject_runtime(
     should_cancel: Callable[[], bool] | None = None,
     on_status: Callable[[str], None] | None = None,
@@ -726,7 +837,7 @@ def install_subject_runtime(
     Inputs: should_cancel, an optional check that is polled while pip runs. None never cancels. on_status, an optional callback that receives a short progress line while the download runs.
     Output: no return value. Raises SubjectRuntimeCancelled when the check asks to stop, and RuntimeError when pip exits with an error.
     Uses: the review window the first time subject or bird eye detection is turned on without Ultralytics.
-    Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. A packaged Windows app downloads a private Python, then installs Ultralytics there. A normal install downloads PyTorch and can take several minutes. Pip output is appended to install.log in the cache, and the status line counts the bytes in the pip cache. It does not download model weights. The caller should stay off the window thread.
+    Limitations: a frozen app that is not 64-bit Windows raises RuntimeError and does not start pip. A packaged Windows app downloads a private Python, then installs Ultralytics there. A source install keeps the OpenCV already loaded by this process, then installs the other packages with --no-deps, because replacing cv2.pyd while Outburst has it open is denied on Windows. A normal install downloads PyTorch and can take several minutes. Pip output is appended to install.log in the cache, and the status line counts the bytes in the pip cache. It does not download model weights. The caller should stay off the window thread.
     """
 
     if not subject_runtime_can_install():
@@ -741,6 +852,12 @@ def install_subject_runtime(
         return
     from outburst.sidecar import _run_logged
 
+    command = subject_runtime_install_command()
+    planned = _command_keeping_loaded_cv2(command, should_cancel, on_status)
+    if planned is not None:
+        command = planned
+    if not command:
+        return
     if on_status is not None:
         on_status(
             "Installing Ultralytics and PyTorch. This download is large and can take several minutes."
@@ -748,8 +865,12 @@ def install_subject_runtime(
     log_path = default_cache_dir() / "install.log"
     cache_dir = default_cache_dir() / "pip-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    if "--no-deps" in command:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("Keeping the OpenCV already loaded by Outburst.\n")
     code, _stdout, stderr = _run_logged(
-        subject_runtime_install_command(),
+        command,
         log_path,
         should_cancel,
         on_status=on_status,

@@ -778,12 +778,12 @@ def test_a_failed_runtime_install_leaves_detection_off(
     from outburst.gui.main_window import MainWindow
     from outburst.gui.worker import AnalyzeWorker
 
-    notes: list[str] = []
+    notes: list[tuple[str, str]] = []
     scans: list[str] = []
     monkeypatch.delenv("OUTBURST_HEADLESS", raising=False)
     monkeypatch.setattr(
         "outburst.gui.main_window.notify",
-        lambda *_args, **_kwargs: notes.append(str(_args[1])),
+        lambda *_args, **_kwargs: notes.append((str(_args[1]), str(_args[2]))),
     )
     monkeypatch.setattr(AnalyzeWorker, "start", lambda *_args, **_kwargs: scans.append("scan"))
     _isolate_settings(tmp_path / "settings")
@@ -797,7 +797,10 @@ def test_a_failed_runtime_install_leaves_detection_off(
     qt_app.processEvents()
     assert window.controls.eye_scoring() is False
     assert window.controls.prefer_subject() is False
-    assert notes == ["Subject detection"]
+    assert notes[0][0] == "Subject detection"
+    assert "Close Outburst" in notes[0][1]
+    assert 'pip install "outburst[subject]"' in notes[0][1]
+    assert "no network" in notes[0][1]
     assert scans == ["scan"]
     window.close()
     qt_app.processEvents()

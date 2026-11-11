@@ -21,6 +21,7 @@ from outburst.subject import (
     option_by_id,
     preferred_device,
     subject_runtime_can_install,
+    packages_keeping_loaded_cv2,
     subject_runtime_install_command,
     subject_runtime_python,
     subject_runtime_ready,
@@ -335,6 +336,62 @@ def test_windowed_launcher_installs_with_console_python(
     assert command[0] == str(console)
     assert command[1:3] == ["-m", "pip"]
     assert command[-1] == "ultralytics>=8.3"
+
+
+def test_pip_report_omits_opencv_distributions() -> None:
+    report = {
+        "install": [
+            {"metadata": {"name": "opencv-python", "version": "4.10.0.84"}},
+            {"metadata": {"name": "opencv_python_headless", "version": "4.10.0.84"}},
+            {"metadata": {"name": "torch", "version": "2.5.1"}},
+            {"metadata": {"name": "ultralytics", "version": "8.3.40"}},
+        ]
+    }
+    assert packages_keeping_loaded_cv2(report) == ["torch==2.5.1", "ultralytics==8.3.40"]
+    opencv_only = {"install": [{"metadata": {"name": "opencv-python", "version": "4.10"}}]}
+    assert packages_keeping_loaded_cv2(opencv_only) == []
+    assert packages_keeping_loaded_cv2({}) is None
+    assert packages_keeping_loaded_cv2("not a report") is None
+
+
+def test_source_install_keeps_the_loaded_opencv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    report = {
+        "install": [
+            {"metadata": {"name": "opencv-python", "version": "4.10.0.84"}},
+            {"metadata": {"name": "torch", "version": "2.5.1"}},
+            {"metadata": {"name": "ultralytics", "version": "8.3.40"}},
+        ]
+    }
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(args: list[str], _should_cancel: object) -> tuple[int, str, str]:
+        assert "--dry-run" in args
+        path = Path(args[args.index("--report") + 1])
+        path.write_text(json.dumps(report), encoding="utf-8")
+        return 0, "", ""
+
+    def fake_logged(args: list[str], *_args: object, **_kwargs: object) -> tuple[int, str, str]:
+        seen["args"] = args
+        return 0, "", ""
+
+    monkeypatch.setattr("outburst.subject._loaded_cv2_stays", lambda: True)
+    monkeypatch.setattr("outburst.subject.default_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr("outburst.sidecar._run", fake_run)
+    monkeypatch.setattr("outburst.sidecar._run_logged", fake_logged)
+    messages: list[str] = []
+    install_subject_runtime(on_status=messages.append)
+    assert "--no-deps" in seen["args"]
+    assert "torch==2.5.1" in seen["args"]
+    assert "ultralytics==8.3.40" in seen["args"]
+    assert all("opencv" not in part.lower() for part in seen["args"])
+    assert any("OpenCV already loaded" in message for message in messages)
+    assert "Keeping the OpenCV already loaded by Outburst." in (tmp_path / "install.log").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_install_subject_runtime_reports_a_pip_failure(
