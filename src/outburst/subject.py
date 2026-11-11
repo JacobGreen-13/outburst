@@ -387,7 +387,7 @@ PYTORCH_SOURCE_URL = "https://github.com/pytorch/pytorch"
 PYTORCH_LICENSE_URL = "https://github.com/pytorch/pytorch/blob/main/LICENSE"
 SUBJECT_LICENSE_TEXT = """Subject-aware sharpness and bird eye detection use Ultralytics YOLO and open model weights. Ultralytics, the YOLO weights, and eye_pose_v0.pt are licensed under the GNU Affero General Public License, version 3 (AGPL-3.0).
 
-Accepting lets Outburst install Ultralytics and PyTorch on this computer and download the selected model weights. Those pieces stay under AGPL-3.0. You may use, copy, and share them, and you can ask for their source. Your photographs stay on this computer.
+Accepting lets Outburst install Ultralytics and PyTorch on this computer and download YOLO11 Nano and eye_pose_v0.pt. Those pieces stay under AGPL-3.0. You may use, copy, and share them, and you can ask for their source. Your photographs stay on this computer.
 
 If you do not accept, Outburst keeps scoring the whole frame. It does not install that software and it does not download the models."""
 

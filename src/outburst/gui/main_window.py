@@ -2688,7 +2688,7 @@ class MainWindow(QMainWindow):
         Inputs: none.
         Output: no return value. A message box names the version and says the photographs stay on this computer.
         Uses: the Help menu.
-        Limitations: a headless process returns without a message box. The text says original files are not modified.
+        Limitations: a headless process returns without a message box. The text says original files are not modified, and that subject and bird eye detection wait for the install button.
         """
         if os.environ.get("OUTBURST_HEADLESS") == "1":
             return
@@ -2699,8 +2699,10 @@ class MainWindow(QMainWindow):
             f"<p>Version {__version__}</p>"
             "<p>Outburst is a free, offline burst-culling app for wildlife and nature photographers. "
             "Your photos stay on this computer. Outburst never modifies the original files. "
-            "A subject model is downloaded into the models folder only when you turn that "
-            "feature on and the weights are not already there.</p>",
+            "Subject and bird eye detection stay hidden until you press "
+            "Install subject and bird eye detection. That button checks this computer and the "
+            "internet connection, asks you to accept the AGPL-3.0 license, then installs the "
+            "detection software and downloads YOLO11 Nano and the bird eye model.</p>",
         )
 
     def _current_burst(self) -> Burst | None:
