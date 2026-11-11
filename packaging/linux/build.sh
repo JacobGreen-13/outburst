@@ -129,7 +129,10 @@ for path in stage.iterdir():
 PY
 
 echo "Checking that the window toolkit imports..."
-QT_QPA_PLATFORM=offscreen "$PREFIX/bin/python3" -c "import outburst, PySide6, cv2, numpy, rawpy, exifread"
+if ! QT_QPA_PLATFORM=offscreen "$PREFIX/bin/python3" -c "import outburst, PySide6.QtWidgets, cv2, numpy, rawpy, exifread"; then
+  echo "The build machine is missing a library the window loads. Install the packages in packaging/linux/build-packages.txt, then run this script again." >&2
+  exit 1
+fi
 
 QT_QPA_PLATFORM=offscreen "$PREFIX/bin/python3" \
   "$ROOT/packaging/linux/make_icon.py" \

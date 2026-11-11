@@ -156,7 +156,7 @@ To build the package on Debian or Ubuntu:
 packaging/linux/build.sh
 ```
 
-The result is `dist/installer/outburst_0.2.0_amd64.deb` on Intel or AMD, and `dist/installer/outburst_0.2.0_arm64.deb` on ARM. GitHub Actions builds both with [`.github/workflows/debian-package.yml`](.github/workflows/debian-package.yml).
+The result is `dist/installer/outburst_0.2.0_amd64.deb` on Intel or AMD, and `dist/installer/outburst_0.2.0_arm64.deb` on ARM. The build machine needs the window libraries listed in [`packaging/linux/build-packages.txt`](packaging/linux/build-packages.txt). A desktop install already has them. GitHub Actions installs that list, then builds both packages with [`.github/workflows/debian-package.yml`](.github/workflows/debian-package.yml).
 
 ### From source
 
