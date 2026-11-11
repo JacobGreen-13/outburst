@@ -55,7 +55,7 @@ The Windows setup program and a source checkout have different requirements. Cul
 **Windows 11 setup program**
 
 - Windows 11, 64-bit, on an Intel or AMD processor.
-- The setup program is [Outburst-Setup-0.1.3.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.3) on the Releases page. It is about 80 MB.
+- The setup program is [Outburst-Setup-0.1.4.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.4) on the Releases page. It is about 80 MB.
 - It installs for the current user under `%LOCALAPPDATA%\Outburst` and adds a Start menu shortcut. ExifTool is included beside the app. Open **Outburst** from the Start menu after setup.
 - The setup program is unsigned. The first time Windows SmartScreen appears, choose **More info**, then **Run anyway**.
 
@@ -109,7 +109,7 @@ Subject detection uses MPS on Apple Silicon when PyTorch provides it, CUDA on NV
 
 ### Windows 11
 
-1. Download [Outburst-Setup-0.1.3.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.3).
+1. Download [Outburst-Setup-0.1.4.exe](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.4).
 2. If SmartScreen appears, choose **More info**, then **Run anyway**.
 3. Finish the setup. Open **Outburst** from the Start menu.
 4. In **Scoring**, press **Install subject and bird eye detection**.
@@ -127,7 +127,7 @@ To build that setup program on a Windows machine:
 powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
 ```
 
-The result is `dist\installer\Outburst-Setup-0.1.3.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
+The result is `dist\installer\Outburst-Setup-0.1.4.exe`. GitHub Actions builds the same file with [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml). Inno Setup 6 is required when you build it by hand. `choco install innosetup` provides it.
 
 ### From source
 
@@ -301,7 +301,9 @@ A burst shorter than the minimum is not saved, so a pick on one of those frames 
 
 ## Subject detection
 
-After **Install subject and bird eye detection** finishes, this stays off until you check **Subject-aware sharpness**. The model list is YOLO11 Nano (the default), YOLO11 Small, YOLOv8 Nano, and YOLOv8 Small. The files, sizes, license, and source pages are in [Requirements](#requirements). Checking the box, or choosing a model, scores the open folder and downloads the weights when the file is missing. Cancel with Esc. Unchecking the box scores again from the measurements already cached.
+In **Scoring**, press **Install subject and bird eye detection**. Outburst checks the computer, then the internet connection, and asks you to accept the AGPL-3.0 license. Accepting installs Ultralytics and PyTorch and downloads YOLO11 Nano and `eye_pose_v0.pt`. Declining leaves this section as that button. An incompatible computer or a missing connection explains why and leaves the model files where they are.
+
+When the install finishes, the controls appear and **Subject-aware sharpness** stays off until you check it. The model list is YOLO11 Nano (the default), YOLO11 Small, YOLOv8 Nano, and YOLOv8 Small. The files, sizes, license, and source pages are in [Requirements](#requirements). Checking the box scores the open folder. Choosing another model downloads that file when it is missing, then scores the open folder. Cancel with Esc. Unchecking the box scores again from the measurements already cached.
 
 When an animal is found, the sharpest patch inside that box becomes the score, and the box is drawn. **Show subject box** hides the rectangle without scanning again. The score still uses the box, and zoom still centers on it when no eye is present. If nothing is found, Outburst keeps the center-patch score and says so.
 
@@ -311,7 +313,9 @@ On Apple Silicon the subject detector uses MPS when PyTorch provides it. On NVID
 
 ## Bird eye detection
 
-After the install button finishes, this stays off until you check **Bird eye detection**. Checking it, or unchecking it, scans the open folder again. The first time, Outburst downloads `eye_pose_v0.pt` (about 6 MB) into the models folder. That file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. The weights are [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html). Photos stay on this computer. The eye finder stays on the CPU.
+**Bird eye detection** is in the same Scoring section as subject detection, and it stays hidden until you press **Install subject and bird eye detection**. That button checks the computer and the internet connection, asks you to accept the AGPL-3.0 license, installs Ultralytics and PyTorch, and downloads `eye_pose_v0.pt` (about 6 MB) along with YOLO11 Nano. The checkbox stays off until you check it.
+
+Checking it, or unchecking it, scans the open folder again. If `eye_pose_v0.pt` is missing, that check downloads it into the models folder. The file is the open-weight [synthet/eye-pose-v0](https://huggingface.co/synthet/eye-pose-v0) model, a YOLO11n pose network trained on CUB-200-2011 bird photos. The weights are [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html). Photos stay on this computer. The eye finder stays on the CPU.
 
 The model is birds only, so a distant or unusual field frame may have no eye. Outburst checks the whole preview, then overlapping 512 pixel windows, and maps the strongest eye back. A keypoint under 0.35 confidence is ignored. An eye is rated only when the disk around it is at least 16 pixels across. A smaller eye is noted and left out of the ranking.
 
@@ -327,7 +331,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program is on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.3) page.
+On Windows, activate with `.venv\Scripts\activate`. See [docs/architecture.md](docs/architecture.md) for the scoring formula, cache keys, and which modules write files. The launcher is the supported way to install and open Outburst from source. The Windows 11 setup program is on the [Releases](https://github.com/JacobGreen-13/outburst/releases/tag/v0.1.4) page.
 
 ## Feedback
 
