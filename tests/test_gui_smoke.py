@@ -264,6 +264,107 @@ def test_burst_gap_replaces_automatic_keepers_and_keeps_user_marks(qt_app, tmp_p
     qt_app.processEvents()
 
 
+def _assert_user_keepers_stay_and_the_app_picks_the_recommendation(window, written: dict[str, Path]) -> None:
+    from outburst.scoring import recommended_offset
+
+    assert window._library is not None
+    assert window._decisions[written["blur"]] == "keep"
+    assert window._origins[written["blur"]] == "user"
+    assert window._decisions[written["second_sharp"]] == "reject"
+    assert written["clipped"] not in window._decisions
+    assert written["second_soft"] not in window._decisions
+    for burst in window._library.bursts:
+        best = burst.frames[recommended_offset(burst.frames, window._by_path)]
+        if best.path == written["blur"]:
+            assert window._origins[best.path] == "user"
+        elif best.path == written["second_sharp"]:
+            assert window._decisions[best.path] == "reject"
+        else:
+            assert window._decisions[best.path] == "keep"
+            assert window._origins[best.path] == "auto"
+    automatic = [path for path, origin in window._origins.items() if origin == "auto"]
+    assert automatic
+    assert written["clipped"] not in automatic
+    assert written["second_soft"] not in automatic
+    assert written["blur"] not in automatic
+
+
+def test_sliders_rescan_and_model_replace_the_app_keeper(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.cache import Cache
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    monkeypatch.setenv("OUTBURST_MODELS", str(tmp_path / "models"))
+    _ready_weights(tmp_path / "models" / "yolo11s.pt")
+    written = write_burst_folder(tmp_path / "photos")
+    cache_dir = tmp_path / "cache"
+    library = analyze_folder(written["folder"], cache_dir=cache_dir, threshold=1.0)
+    window = MainWindow(cache_dir=cache_dir)
+    window.resize(1100, 760)
+    window.show()
+    window.present(library)
+    qt_app.processEvents()
+
+    window._select_frame(1)
+    window._toggle_decision("keep")
+    window._set_stars(4)
+    window._apply_decision(written["clipped"], "keep", origin="auto")
+    window._show_burst(1, prefer_path=written["second_sharp"])
+    window._toggle_decision("reject")
+    window._apply_decision(written["second_soft"], "keep", origin="auto")
+    window._show_burst(0, prefer_path=written["clipped"])
+    qt_app.processEvents()
+    window.controls._sharpness.setValue(20)
+    window.controls._center.setValue(10)
+    qt_app.processEvents()
+
+    _assert_user_keepers_stay_and_the_app_picks_the_recommendation(window, written)
+    assert window.viewer.keeper_button.isChecked() is False
+    window._select_frame(1)
+    qt_app.processEvents()
+    assert window.viewer.keeper_button.isChecked() is True
+    assert window._stars[written["blur"]] == 4
+    with Cache(cache_dir) as cache:
+        stored = cache.decision_origins(
+            [written["blur"], written["sharp"], written["clipped"], written["second_sharp"]]
+        )
+    assert stored[written["blur"]] == "user"
+    assert stored[written["second_sharp"]] == "user"
+    assert written["clipped"] not in stored
+
+    window._apply_decision(written["clipped"], "keep", origin="auto")
+    window.rescan()
+    deadline = time.time() + 30
+    while time.time() < deadline and window.is_scanning:
+        qt_app.processEvents()
+        time.sleep(0.02)
+    assert window.is_scanning is False
+    _assert_user_keepers_stay_and_the_app_picks_the_recommendation(window, written)
+    assert window._stars[written["blur"]] == 4
+
+    window._apply_decision(written["clipped"], "keep", origin="auto")
+
+    def finish_immediately(self: AnalyzeWorker) -> None:
+        self.succeeded.emit(library)
+
+    monkeypatch.setattr(AnalyzeWorker, "run", finish_immediately)
+    window.controls._model.setCurrentIndex(window.controls._model.findData("yolo11s"))
+    deadline = time.time() + 30
+    while time.time() < deadline and window.is_scanning:
+        qt_app.processEvents()
+        time.sleep(0.02)
+    assert window.is_scanning is False
+    assert window.controls.model_id() == "yolo11s"
+    _assert_user_keepers_stay_and_the_app_picks_the_recommendation(window, written)
+    assert window._stars[written["blur"]] == 4
+    window.close()
+    qt_app.processEvents()
+
+
 def test_rescan_forgets_cached_measurements_for_the_open_folder(
     qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

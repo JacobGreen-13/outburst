@@ -244,9 +244,9 @@ class MainWindow(QMainWindow):
         Show a finished library. Tests and the scan worker both use this.
 
         Inputs: library, the scanned folder, bursts, analyses, and warnings.
-        Output: no return value. The review surface is shown again. Decisions are loaded, recommended keepers are marked, and the burst list, preview, and status summary update.
-        Uses: the review window after a scan.
-        Limitations: a library with warnings and no analyses shows the first warning as a notice. Original files are not modified.
+        Output: no return value. The review surface is shown again. Decisions are loaded, the keeper Outburst chose is replaced by the new recommendation, and the burst list, preview, and status summary update.
+        Uses: the review window after a scan, a rescan, and a subject-model change.
+        Limitations: a library with warnings and no analyses shows the first warning as a notice. A keeper or reject the photographer set stays. A rejected recommended frame is not marked. Original files are not modified.
         """
 
         self._resume_review()
@@ -255,7 +255,7 @@ class MainWindow(QMainWindow):
         self._by_path = {item.frame.path: item for item in library.analyses}
         self._warnings = library.warnings
         self._load_decisions()
-        self._mark_recommended_keepers()
+        self._reselect_automatic_keepers()
         self._set_folder_label()
         self.controls.set_threshold(library.threshold)
         self._refresh_burst_list(prefer_path=None)
@@ -295,8 +295,8 @@ class MainWindow(QMainWindow):
 
         Inputs: none.
         Output: no return value. With no folder, nothing happens. Otherwise the preview and filmstrip are cleared, the folder cache is forgotten, and a scan starts.
-        Uses: the Rescan action.
-        Limitations: keeper, reject, and star marks stay in the cache. A previous scan that will not stop shows a warning and does not clear the review. The cleared frames stay hidden if the new scan is cancelled. A missing model is not downloaded here. The install button is what adds the detection software and the default weights.
+        Uses: the Rescan action, and a subject model that is already installed.
+        Limitations: keeper, reject, and star marks the photographer set stay in the cache. The keeper Outburst chose is replaced when the new scan is shown. A previous scan that will not stop shows a warning and does not clear the review. The cleared frames stay hidden if the new scan is cancelled. A missing model is not downloaded here. The install button is what adds the detection software and the default weights.
         """
         if self._folder is None:
             return
@@ -917,9 +917,8 @@ class MainWindow(QMainWindow):
         if self._library is None or self._review_suspended:
             return
         selected = self._selected_path()
-        self._clear_automatic_keepers()
         self._library = with_threshold(self._library, value)
-        self._mark_keepers_for_new_bursts()
+        self._reselect_automatic_keepers()
         self._refresh_burst_list(prefer_path=selected)
 
     def _apply_weights(self) -> None:
@@ -927,16 +926,18 @@ class MainWindow(QMainWindow):
         Rescore the open library with the current sharpness, exposure, center, and subject settings.
 
         Inputs: none. Weights are read from the control panel.
-        Output: no return value. The analysis map, burst labels, filmstrip scores, and preview refresh.
+        Output: no return value. The analysis map, burst labels, filmstrip scores, and preview refresh. The keeper Outburst chose is replaced by the new recommendation.
         Uses: the Sharp and Center sliders, and turning subject scoring off.
-        Limitations: nothing happens before a library is loaded or while the review is cleared for a scan. This rescores cached measurements and does not scan the files again. While Minimum score is on, the burst list is rebuilt because a new score can hide or show a frame.
+        Limitations: nothing happens before a library is loaded or while the review is cleared for a scan. This rescores cached measurements and does not scan the files again. A keeper or reject the photographer set stays. While Minimum score is on, the burst list is rebuilt because a new score can hide or show a frame.
         """
         if self._library is None or self._review_suspended:
             return
+        selected = self._selected_path()
         self._library = with_weights(self._library, self.controls.weights())
         self._by_path = {item.frame.path: item for item in self._library.analyses}
+        self._reselect_automatic_keepers()
         if self.controls.score_floor() is not None:
-            self._refresh_burst_list(prefer_path=self._selected_path())
+            self._refresh_burst_list(prefer_path=selected)
             return
         self._refresh_burst_labels()
         self.filmstrip.refresh_flags(self._thumbs())
@@ -969,7 +970,7 @@ class MainWindow(QMainWindow):
         Switch to the selected subject model and turn subject scoring on.
 
         Inputs: _model_id, the id emitted by the combo. The argument is unused; the panel is read instead.
-        Output: no return value. Subject scoring is checked without re-entering its toggle. A missing model downloads only after detection is installed. An open folder is rescanned when the file is already there.
+        Output: no return value. Subject scoring is checked without re-entering its toggle. A missing model downloads only after detection is installed. An open folder is rescanned when the file is already there, and that scan replaces the keeper Outburst chose.
         Uses: the subject model combo.
         Limitations: with no folder, a missing installed model downloads and does not scan afterward. Choosing a model before detection is installed does not download it. A ready model with no folder does not scan.
         """
@@ -2659,7 +2660,7 @@ class MainWindow(QMainWindow):
 
         Inputs: none.
         Output: no return value. Keep marks whose origin is automatic are cleared.
-        Uses: a burst-gap change and turning bird eye detection on or off.
+        Uses: a burst-gap change, the Sharp and Center sliders, a finished scan, and turning bird eye detection on or off.
         Limitations: a photographer's keep or reject is left in place. Original files are not modified.
         """
 
@@ -2671,6 +2672,19 @@ class MainWindow(QMainWindow):
         for path in automatic:
             self._apply_decision(path, None)
 
+    def _reselect_automatic_keepers(self) -> None:
+        """
+        Replace the keeper Outburst chose with the recommended frame of each burst.
+
+        Inputs: none.
+        Output: no return value. Automatic keepers are cleared, then each burst's recommended frame is marked unless the photographer rejected it or already kept it.
+        Uses: a finished scan, the Sharp and Center sliders, and the Burst gap control.
+        Limitations: nothing happens before a library is loaded. A photographer's keep or reject stays. Original files are not modified.
+        """
+
+        self._clear_automatic_keepers()
+        self._mark_keepers_for_new_bursts()
+
     def _mark_keepers_for_new_bursts(self) -> None:
         """
         Mark each burst's best frame after the burst gap changes.
@@ -2679,7 +2693,7 @@ class MainWindow(QMainWindow):
 
         Inputs: none.
         Output: no return value. The recommended frame of each burst is stored as an automatic keeper unless it was rejected or the photographer already kept it.
-        Uses: the Burst gap control.
+        Uses: the Burst gap control, the Sharp and Center sliders, and a finished scan.
         Limitations: nothing happens before a library is loaded. Every burst in the library is considered, including bursts hidden by Minimum frames. Original files are not modified.
         """
 
