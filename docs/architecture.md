@@ -28,7 +28,7 @@ Outburst is a desktop app. The scoring pipeline does not import Qt, so it can be
 5. If bird eye detection is on, the pose model reads the left and right eye keypoints from the BGR preview. A preview with no eye is searched again in overlapping 512 px windows. The center, a radius taken from the bird box, and the sharpness (only when the disk is large enough) are stored on the metrics. The cache key includes the weights file and an eye-reading token, so a scan without the model, or from an older reading, does not reuse those rows. Turning it on with no weights file leaves detection off and adds a warning.
 6. Group the frames and hand a `Library` to the window.
 
-Changing the sharpness, exposure, or center sliders recomputes the composite from cached measurements. Changing the burst gap only regroups. Neither step rereads the RAW files. Turning subject detection or bird eye detection on starts a new scan, because that measurement is not in the plain cache row. Turning bird eye detection off does the same, and clears automatic keepers first. The bird-eye weights download the same way as a subject model.
+Changing the sharpness, exposure, or center sliders recomputes the composite from cached measurements. Changing the burst gap only regroups. Neither step rereads the RAW files. A slider move, a burst-gap change, a rescan, and a new subject model clear the keeper Outburst chose and mark the new recommendation. Marks the photographer set stay. Turning subject detection or bird eye detection on starts a new scan, because that measurement is not in the plain cache row. Turning bird eye detection off does the same, and clears automatic keepers first. The bird-eye weights download the same way as a subject model.
 
 ## Scoring
 
