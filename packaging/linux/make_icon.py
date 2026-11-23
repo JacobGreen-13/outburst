@@ -1,40 +1,33 @@
-"""Write the PNG icon installed by the Debian package.
+"""Copy the Outburst icon to a destination PNG.
 
-Run this with the Python that has PySide6. The mark is the same stacked-frame drawing the window uses.
+The artwork lives at src/outburst/gui/outburst.png. The Debian package installs that file directly.
 """
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
+
+SOURCE = Path(__file__).resolve().parents[2] / "src" / "outburst" / "gui" / "outburst.png"
 
 
 def main() -> None:
     """
-    Draw the Outburst mark and save a PNG.
+    Copy the committed icon.
 
     Inputs: the destination path in argv.
-    Output: no return value. Raises SystemExit when the path is missing or the PNG cannot be written.
-    Uses: packaging/linux/build.sh after PySide6 is installed into the package prefix.
-    Limitations: Qt runs on the offscreen platform so the build does not need a display. The image is 256 pixels.
+    Output: no return value. Raises SystemExit when the path is missing or the source cannot be read.
+    Uses: a manual refresh of an exported PNG. The package build copies the source itself.
+    Limitations: this does not draw a new mark. The destination is a byte copy of the committed PNG.
     """
 
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     if len(sys.argv) != 2:
         raise SystemExit("usage: make_icon.py DESTINATION.png")
+    if not SOURCE.is_file():
+        raise SystemExit(f"Icon file is missing: {SOURCE}")
     destination = Path(sys.argv[1])
-    from PySide6.QtGui import QImage
-    from PySide6.QtWidgets import QApplication
-
-    app = QApplication.instance() or QApplication([])
-    del app
-    from outburst.gui.styles import build_app_icon
-
-    image = build_app_icon().pixmap(256, 256).toImage().convertToFormat(QImage.Format.Format_RGBA8888)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if not image.save(str(destination), "PNG"):
-        raise SystemExit(f"Could not write {destination}")
+    destination.write_bytes(SOURCE.read_bytes())
 
 
 if __name__ == "__main__":

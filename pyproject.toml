@@ -48,6 +48,9 @@ outburst-gui = "outburst.main:main"
 [tool.hatch.version]
 path = "src/outburst/__init__.py"
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/outburst/gui/outburst.png" = "outburst/gui/outburst.png"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

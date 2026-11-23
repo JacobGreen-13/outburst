@@ -47,7 +47,7 @@ Invoke-Checked { & $Python -m pip install --upgrade pip }
 Invoke-Checked { & $Python -m pip install $Root }
 Invoke-Checked { & $Python -m pip install "pyinstaller>=6.11" }
 
-Write-Host "Drawing the application icon..."
+Write-Host "Writing the application icon..."
 New-Item -ItemType Directory -Force -Path (Split-Path $Icon -Parent) | Out-Null
 Invoke-Checked { & $Python (Join-Path $Root "packaging\windows\make_icon.py") $Icon }
 if (-not (Test-Path $Icon)) {

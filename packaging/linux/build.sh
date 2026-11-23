@@ -134,8 +134,8 @@ if ! "$PREFIX/bin/python3" -c "import outburst, cv2, numpy, rawpy, exifread"; th
   exit 1
 fi
 
-# The icon is committed. packaging/linux/make_icon.py redraws it when the app mark changes.
-install -D -m 0644 "$ROOT/packaging/linux/outburst.png" \
+# The icon is the artwork shipped with the app.
+install -D -m 0644 "$ROOT/src/outburst/gui/outburst.png" \
   "$STAGE/usr/share/icons/hicolor/256x256/apps/outburst.png"
 
 install -D -m 0755 "$ROOT/packaging/linux/outburst" "$STAGE/usr/bin/outburst"

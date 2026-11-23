@@ -1,12 +1,16 @@
 """Dark review theme. A dim surround makes it easier to judge a photograph.
 
-``apply_theme`` sets the Fusion palette and the stylesheet for the rail, preview, and filmstrip. ``build_app_icon`` draws the stacked-frame icon in memory so the repo has no icon file.
+``apply_theme`` sets the Fusion palette and the stylesheet for the rail, preview, and filmstrip. ``build_app_icon`` loads the committed Outburst icon.
 """
 
 from __future__ import annotations
 
+import sys
+from importlib.resources import as_file, files
+from pathlib import Path
+
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import QApplication
 
 STYLESHEET = """
@@ -249,32 +253,57 @@ def apply_theme(app: QApplication) -> None:
     app.setStyleSheet(STYLESHEET)
 
 
+def _icon_image() -> QImage:
+    """
+    Read the committed Outburst icon.
+
+    Inputs: none. The file is outburst.png beside this module.
+    Output: the icon image, or a null image when the file is missing or unreadable.
+    Uses: the window icon and the Windows .ico writer.
+    Limitations: the pixels come from the PNG. A missing file does not draw a replacement.
+    """
+
+    candidates = [Path(__file__).resolve().with_name("outburst.png")]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "outburst" / "gui" / "outburst.png")
+    for path in candidates:
+        if path.is_file():
+            image = QImage(str(path))
+            if not image.isNull():
+                return image
+    try:
+        resource = files("outburst.gui").joinpath("outburst.png")
+        with as_file(resource) as path:
+            image = QImage(str(path))
+    except OSError:
+        return QImage()
+    return image
+
+
 def build_app_icon() -> QIcon:
     """
-    A small stacked-frame mark, drawn in code so the repo stays free of binary assets.
+    Load the Outburst icon for the window and the taskbar.
 
     Inputs: none.
-    Output: a QIcon painted at 256 pixels.
+    Output: a QIcon holding the artwork at 16, 24, 32, 48, 64, 128, and 256 pixels. An empty icon when the PNG cannot be read.
     Uses: the review window icon and the application icon set at startup.
-    Limitations: the mark is drawn in memory and is not loaded from an image file.
+    Limitations: smaller sizes are scaled from the 256-pixel file. A missing file leaves the window with no custom icon.
     """
 
-    size = 256
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor("#143026"))
-    painter.drawRoundedRect(0, 0, size, size, 56, 56)
-    pen = QPen(QColor("#d7efe4"))
-    pen.setWidth(8)
-    painter.setPen(pen)
-    painter.setBrush(QColor("#1f6b4a"))
-    for rect in ((96, 40, 118, 92), (72, 62, 118, 92), (48, 84, 118, 92)):
-        painter.drawRoundedRect(*rect, 12, 12)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor("#f2c14e"))
-    painter.drawEllipse(112, 118, 30, 22)
-    painter.end()
-    return QIcon(pixmap)
+    image = _icon_image()
+    icon = QIcon()
+    if image.isNull():
+        return icon
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        if image.width() == size and image.height() == size:
+            icon.addPixmap(QPixmap.fromImage(image))
+            continue
+        scaled = image.scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        icon.addPixmap(QPixmap.fromImage(scaled))
+    return icon
