@@ -471,6 +471,7 @@ def test_private_python_scores_a_preview_batch(tmp_path: Path) -> None:
         assert boxes[0] is not None and boxes[1] is not None
         assert boxes[0].box == (8, 8, 40, 30)
         assert boxes[0].label == "bird"
+        assert boxes[0].class_id == 14
         assert subject.detect(image) is not None
         eyes = SidecarEyeFinder(weights, session).find_many([image])
         assert isinstance(eyes[0], Eye)
@@ -994,6 +995,7 @@ def test_detect_many_reads_a_batch_on_one_call() -> None:
     assert model.calls == 1
     assert model.batch == 2
     assert found[0] is not None and found[0].label == "bird"
+    assert found[0].class_id == 14
     assert found[0].box == (1, 2, 10, 12)
     assert found[0].confidence == 0.95
     assert found[1] is not None and found[1].label == "bird"
@@ -1001,6 +1003,48 @@ def test_detect_many_reads_a_batch_on_one_call() -> None:
     single = detector.detect(blank)
     assert single is not None and single.label == "bird"
     assert model.calls == 2
+
+
+def test_detect_many_keeps_the_highest_confidence_subject_of_any_class() -> None:
+    import numpy as np
+
+    from outburst.subject import YoloSubjectDetector, is_bird
+
+    class Boxes:
+        xyxy = [[1, 2, 11, 14], [4, 4, 20, 20]]
+        conf = [0.4, 0.91]
+        cls = [14, 0]
+
+        def __len__(self) -> int:
+            return len(self.cls)
+
+    class Result:
+        boxes = Boxes()
+        names = {14: "bird", 0: "person"}
+
+    class Model:
+        def predict(self, images, verbose, device, imgsz):  # type: ignore[no-untyped-def]
+            del images, verbose, device, imgsz
+            return [Result()]
+
+    found = YoloSubjectDetector(Model(), "cpu").detect_many([np.zeros((12, 12, 3), dtype=np.uint8)])
+    assert found[0] is not None
+    assert found[0].label == "person"
+    assert found[0].class_id == 0
+    assert found[0].box == (4, 4, 16, 16)
+    assert is_bird(found[0]) is False
+
+
+def test_is_bird_uses_the_class_id_and_falls_back_to_the_label() -> None:
+    from outburst.subject import Detection, is_bird
+
+    assert is_bird(None) is False
+    assert is_bird(Detection((0, 0, 8, 8), "bird", 0.9, 14)) is True
+    assert is_bird(Detection((0, 0, 8, 8), "person", 0.9, 14)) is True
+    assert is_bird(Detection((0, 0, 8, 8), "bird", 0.9, 0)) is False
+    assert is_bird(Detection((0, 0, 8, 8), "bird", 0.9)) is True
+    assert is_bird(Detection((0, 0, 8, 8), " Bird ", 0.4)) is True
+    assert is_bird(Detection((0, 0, 8, 8), "dog", 0.4)) is False
 
 
 def test_unknown_model_id() -> None:

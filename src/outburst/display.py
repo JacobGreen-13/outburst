@@ -497,7 +497,7 @@ def frame_info_parts(
             else:
                 extra += (
                     '<div style="color:#9a9a9a; margin-top:4px;">'
-                    "No animal detected in this preview. Using frame sharpness."
+                    "No subject detected in this preview. Using frame sharpness."
                     "</div>"
                 )
         if eye_active:

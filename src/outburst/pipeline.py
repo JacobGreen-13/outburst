@@ -32,7 +32,13 @@ from outburst.preview import (
 )
 from outburst.scanner import ScannedFile, scan_folder
 from outburst.scoring import composite_score, score_bgr
-from outburst.subject import SubjectDetector, load_yolo_detector, make_subject_key
+from outburst.subject import (
+    SUBJECT_CACHE_TOKEN,
+    SubjectDetector,
+    is_bird,
+    load_yolo_detector,
+    make_subject_key,
+)
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +72,7 @@ def analyze_folder(
     Inputs: folder, the directory to scan; recursive, whether subfolders are included; threshold, the burst gap in seconds; weights, the sharpness blend; cache_dir, an optional cache location; subject_model, an optional weights path; detector, an optional already-loaded detector; eye_scoring, whether bird eyes are measured; eye_model, the pose weights to load when eye_scoring is on; eye_finder, an optional already-loaded finder; progress, an optional count callback; should_cancel, an optional cancel check.
     Output: a Library of analyses, bursts, and warnings.
     Uses: the window's scan.
-    Limitations: photographs are opened for reading only. Previews are an embedded JPEG or a paired JPEG, with the long edge resized to 1024 px, and there is no demosaic. The subject model and the bird-eye model stay on this coordinating thread. Cache rows are written on this thread. The bird-eye cache key includes a generation token, so a scan from before that token is scored again. Consecutive frames share a burst only while the gap is strictly less than threshold. Cancel raises CancelledError. eye_scoring with no weights and no finder leaves bird eyes off and adds a warning.
+    Limitations: photographs are opened for reading only. Previews are an embedded JPEG or a paired JPEG, with the long edge resized to 1024 px, and there is no demosaic. The subject model and the bird-eye model stay on this coordinating thread. Cache rows are written on this thread. The subject cache key includes a generation token, so a scan from the animal-only filter is scored again. The bird-eye cache key includes its own generation token. Bird eye detection runs only on frames the subject model marks as a bird, and it stays off when no subject detector is available. Consecutive frames share a burst only while the gap is strictly less than threshold. Cancel raises CancelledError. eye_scoring with no weights and no finder leaves bird eyes off and adds a warning.
     """
 
     weights = (weights or Weights()).clamped()
@@ -86,23 +92,32 @@ def analyze_folder(
             warnings.append(f"Subject detection stayed off: {exc}")
             detector = None
             subject_key = ""
+    if subject_key:
+        subject_key = f"{subject_key}|{SUBJECT_CACHE_TOKEN}"
     eye_active = False
-    if eye_scoring:
-        if eye_finder is not None:
-            eye_active = True
-            subject_key = f"{subject_key}|bird-eye" if subject_key else "bird-eye"
-        elif eye_model is not None:
-            try:
-                eye_finder = load_bird_eye_detector(eye_model)
-                eye_key = f"{make_subject_key(eye_model)}|{EYE_CACHE_TOKEN}"
-                subject_key = f"{subject_key}|{eye_key}" if subject_key else eye_key
-                eye_active = True
-            except Exception as exc:
-                warnings.append(f"Bird eye detection stayed off: {exc}")
-                eye_finder = None
-        else:
-            warnings.append("Bird eye detection stayed off: the weights are not in the models folder.")
+    supplied_finder = eye_finder is not None
+    if not eye_scoring:
+        eye_finder = None
+    elif eye_finder is None and eye_model is not None:
+        try:
+            eye_finder = load_bird_eye_detector(eye_model)
+        except Exception as exc:
+            warnings.append(f"Bird eye detection stayed off: {exc}")
             eye_finder = None
+    elif eye_finder is None:
+        warnings.append("Bird eye detection stayed off: the weights are not in the models folder.")
+    if eye_scoring and eye_finder is not None and detector is None:
+        warnings.append(
+            "Bird eye detection stayed off: it only reads frames the subject model marks as a bird."
+        )
+        eye_finder = None
+    if eye_finder is not None:
+        eye_active = True
+        if eye_model is not None and not supplied_finder:
+            eye_key = f"{make_subject_key(eye_model)}|{EYE_CACHE_TOKEN}"
+        else:
+            eye_key = "bird-eye"
+        subject_key = f"{subject_key}|{eye_key}" if subject_key else eye_key
 
     files = scan_folder(folder, recursive=recursive)
     log.info("Found %d file(s) in %s", len(files), folder)
@@ -466,7 +481,7 @@ def _measure_with_detector(
                     failures = [0] * len(images)
                 else:
                     boxes, failures = _detect_batch(detector, images, detection_errors)
-                eyes = _find_eyes(eye_finder, images)
+                eyes = _find_eyes(eye_finder, images, boxes)
                 for offset, index in enumerate(indexes):
                     loaded = decoded[index]
                     image = images[offset]
@@ -614,30 +629,45 @@ def _remember_detection_error(errors: list[str], reason: object) -> None:
         errors.append(text)
 
 
-def _find_eyes(finder: object | None, images: list[np.ndarray]) -> list[object]:
-    """Run bird-eye detection for one batch on the caller thread.
+def _find_eyes(
+    finder: object | None,
+    images: list[np.ndarray],
+    detections: list[object],
+) -> list[object]:
+    """Run bird-eye detection for the bird frames in one batch on the caller thread.
 
-    Inputs: finder, the pose model or None; images, the BGR previews.
-    Output: one eye or None per image. A missing finder returns None for each image.
+    Inputs: finder, the pose model or None; images, the BGR previews; detections, the subject box for each image, or None.
+    Output: one eye or None per image. A missing finder, and every frame that is not a bird, returns None.
     Uses: _measure_with_detector.
-    Limitations: find_many runs on this thread. The model is not shared across threads. A detection exception returns no eyes for that batch. Those frames keep their usual sharpness rank.
+    Limitations: find_many receives only frames whose subject is the COCO bird class. It runs on this thread. The model is not shared across threads. A detection exception returns no eyes for that batch. Those frames keep their usual sharpness rank.
     """
 
+    eyes: list[object] = [None] * len(images)
     if finder is None:
-        return [None] * len(images)
+        return eyes
     many = getattr(finder, "find_many", None)
     if not callable(many):
         log.warning("Bird eye finder has no find_many method")
-        return [None] * len(images)
+        return eyes
+    chosen = [
+        index
+        for index, _image in enumerate(images)
+        if is_bird(detections[index] if index < len(detections) else None)
+    ]
+    if not chosen:
+        return eyes
+    selected = [images[index] for index in chosen]
     try:
-        found = list(many(images))
+        found = list(many(selected))
     except Exception:
-        log.warning("Bird eye detection failed for %d frame(s)", len(images), exc_info=True)
-        return [None] * len(images)
-    if len(found) != len(images):
-        log.warning("Bird eye detection returned %d eyes for %d frames", len(found), len(images))
-        found = (found + [None] * len(images))[: len(images)]
-    return found
+        log.warning("Bird eye detection failed for %d frame(s)", len(selected), exc_info=True)
+        return eyes
+    if len(found) != len(selected):
+        log.warning("Bird eye detection returned %d eyes for %d frames", len(found), len(selected))
+        found = (found + [None] * len(selected))[: len(selected)]
+    for offset, index in enumerate(chosen):
+        eyes[index] = found[offset]
+    return eyes
 
 
 def _load_scanned(scanned: ScannedFile, info: object) -> _Loaded:

@@ -97,22 +97,23 @@ class ControlPanel(QWidget):
         self._recursive = QCheckBox("Include subfolders on the next scan")
         self._subject = QCheckBox("Subject-aware sharpness")
         self._subject.setToolTip(
-            "Score sharpness inside a detected animal. "
-            "The score uses that box when an animal is found, and the whole frame when it is not."
+            "Score sharpness inside a detected subject. "
+            "The score uses that box when something is found, and the whole frame when it is not."
         )
         self._subject.toggled.connect(self.subject_toggled.emit)
         self._show_box = QCheckBox("Show subject box")
         self._show_box.setChecked(True)
         self._show_box.setToolTip(
-            "Draw the detected animal box on the preview and the compare pane. "
+            "Draw the detected subject box on the preview and the compare pane. "
             "This does not rescan and does not turn subject scoring off."
         )
         self._show_box.toggled.connect(self.subject_box_toggled.emit)
         self._eye = QCheckBox("Bird eye detection")
         self._eye.setToolTip(
-            "Use the open-weight bird eye model. "
+            "Use the open-weight bird eye model on frames the subject model calls a bird. "
             "In a burst with two or more rated eyes, the sharpest eye becomes the best frame "
-            "and is marked a keeper. The model is birds only. It stays on this computer."
+            "and is marked a keeper. A person, another animal, or a frame with no subject is left out. "
+            "It stays on this computer."
         )
         self._eye.toggled.connect(self.eye_toggled.emit)
         self._show_eye = QCheckBox("Show eye circle")
@@ -509,7 +510,7 @@ class ControlPanel(QWidget):
 
     def prefer_subject(self) -> bool:
         """
-        Read whether sharpness is scored inside a detected animal.
+        Read whether sharpness is scored inside a detected subject.
 
         Inputs: none.
         Output: True when Subject-aware sharpness is checked.
@@ -531,7 +532,7 @@ class ControlPanel(QWidget):
 
     def show_subject_box(self) -> bool:
         """
-        Read whether the detected animal box is drawn.
+        Read whether the detected subject box is drawn.
 
         Inputs: none.
         Output: True when Show subject box is checked.
@@ -673,7 +674,7 @@ class ControlPanel(QWidget):
         """
         Set the subject-box checkbox without emitting a change.
 
-        Inputs: checked, whether the detected animal box is drawn.
+        Inputs: checked, whether the detected subject box is drawn.
         Output: no return value. The checkbox matches checked.
         Uses: restoring the saved Show subject box setting.
         Limitations: signals are blocked, so the preview is not redrawn by this call. Subject scoring is left as it is.

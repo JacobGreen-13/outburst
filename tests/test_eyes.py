@@ -45,6 +45,15 @@ class PortraitEyeFinder:
         return [_portrait_eye(image) for image in images]
 
 
+class EveryFrameIsABird:
+    """Test double. Every preview is a bird, so bird eye detection may read it."""
+
+    def detect_many(self, images: list[np.ndarray]) -> list[object]:
+        from outburst.subject import Detection
+
+        return [Detection((0, 0, 8, 8), "bird", 0.9) for _image in images]
+
+
 def _portrait_eye(image: np.ndarray) -> object | None:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     dark = gray < 45
@@ -148,6 +157,7 @@ def test_bird_eye_finder_stays_on_the_calling_thread(tmp_path: Path) -> None:
         cache_dir=tmp_path / "cache",
         threshold=1.0,
         eye_scoring=True,
+        detector=EveryFrameIsABird(),
         eye_finder=RecordingFinder(),
     )
     assert len(library.analyses) == 5
@@ -182,6 +192,7 @@ def test_a_burst_with_two_rated_eyes_keeps_the_sharpest(tmp_path: Path) -> None:
         cache_dir=tmp_path / "cache",
         threshold=1.0,
         eye_scoring=True,
+        detector=EveryFrameIsABird(),
         eye_finder=PortraitEyeFinder(),
     )
     assert library.eye_active
@@ -207,6 +218,78 @@ def test_a_burst_with_two_rated_eyes_keeps_the_sharpest(tmp_path: Path) -> None:
     assert plain_by_path[sharp_path].metrics.eye_sharpness is None
     texture_best = library.bursts[0].frames[recommended_offset(library.bursts[0].frames, plain_by_path)]
     assert texture_best.path == texture_path
+
+
+def test_bird_eye_detection_reads_only_frames_labeled_bird(tmp_path: Path) -> None:
+    from outburst.subject import Detection
+
+    folder = tmp_path / "mixed"
+    folder.mkdir()
+    moment = datetime(2024, 7, 2, 9, 0, 0)
+    names = ("bird.jpg", "dog.jpg", "named-bird.jpg", "person.jpg")
+    for index, name in enumerate(names):
+        write_jpeg(folder / name, _portrait(36, seed=index + 3), moment + timedelta(milliseconds=100 * index))
+
+    class MixedSubjects:
+        def detect_many(self, images: list[np.ndarray]) -> list[Detection]:
+            # The scan orders files by name: bird, dog, named-bird, person.
+            specs = (
+                ((0, 0, 10, 10), "bird", 0.8, 14),
+                ((0, 0, 10, 10), "dog", 0.7, 16),
+                ((0, 0, 10, 10), "bird", 0.6, None),
+                ((0, 0, 10, 10), "person", 0.99, 0),
+            )
+            return [Detection(*specs[index]) for index in range(len(images))]
+
+    class CountingFinder:
+        def __init__(self) -> None:
+            self.seen = 0
+
+        def find_many(self, images: list[np.ndarray]) -> list[object]:
+            self.seen += len(images)
+            return [measure_eye(image, image.shape[1] // 2, image.shape[0] // 2, 12) for image in images]
+
+    finder = CountingFinder()
+    library = analyze_folder(
+        folder,
+        cache_dir=tmp_path / "cache",
+        threshold=1.0,
+        eye_scoring=True,
+        detector=MixedSubjects(),
+        eye_finder=finder,
+    )
+    assert finder.seen == 2
+    by_name = {item.frame.path.name: item for item in library.analyses}
+    assert by_name["person.jpg"].metrics is not None
+    assert by_name["person.jpg"].metrics.eye_sharpness is None
+    assert by_name["dog.jpg"].metrics is not None
+    assert by_name["dog.jpg"].metrics.eye_sharpness is None
+    assert by_name["bird.jpg"].metrics is not None and by_name["bird.jpg"].metrics.eye_sharpness is not None
+    assert by_name["named-bird.jpg"].metrics is not None
+    assert by_name["named-bird.jpg"].metrics.eye_sharpness is not None
+
+
+def test_bird_eye_detection_stays_off_without_a_subject(tmp_path: Path) -> None:
+    folder = tmp_path / "plain"
+    folder.mkdir()
+    write_jpeg(folder / "frame.jpg", sharp_frame(), datetime(2024, 7, 2, 9, 0, 0))
+    seen = {"count": 0}
+
+    class CountingFinder:
+        def find_many(self, images: list[np.ndarray]) -> list[object]:
+            seen["count"] += len(images)
+            return [None for _image in images]
+
+    library = analyze_folder(
+        folder,
+        cache_dir=tmp_path / "cache",
+        threshold=1.0,
+        eye_scoring=True,
+        eye_finder=CountingFinder(),
+    )
+    assert seen["count"] == 0
+    assert library.eye_active is False
+    assert any("marks as a bird" in note for note in library.warnings)
 
 
 def test_pose_device_keeps_the_bird_eye_model_off_mps() -> None:

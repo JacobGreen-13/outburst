@@ -1,6 +1,6 @@
 """Locate a bird eye with an open-weight pose model and measure its sharpness.
 
-The checkbox is Bird eye detection. The install button downloads ``eye_pose_v0.pt`` (synthet/eye-pose-v0, YOLO11n-pose trained on CUB-200-2011). This module reads the left-eye and right-eye keypoints. A keypoint below 0.35 confidence is ignored. Sharpness is the Laplacian variance inside a disk sized from the bird box, and it is stored only when that disk is at least 16 px across. This is birds only. It does not judge a blink or a catchlight, and it does not look for mammal eyes.
+The checkbox is Bird eye detection. The install button downloads ``eye_pose_v0.pt`` (synthet/eye-pose-v0, YOLO11n-pose trained on CUB-200-2011). This module reads the left-eye and right-eye keypoints. A keypoint below 0.35 confidence is ignored. Sharpness is the Laplacian variance inside a disk sized from the bird box, and it is stored only when that disk is at least 16 px across. This is birds only. The scan sends it only frames the subject model labels as a bird. It does not judge a blink or a catchlight, and it does not look for mammal eyes.
 
 ``measure_eye`` scores a disk the caller already located. ``eye_from_pose`` reads one pose result. ``pose_device`` keeps this model off MPS. ``load_bird_eye_detector`` opens weights that are already on disk. ``BirdEyeDetector.find_many`` runs a batch on one thread: the whole preview first, then overlapping regions when that preview has no eye.
 """
