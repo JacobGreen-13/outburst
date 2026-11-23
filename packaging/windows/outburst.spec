@@ -57,7 +57,10 @@ version_file.write_text(
     encoding="utf-8",
 )
 
-datas: list = [(str(root / "src" / "outburst"), "detection_src/outburst")]
+datas: list = [
+    (str(root / "src" / "outburst"), "detection_src/outburst"),
+    (str(root / "src" / "outburst" / "gui" / "outburst.png"), "outburst/gui"),
+]
 binaries: list = []
 hiddenimports = collect_submodules("outburst")
 for package in ("rawpy", "cv2", "certifi"):

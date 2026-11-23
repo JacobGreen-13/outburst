@@ -73,8 +73,13 @@ def test_libraries_inside_the_package_are_not_dependencies() -> None:
 
 
 def test_icon_file_is_a_png() -> None:
-    data = (LINUX / "outburst.png").read_bytes()
+    import struct
+
+    data = (ROOT / "src" / "outburst" / "gui" / "outburst.png").read_bytes()
     assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    assert struct.unpack(">II", data[16:24]) == (256, 256)
+    script = (LINUX / "build.sh").read_text(encoding="utf-8")
+    assert "src/outburst/gui/outburst.png" in script
 
 
 def test_xcb_plugin_sonames_become_packages() -> None:

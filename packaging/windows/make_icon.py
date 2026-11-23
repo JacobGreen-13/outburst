@@ -1,6 +1,6 @@
 """Write the Windows icon used by the frozen app and the installer.
 
-Run this after Outburst and PySide6 are installed. The icon is the same stacked-frame mark the window draws in memory.
+Run this after Outburst and PySide6 are installed. The icon is the PNG shipped with the window.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def main() -> None:
     Inputs: the destination path in argv, or build/windows/outburst.ico when argv is empty.
     Output: no return value. Raises SystemExit when the path is missing or a PNG cannot be encoded.
     Uses: packaging/windows/build.ps1 before PyInstaller runs.
-    Limitations: a QApplication is created so the pixmap can be painted. The process exits after the file is written.
+    Limitations: a QApplication is created so the PNG can be scaled. The process exits after the file is written.
     """
 
     from PySide6.QtCore import QBuffer, QIODevice
