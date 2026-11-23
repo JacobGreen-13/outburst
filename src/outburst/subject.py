@@ -1,13 +1,13 @@
 """Optional subject detection.
 
 The core app scores the whole preview. When a YOLO model is available,
-Outburst can measure sharpness inside the animal's bounding box instead.
+Outburst can measure sharpness inside a detected subject's bounding box instead.
 Weights live in the models folder. A missing file is downloaded there when
 subject scoring needs it. Loading a detector never fetches weights by itself.
-If detection is unavailable or finds no animal, scoring falls back to the
+If detection is unavailable or finds no subject, scoring falls back to the
 full frame.
 
-``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics can be used. ``subject_runtime_can_install`` reports whether this process can add that library. A packaged Windows app installs it into a private Python. ``subject_hardware_support`` reports whether this computer can run that software. ``internet_connection`` reports whether a model host can be reached. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return one animal box per image. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
+``option_by_id``, ``models_dir``, ``model_path``, and ``model_is_ready`` find a weights file. ``ensure_model`` downloads a missing file. ``subject_runtime_ready`` reports whether Ultralytics can be used. ``subject_runtime_can_install`` reports whether this process can add that library. A packaged Windows app installs it into a private Python. ``subject_hardware_support`` reports whether this computer can run that software. ``internet_connection`` reports whether a model host can be reached. ``install_subject_runtime`` installs that library into the running Python. ``load_yolo_detector`` only opens a file that is already there. ``YoloSubjectDetector.detect`` and ``detect_many`` return the highest-confidence subject box per image. ``is_bird`` reports whether that box is the COCO bird class. ``preferred_device`` tries MPS, then CUDA, then CPU. ``make_subject_key`` is the cache suffix for the chosen model. ``BIRD_EYE_OPTION`` is the separate open-weight bird eye pose file. It is not one of the subject dropdown models.
 """
 
 from __future__ import annotations
@@ -34,8 +34,10 @@ from outburst.cache import default_cache_dir
 
 log = logging.getLogger(__name__)
 
-# COCO classes that cover typical wildlife and nature subjects.
-ANIMAL_CLASS_IDS = frozenset({14, 15, 16, 17, 18, 19, 20, 21, 22, 23})
+# COCO class id for bird. Bird eye detection reads only this class.
+BIRD_CLASS_ID = 14
+# Appended to the subject cache key so rows from the animal-only filter are measured again.
+SUBJECT_CACHE_TOKEN = "subjects-v2"
 
 _ASSET_BASE = "https://github.com/ultralytics/assets/releases/download/v8.3.0"
 MIN_MODEL_BYTES = 1_000_000
@@ -366,28 +368,56 @@ def _content_length(response: object) -> int | None:
 class Detection:
     """One subject box in preview-pixel coordinates: x, y, width, height."""
 
-    def __init__(self, box: tuple[int, int, int, int], label: str, confidence: float) -> None:
-        """Store one animal box in preview pixels.
+    def __init__(
+        self,
+        box: tuple[int, int, int, int],
+        label: str,
+        confidence: float,
+        class_id: int | None = None,
+    ) -> None:
+        """Store one subject box in preview pixels.
 
-        Inputs: box, x, y, width, and height; label, the class name; confidence, the detector score.
-        Output: none. The three fields are stored on the instance.
-        Uses: YoloSubjectDetector when it returns the best animal in a preview.
+        Inputs: box, x, y, width, and height; label, the class name; confidence, the detector score; class_id, the COCO class number, or None when the caller only has a name.
+        Output: none. The fields are stored on the instance.
+        Uses: YoloSubjectDetector when it returns the best subject in a preview.
         Limitations: the box is not clipped here. Coordinates are preview pixels on the 1024 px analysis image, not the original RAW.
         """
 
         self.box = box
         self.label = label
         self.confidence = confidence
+        self.class_id = class_id
+
+
+def is_bird(detection: object) -> bool:
+    """Report whether a subject box is the COCO bird class.
+
+    Inputs: detection, a Detection or None.
+    Output: True when class_id is 14, or when class_id is missing and the label is bird.
+    Uses: the scan, so only those frames are passed to bird eye detection.
+    Limitations: a missing detection is not a bird. A class id other than 14 is not a bird, even if the label says bird.
+    """
+
+    if detection is None:
+        return False
+    class_id = getattr(detection, "class_id", None)
+    if class_id is not None:
+        try:
+            return int(class_id) == BIRD_CLASS_ID
+        except (TypeError, ValueError):
+            return False
+    label = getattr(detection, "label", None)
+    return isinstance(label, str) and label.strip().casefold() == "bird"
 
 
 class SubjectDetector(Protocol):
     def detect(self, image: np.ndarray) -> Detection | None:
-        """Return the best animal box, or None when the frame has no subject.
+        """Return the best subject box, or None when the frame has no subject.
 
         Inputs: image, one BGR preview.
         Output: a Detection, or None.
         Uses: the scan pipeline when a detector has no detect_many method, and YoloSubjectDetector.detect.
-        Limitations: a detector is not shared across threads. The caller runs detection on one thread. No animal means the frame keeps full-frame sharpness.
+        Limitations: a detector is not shared across threads. The caller runs detection on one thread. No subject means the frame keeps full-frame sharpness.
         """
 
 
@@ -1138,7 +1168,7 @@ def load_yolo_detector(model_path: Path, device: str | None = None) -> SubjectDe
 
 
 class YoloSubjectDetector:
-    """Ultralytics YOLO wrapper limited to animal and bird classes."""
+    """Ultralytics YOLO wrapper. The highest-confidence box of any class is the subject."""
 
     def __init__(self, model: object, device: str) -> None:
         """Keep one loaded YOLO model and the device it runs on.
@@ -1153,10 +1183,10 @@ class YoloSubjectDetector:
         self.device = device
 
     def detect(self, image: np.ndarray) -> Detection | None:
-        """Detect the animal in one preview by running a one-image batch.
+        """Detect the subject in one preview by running a one-image batch.
 
         Inputs: image, a BGR preview.
-        Output: the Detection for that image, or None when the frame has no animal.
+        Output: the Detection for that image, or None when the frame has no subject.
         Uses: callers that ask for a single frame, including the pipeline fallback.
         Limitations: the call goes through detect_many on this same thread. The model is not shared across threads.
         """
@@ -1172,7 +1202,7 @@ class YoloSubjectDetector:
         Inputs: images, BGR previews in batch order.
         Output: one Detection or None per image, in the same order. An empty input returns an empty list.
         Uses: the scan pipeline, which calls this on the coordinating thread.
-        Limitations: the model is not shared across threads. Arrays are passed through as BGR and predicted at imgsz 640 on this detector's device. Ultralytics treats a NumPy frame as BGR and swaps channels itself. Only COCO animal and bird classes are kept. A short result list is padded with None.
+        Limitations: the model is not shared across threads. Arrays are passed through as BGR and predicted at imgsz 640 on this detector's device. Ultralytics treats a NumPy frame as BGR and swaps channels itself. Every class is eligible, and the highest confidence wins. A short result list is padded with None.
         """
 
         if not images:
@@ -1182,19 +1212,19 @@ class YoloSubjectDetector:
         results = predict(prepared, verbose=False, device=self.device, imgsz=640)
         if not results:
             return [None] * len(images)
-        parsed = [_best_animal(result) for result in results]
+        parsed = [_best_subject(result) for result in results]
         if len(parsed) < len(images):
             parsed.extend([None] * (len(images) - len(parsed)))
         return parsed[: len(images)]
 
 
-def _best_animal(result: object) -> Detection | None:
-    """Pick the highest-confidence animal or bird box from one YOLO result.
+def _best_subject(result: object) -> Detection | None:
+    """Pick the highest-confidence subject box from one YOLO result.
 
     Inputs: result, one Ultralytics prediction.
-    Output: a Detection in preview pixels, or None when no animal class is present.
+    Output: a Detection in preview pixels, or None when the result has no boxes.
     Uses: detect_many.
-    Limitations: classes outside the COCO animal and bird set are ignored. The box is the highest confidence, not the largest area.
+    Limitations: every class is eligible. The box is the highest confidence, not the largest area.
     """
 
     boxes = getattr(result, "boxes", None)
@@ -1206,15 +1236,14 @@ def _best_animal(result: object) -> Detection | None:
     names = getattr(result, "names", {}) or {}
     best: tuple[float, Detection] | None = None
     for index, class_id in enumerate(classes):
-        if int(class_id) not in ANIMAL_CLASS_IDS:
-            continue
         confidence = float(confidences[index])
         if best is not None and confidence <= best[0]:
             continue
         x1, y1, x2, y2 = (float(value) for value in xyxy[index][:4])
         box = (int(x1), int(y1), max(1, int(x2 - x1)), max(1, int(y2 - y1)))
-        label = str(names.get(int(class_id), class_id))
-        best = (confidence, Detection(box, label, confidence))
+        class_number = int(class_id)
+        label = str(names.get(class_number, class_number))
+        best = (confidence, Detection(box, label, confidence, class_number))
     if best is None:
         return None
     return best[1]
@@ -1225,7 +1254,7 @@ def _as_numpy(value: object) -> np.ndarray:
 
     Inputs: value, a tensor or an array-like box field.
     Output: a NumPy array. A cpu method is called first when it exists.
-    Uses: _best_animal so MPS or CUDA boxes can be read as pixels.
+    Uses: _best_subject so MPS or CUDA boxes can be read as pixels.
     Limitations: this moves values to the CPU for reading. It does not run the model.
     """
 

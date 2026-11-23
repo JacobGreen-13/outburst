@@ -105,7 +105,7 @@ def _handle_stub(command: str, message: dict[str, object]) -> dict[str, object]:
         return {"ok": True}
     count = len(_files(message))
     if command == "subject":
-        box = {"box": [8, 8, 40, 30], "label": "bird", "confidence": 0.9}
+        box = {"box": [8, 8, 40, 30], "label": "bird", "confidence": 0.9, "class_id": 14}
         return {"ok": True, "boxes": [box for _index in range(count)]}
     if command == "eye":
         eye = {"x": 20, "y": 30, "radius": 12, "sharpness": 18.0}
@@ -186,7 +186,7 @@ def _box_payload(item: object) -> dict[str, object] | None:
     Turn one subject detection into JSON fields.
 
     Inputs: item, a Detection or None.
-    Output: box, label, and confidence, or None.
+    Output: box, label, confidence, and class_id when the detection has one, or None.
     Uses: a subject command reply.
     Limitations: the box is four integers. This does not run the model.
     """
@@ -194,11 +194,15 @@ def _box_payload(item: object) -> dict[str, object] | None:
     if item is None:
         return None
     box = getattr(item, "box")
-    return {
+    payload: dict[str, object] = {
         "box": [int(value) for value in box],
         "label": str(getattr(item, "label")),
         "confidence": float(getattr(item, "confidence")),
     }
+    class_id = getattr(item, "class_id", None)
+    if class_id is not None:
+        payload["class_id"] = int(class_id)
+    return payload
 
 
 def _eye_payload(item: object) -> dict[str, object] | None:

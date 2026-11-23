@@ -1025,10 +1025,10 @@ def _detection_from_payload(item: object) -> Detection | None:
     """
     Build a Detection from one worker box.
 
-    Inputs: item, a dict with box, label, and confidence, or None.
+    Inputs: item, a dict with box, label, confidence, and an optional class_id, or None.
     Output: a Detection, or None.
     Uses: SidecarSubjectDetector.
-    Limitations: a payload that is not a dict with a four-number box returns None.
+    Limitations: a payload that is not a dict with a four-number box returns None. A missing class_id stays None, and a bird is then recognized by the label.
     """
 
     if not isinstance(item, dict):
@@ -1037,7 +1037,10 @@ def _detection_from_payload(item: object) -> Detection | None:
     if not isinstance(raw_box, list) or len(raw_box) < 4:
         return None
     box = tuple(int(value) for value in raw_box[:4])
-    return Detection(box, str(item.get("label", "")), float(item.get("confidence", 0.0)))  # type: ignore[arg-type]
+    class_id = item.get("class_id")
+    if not isinstance(class_id, int):
+        class_id = None
+    return Detection(box, str(item.get("label", "")), float(item.get("confidence", 0.0)), class_id)  # type: ignore[arg-type]
 
 
 def _eye_from_payload(item: object) -> object:

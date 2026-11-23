@@ -1144,7 +1144,7 @@ def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
     from outburst.gui.worker import AnalyzeWorker
     from outburst.pipeline import analyze_folder
     from tests.helpers import write_jpeg
-    from tests.test_eyes import PortraitEyeFinder, _portrait
+    from tests.test_eyes import EveryFrameIsABird, PortraitEyeFinder, _portrait
 
     _isolate_settings(tmp_path / "settings")
     monkeypatch.setenv("OUTBURST_MODELS", str(tmp_path / "models"))
@@ -1161,6 +1161,7 @@ def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
         cache_dir=tmp_path / "cache",
         threshold=1.0,
         eye_scoring=True,
+        detector=EveryFrameIsABird(),
         eye_finder=PortraitEyeFinder(),
     )
     window = MainWindow(cache_dir=tmp_path / "cache")
@@ -1216,6 +1217,39 @@ def test_eye_scoring_marks_the_sharpest_eye_and_can_be_toggled(
     qt_app.processEvents()
 
 
+def test_bird_eye_scan_passes_the_installed_subject_model(
+    qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outburst.gui.main_window import MainWindow
+    from outburst.gui.worker import AnalyzeWorker
+    from outburst.pipeline import analyze_folder
+
+    _isolate_settings(tmp_path / "settings")
+    monkeypatch.setenv("OUTBURST_MODELS", str(tmp_path / "models"))
+    _ready_weights(tmp_path / "models" / "yolo11n.pt")
+    _ready_weights(tmp_path / "models" / "eye_pose_v0.pt")
+    written = write_burst_folder(tmp_path / "photos")
+    library = analyze_folder(written["folder"], cache_dir=tmp_path / "cache", threshold=1.0)
+    started: list[tuple[str | None, bool]] = []
+
+    def spy_start(self: AnalyzeWorker) -> None:
+        model = self._subject_model.name if self._subject_model is not None else None
+        started.append((model, self._weights.prefer_subject))
+
+    monkeypatch.setattr(AnalyzeWorker, "start", spy_start)
+    window = MainWindow(cache_dir=tmp_path / "cache")
+    window.present(library)
+    qt_app.processEvents()
+    assert window.controls.prefer_subject() is False
+    window.controls._eye.setChecked(True)
+    qt_app.processEvents()
+    assert started == [("yolo11n.pt", False)]
+    assert window.controls.prefer_subject() is False
+    window._scanning = False
+    window.close()
+    qt_app.processEvents()
+
+
 def test_hidden_single_frames_still_say_when_an_eye_was_found(
     qt_app, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1224,7 +1258,7 @@ def test_hidden_single_frames_still_say_when_an_eye_was_found(
     from outburst.gui.main_window import MainWindow
     from outburst.pipeline import analyze_folder
     from tests.helpers import write_jpeg
-    from tests.test_eyes import PortraitEyeFinder, _portrait
+    from tests.test_eyes import EveryFrameIsABird, PortraitEyeFinder, _portrait
 
     _isolate_settings(tmp_path / "settings")
     monkeypatch.setenv("OUTBURST_MODELS", str(tmp_path / "models"))
@@ -1238,6 +1272,7 @@ def test_hidden_single_frames_still_say_when_an_eye_was_found(
         cache_dir=tmp_path / "cache",
         threshold=1.0,
         eye_scoring=True,
+        detector=EveryFrameIsABird(),
         eye_finder=PortraitEyeFinder(),
     )
     window = MainWindow(cache_dir=tmp_path / "cache")

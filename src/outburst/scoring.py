@@ -144,7 +144,7 @@ def normalize_sharpness(value: float) -> float:
 def effective_sharpness(metrics: Metrics, weights: Weights) -> float:
     """The sharpness number that actually feeds the composite score.
 
-    With subject scoring on, this is the sharpest patch inside the animal.
+    With subject scoring on, this is the sharpest patch inside the subject.
     Otherwise the center-weight slider mixes the sharpest patch in the middle
     of the frame with the full-frame measurement.
 

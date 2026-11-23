@@ -757,7 +757,7 @@ class MainWindow(QMainWindow):
         Inputs: none. The folder, recursion, gap, weights, cache, subject model, and bird eye detection are read from the window.
         Output: no return value. The preview and filmstrip are cleared, the progress bar is shown, and the worker starts. A checked feature whose weights are missing is turned off for this scan.
         Uses: opening and rescanning a folder.
-        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. This scan does not install Ultralytics and does not download weights. That happens from the install button, and from choosing a subject model that is not on disk after detection is installed.
+        Limitations: a missing folder returns immediately. A download already in progress only remembers to scan when that download finishes. This scan does not install Ultralytics and does not download weights. That happens from the install button, and from choosing a subject model that is not on disk after detection is installed. Bird eye detection still passes the selected subject model when that file is already on disk, so only frames labeled bird are sent to the eye model. Subject-aware sharpness stays off unless its checkbox is on.
         """
         if self._folder is None:
             return
@@ -779,6 +779,8 @@ class MainWindow(QMainWindow):
         scan_id = self._scan_id
         subject_model = self._model_path if self.controls.prefer_subject() else None
         eye_on = self.controls.eye_scoring()
+        if eye_on and subject_model is None and self._model_ready():
+            subject_model = self._model_path
         worker = AnalyzeWorker(
             self._folder,
             recursive=self.controls.recursive(),
@@ -2023,12 +2025,12 @@ class MainWindow(QMainWindow):
 
     def _on_subject_box_toggled(self, _checked: bool) -> None:
         """
-        Show or hide the detected animal box.
+        Show or hide the detected subject box.
 
         Inputs: _checked, whether the box is drawn. The checkbox is read again while the preview is redrawn.
         Output: no return value. The preview and compare pane redraw.
         Uses: the Show subject box checkbox in the Scoring section.
-        Limitations: hiding the box does not turn off subject scoring and does not rescan. A frame with no detected animal still has no box. Zoom still centers on the animal when the box is hidden and no eye is present.
+        Limitations: hiding the box does not turn off subject scoring and does not rescan. A frame with no detected subject still has no box. Zoom still centers on the subject when the box is hidden and no eye is present.
         """
         self._update_viewer()
 
@@ -2621,7 +2623,7 @@ class MainWindow(QMainWindow):
         Inputs: enabled, whether the checkbox is now checked.
         Output: no return value. Automatic keepers are cleared. Turning it off rescans. Turning it on rescans when the weights are already installed.
         Uses: the Bird eye detection checkbox.
-        Limitations: with no folder open, a ready model does not scan. A missing model stays off and does not download. The install button downloads eye_pose_v0.pt.
+        Limitations: with no folder open, a ready model does not scan. A missing model stays off and does not download. The install button downloads eye_pose_v0.pt. The scan passes the selected subject model when that file is already installed, so only bird frames are read. Subject-aware sharpness stays at its checkbox.
         """
         self._clear_automatic_keepers()
         if not enabled:
@@ -3163,7 +3165,7 @@ def _overlay_focus(
 
     Inputs: box, the subject rectangle or None; circle, the eye center, radius, or None.
     Output: the eye center when a circle is present, otherwise the center of the box, or None when both are missing.
-    Uses: the preview and compare pane so hiding a mark still leaves zoom on the animal or the eye.
+    Uses: the preview and compare pane so hiding a mark still leaves zoom on the subject or the eye.
     Limitations: the box center uses integer division. A circle of any radius uses its center.
     """
     if circle is not None:
