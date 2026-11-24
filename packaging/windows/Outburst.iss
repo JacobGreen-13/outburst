@@ -23,7 +23,7 @@ PrivilegesRequired=lowest
 OutputDir=..\..\dist\installer
 OutputBaseFilename=Outburst-Setup-{#MyAppVersion}
 SetupIconFile=..\..\build\windows\outburst.ico
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\outburst.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -47,10 +47,12 @@ Name: "{app}\Cache"; Flags: uninsneveruninstall
 
 [Files]
 Source: "..\..\dist\Outburst\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Desktop and Start menu shortcuts read this file. Windows caches the icon it found inside Outburst.exe.
+Source: "..\..\build\windows\outburst.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\outburst.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\outburst.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Open Outburst"; Flags: nowait postinstall skipifsilent
